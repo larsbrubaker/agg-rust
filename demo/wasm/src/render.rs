@@ -16,6 +16,7 @@ use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gradient_lut::GradientLut;
 use agg_rust::gsv_text::GsvText;
+use agg_rust::image_accessors::ImageAccessorClone;
 use agg_rust::image_filters::{
     ImageFilterBilinear, ImageFilterBicubic, ImageFilterSpline16, ImageFilterSpline36,
     ImageFilterHanning, ImageFilterHamming, ImageFilterHermite, ImageFilterKaiser,
@@ -39,7 +40,9 @@ use agg_rust::span_gradient::{
     GradientReflectAdaptor, GradientSqrtXY, GradientX, GradientXY,
     SpanGradient,
 };
-use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
+use agg_rust::span_image_filter_rgba::{
+    SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn, SpanImageFilterRgbaGen,
+};
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_bilinear::TransBilinear;
@@ -2927,6 +2930,757 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut c_translucent = CboxCtrl::new(190.0, 21.0, "Translucent Mode");
     c_translucent.set_status(translucent);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_translucent);
+
+    buf
+}
+
+/// Gamma tuner — gradient background + alpha pattern with gamma correction.
+/// Matches C++ gamma_tuner.cpp.
+pub fn gamma_tuner(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let gamma_val = params.get(0).copied().unwrap_or(2.2);
+    let r_val = params.get(1).copied().unwrap_or(1.0);
+    let g_val = params.get(2).copied().unwrap_or(1.0);
+    let b_val = params.get(3).copied().unwrap_or(1.0);
+    let pattern = params.get(4).copied().unwrap_or(2.0) as usize; // 0=horiz, 1=vert, 2=checkered
+
+    let w = width as i32;
+    let h = height as i32;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    let square_size = 400i32;
+    let x_start = 50i32;
+    let y_start = 80i32;
+
+    // User color (from sliders, 0..1)
+    let color = Rgba8::new(
+        (r_val.clamp(0.0, 1.0) * 255.0) as u32,
+        (g_val.clamp(0.0, 1.0) * 255.0) as u32,
+        (b_val.clamp(0.0, 1.0) * 255.0) as u32,
+        255,
+    );
+    let black = Rgba8::new(0, 0, 0, 255);
+
+    // Background gradient (full height)
+    for i in 0..h {
+        let mut k = if i >= y_start && i < y_start + square_size {
+            (i - y_start) as f64 / (square_size - 1) as f64
+        } else if i < y_start {
+            0.0
+        } else {
+            1.0
+        };
+        k = k.clamp(0.0, 1.0);
+        k = 1.0 - (k / 2.0).powf(1.0 / gamma_val);
+        let c = color.gradient(&black, 1.0 - k);
+        rb.copy_hline(0, i, w - 1, &c);
+    }
+
+    // Black square background
+    rb.blend_bar(x_start, y_start, x_start + square_size - 1, y_start + square_size - 1, &black, 255);
+
+    // Alpha pattern
+    let mut span1 = vec![Rgba8::new(0, 0, 0, 0); square_size as usize];
+    let mut span2 = vec![Rgba8::new(0, 0, 0, 0); square_size as usize];
+
+    for i in (0..square_size).step_by(2) {
+        // Compute gradient color for this row
+        let k_row = i as f64 / (square_size - 1) as f64;
+        let k_color = 1.0 - k_row.powf(1.0 / gamma_val);
+        let c = color.gradient(&black, 1.0 - k_color);
+
+        // Set up spans based on pattern
+        for j in 0..square_size as usize {
+            let alpha_fwd = (j as u32 * 255 / square_size as u32) as u8;
+            let alpha_rev = 255 - alpha_fwd;
+
+            match pattern {
+                0 => {
+                    // Horizontal: span1 = increasing alpha, span2 = decreasing
+                    span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_fwd };
+                    span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_rev };
+                }
+                1 => {
+                    // Vertical: odd columns = increasing, even = decreasing
+                    let a = if (j & 1) != 0 { alpha_fwd } else { alpha_rev };
+                    span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a };
+                    span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a };
+                }
+                _ => {
+                    // Checkered: alternate odd/even columns between spans
+                    if (j & 1) != 0 {
+                        span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_fwd };
+                        span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_rev };
+                    } else {
+                        span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_fwd };
+                        span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_rev };
+                    }
+                }
+            }
+        }
+
+        rb.blend_color_hspan(
+            x_start, i + y_start, square_size,
+            &span1, &[], 255,
+        );
+        if i + 1 < square_size {
+            rb.blend_color_hspan(
+                x_start, i + 1 + y_start, square_size,
+                &span2, &[], 255,
+            );
+        }
+    }
+
+    // 5 vertical reference strips
+    for i in 0..square_size {
+        let k = i as f64 / (square_size - 1) as f64;
+        let k_color = 1.0 - (k / 2.0).powf(1.0 / gamma_val);
+        let c = color.gradient(&black, 1.0 - k_color);
+        for j in 0..5 {
+            let xc = square_size * (j + 1) / 6;
+            rb.copy_hline(x_start + xc - 10, i + y_start, x_start + xc + 10, &c);
+        }
+    }
+
+    // Render controls
+    let mut m_gamma = SliderCtrl::new(5.0, 5.0, 345.0, 11.0);
+    m_gamma.label("Gamma=%.2f");
+    m_gamma.range(0.5, 4.0);
+    m_gamma.set_value(gamma_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_gamma);
+
+    let mut m_r = SliderCtrl::new(5.0, 20.0, 345.0, 26.0);
+    m_r.label("R=%.2f");
+    m_r.range(0.0, 1.0);
+    m_r.set_value(r_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_r);
+
+    let mut m_g = SliderCtrl::new(5.0, 35.0, 345.0, 41.0);
+    m_g.label("G=%.2f");
+    m_g.range(0.0, 1.0);
+    m_g.set_value(g_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_g);
+
+    let mut m_b = SliderCtrl::new(5.0, 50.0, 345.0, 56.0);
+    m_b.label("B=%.2f");
+    m_b.range(0.0, 1.0);
+    m_b.set_value(b_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_b);
+
+    let mut m_pattern = RboxCtrl::new(355.0, 1.0, 495.0, 60.0);
+    m_pattern.text_size(8.0, 0.0);
+    m_pattern.add_item("Horizontal");
+    m_pattern.add_item("Vertical");
+    m_pattern.add_item("Checkered");
+    m_pattern.set_cur_item(pattern as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_pattern);
+
+    buf
+}
+
+/// Image filters 2 — 4x4 test image filtered through 17 types.
+/// Matches C++ image_filters2.cpp.
+pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let filter_idx = params.get(0).copied().unwrap_or(1.0) as usize;
+    let gamma_val = params.get(1).copied().unwrap_or(1.0);
+    let radius = params.get(2).copied().unwrap_or(4.0);
+    let normalize = params.get(3).copied().unwrap_or(1.0) > 0.5;
+
+    let _w = width as i32;
+    let _h = height as i32;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut sa = SpanAllocator::new();
+
+    // 4x4 test image in RGBA order
+    #[rustfmt::skip]
+    let g_image: [u8; 64] = [
+        0,255,0,255,    0,0,255,255,    255,255,255,255,  255,0,0,255,
+        255,0,0,255,    0,0,0,255,      255,255,255,255,  255,255,255,255,
+        255,255,255,255, 255,255,255,255, 0,0,255,255,     255,0,0,255,
+        0,0,255,255,    255,255,255,255,  0,0,0,255,       0,255,0,255,
+    ];
+
+    // Create image rendering buffer
+    let mut img_ra = RowAccessor::new();
+    let mut img_data = g_image.to_vec();
+    unsafe { img_ra.attach(img_data.as_mut_ptr(), 4, 4, 16) };
+
+    // Map 4x4 image to 300x300 area at (200,40)
+    // Scale 4→300, translate to (200,40)
+    let mut img_mtx = TransAffine::new();
+    img_mtx.multiply(&TransAffine::new_scaling(300.0 / 4.0, 300.0 / 4.0));
+    img_mtx.multiply(&TransAffine::new_translation(200.0, 40.0));
+    img_mtx.invert();
+    let mut interp = SpanInterpolatorLinear::new(img_mtx);
+
+    // Rasterize quadrilateral (200,40)-(500,40)-(500,340)-(200,340)
+    ras.reset();
+    ras.move_to_d(200.0, 40.0);
+    ras.line_to_d(500.0, 40.0);
+    ras.line_to_d(500.0, 340.0);
+    ras.line_to_d(200.0, 340.0);
+
+    let mut source = ImageAccessorClone::<4>::new(&img_ra);
+
+    if filter_idx == 0 {
+        // NN (Simple)
+        let mut sg = SpanImageFilterRgbaNn::new(&mut source, &mut interp);
+        render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+    } else {
+        // Create filter LUT
+        let mut filter = ImageFilterLut::new();
+        match filter_idx {
+            1 => filter.calculate(&ImageFilterBilinear, normalize),
+            2 => filter.calculate(&ImageFilterBicubic, normalize),
+            3 => filter.calculate(&ImageFilterSpline16, normalize),
+            4 => filter.calculate(&ImageFilterSpline36, normalize),
+            5 => filter.calculate(&ImageFilterHanning, normalize),
+            6 => filter.calculate(&ImageFilterHamming, normalize),
+            7 => filter.calculate(&ImageFilterHermite, normalize),
+            8 => filter.calculate(&ImageFilterKaiser::new(6.33), normalize),
+            9 => filter.calculate(&ImageFilterQuadric, normalize),
+            10 => filter.calculate(&ImageFilterCatrom, normalize),
+            11 => filter.calculate(&ImageFilterGaussian, normalize),
+            12 => filter.calculate(&ImageFilterBessel, normalize),
+            13 => filter.calculate(&ImageFilterMitchell::new(1.0/3.0, 1.0/3.0), normalize),
+            14 => filter.calculate(&ImageFilterSinc::new(radius), normalize),
+            15 => filter.calculate(&ImageFilterLanczos::new(radius), normalize),
+            _ => filter.calculate(&ImageFilterBlackman::new(radius), normalize),
+        }
+
+        let mut sg = SpanImageFilterRgbaGen::new(&mut source, &mut interp, &filter);
+        render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+
+        // Draw filter graph (bottom-left area)
+        let x_start = 5.0_f64;
+        let x_end = 195.0_f64;
+        let y_start = 235.0_f64;
+        let y_end = height as f64 - 5.0;
+        let x_center = (x_start + x_end) / 2.0;
+
+        // Vertical grid lines
+        for i in 0..=16 {
+            let x = x_start + (x_end - x_start) * i as f64 / 16.0;
+            let mut p = PathStorage::new();
+            p.move_to(x + 0.5, y_start);
+            p.line_to(x + 0.5, y_end);
+            let mut stroke = ConvStroke::new(&mut p);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            let alpha = if i == 8 { 255u32 } else { 100u32 };
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, alpha));
+        }
+
+        // Horizontal reference line at 1/6 height
+        let ys = y_start + (y_end - y_start) / 6.0;
+        {
+            let mut p = PathStorage::new();
+            p.move_to(x_start, ys);
+            p.line_to(x_end, ys);
+            let mut stroke = ConvStroke::new(&mut p);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+        }
+
+        // Filter kernel response curve
+        let fradius = filter.radius();
+        let n = (fradius * 256.0 * 2.0) as usize;
+        let dx = (x_end - x_start) * fradius / 8.0;
+        let dy = y_end - ys;
+        let weights = filter.weight_array();
+        let xs = x_center - (filter.diameter() as f64 * (x_end - x_start) / 32.0);
+        let nn = filter.diameter() as usize * 256;
+
+        if nn > 0 && n > 0 {
+            let mut p = PathStorage::new();
+            p.move_to(
+                xs + 0.5,
+                ys + dy * weights[0] as f64 / IMAGE_FILTER_SCALE as f64,
+            );
+            for i in 1..nn {
+                p.line_to(
+                    xs + dx * i as f64 / n as f64 + 0.5,
+                    ys + dy * weights[i.min(weights.len() - 1)] as f64 / IMAGE_FILTER_SCALE as f64,
+                );
+            }
+            let mut stroke = ConvStroke::new(&mut p);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(100, 0, 0, 255));
+        }
+    }
+
+    // Render controls
+    let mut m_gamma = SliderCtrl::new(115.0, 5.0, width as f64 - 5.0, 11.0);
+    m_gamma.label("Gamma=%.3f");
+    m_gamma.range(0.5, 3.0);
+    m_gamma.set_value(gamma_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_gamma);
+
+    if filter_idx >= 14 {
+        let mut m_radius = SliderCtrl::new(115.0, 20.0, width as f64 - 5.0, 26.0);
+        m_radius.label("Filter Radius=%.3f");
+        m_radius.range(2.0, 8.0);
+        m_radius.set_value(radius);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_radius);
+    }
+
+    let filter_names = [
+        "simple (NN)", "bilinear", "bicubic", "spline16", "spline36",
+        "hanning", "hamming", "hermite", "kaiser", "quadric",
+        "catrom", "gaussian", "bessel", "mitchell", "sinc",
+        "lanczos", "blackman",
+    ];
+    let mut m_filters = RboxCtrl::new(0.0, 0.0, 110.0, 210.0);
+    m_filters.border_width(0.0, 0.0);
+    m_filters.text_size(6.0, 0.0);
+    m_filters.text_thickness(0.85);
+    for name in &filter_names {
+        m_filters.add_item(name);
+    }
+    m_filters.set_cur_item(filter_idx as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_filters);
+
+    let mut m_normalize = CboxCtrl::new(8.0, 215.0, "Normalize Filter");
+    m_normalize.text_size(7.5, 0.0);
+    m_normalize.set_status(normalize);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_normalize);
+
+    buf
+}
+
+/// Conv dash marker — dashed stroke with cap styles.
+/// Simplified from C++ conv_dash_marker.cpp (arrowheads and smooth poly skipped).
+pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let x0 = params.get(0).copied().unwrap_or(157.0);
+    let y0 = params.get(1).copied().unwrap_or(60.0);
+    let x1 = params.get(2).copied().unwrap_or(469.0);
+    let y1 = params.get(3).copied().unwrap_or(170.0);
+    let x2 = params.get(4).copied().unwrap_or(243.0);
+    let y2 = params.get(5).copied().unwrap_or(310.0);
+    let cap_type = params.get(6).copied().unwrap_or(0.0) as usize;
+    let stroke_width = params.get(7).copied().unwrap_or(3.0);
+    let close_poly = params.get(8).copied().unwrap_or(0.0) > 0.5;
+    let even_odd = params.get(9).copied().unwrap_or(0.0) > 0.5;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    // Build path: triangle + midpoint triangle
+    let cx = (x0 + x1 + x2) / 3.0;
+    let cy = (y0 + y1 + y2) / 3.0;
+
+    let mut path = PathStorage::new();
+    // Triangle 1: v0 -> v1 -> center -> v2 (-> close if enabled)
+    path.move_to(x0, y0);
+    path.line_to(x1, y1);
+    path.line_to(cx, cy);
+    path.line_to(x2, y2);
+    if close_poly {
+        path.close_polygon(0);
+    }
+
+    // Midpoint triangle
+    path.move_to((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    path.line_to((x1 + x2) / 2.0, (y1 + y2) / 2.0);
+    path.line_to((x2 + x0) / 2.0, (y2 + y0) / 2.0);
+    if close_poly {
+        path.close_polygon(0);
+    }
+
+    // Set fill rule
+    if even_odd {
+        ras.filling_rule(agg_rust::basics::FillingRule::EvenOdd);
+    }
+
+    // 1. Fill the solid triangles
+    ras.reset();
+    ras.add_path(&mut path, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+        &Rgba8::new(178, 127, 25, 127)); // rgba(0.7, 0.5, 0.1, 0.5)
+
+    // 2. Outline stroke
+    let mut outline = ConvStroke::new(&mut path);
+    outline.set_width(1.0);
+    ras.reset();
+    ras.add_path(&mut outline, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+        &Rgba8::new(0, 153, 0, 204)); // rgba(0.0, 0.6, 0.0, 0.8)
+
+    // 3. Dashed stroked path
+    let path_inner = outline.source_mut();
+    let mut curve = ConvCurve::new(path_inner);
+    let mut dash = ConvDash::new(&mut curve);
+    dash.add_dash(20.0, 5.0);
+    dash.add_dash(5.0, 5.0);
+    dash.add_dash(5.0, 5.0);
+    dash.dash_start(10.0);
+
+    let mut stroke = ConvStroke::new(&mut dash);
+    stroke.set_width(stroke_width);
+    let cap = match cap_type {
+        1 => LineCap::Square,
+        2 => LineCap::Round,
+        _ => LineCap::Butt,
+    };
+    stroke.set_line_cap(cap);
+
+    ras.reset();
+    ras.add_path(&mut stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+        &Rgba8::new(0, 0, 0, 255));
+
+    // Render controls
+    let mut m_cap = RboxCtrl::new(10.0, 10.0, 130.0, 80.0);
+    m_cap.add_item("Butt Cap");
+    m_cap.add_item("Square Cap");
+    m_cap.add_item("Round Cap");
+    m_cap.set_cur_item(cap_type as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_cap);
+
+    let mut m_width = SliderCtrl::new(140.0, 14.0, 290.0, 22.0);
+    m_width.label("Width=%1.2f");
+    m_width.range(0.0, 10.0);
+    m_width.set_value(stroke_width);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_width);
+
+    let mut m_close = CboxCtrl::new(140.0, 34.0, "Close Polygons");
+    m_close.set_status(close_poly);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_close);
+
+    let mut m_even_odd = CboxCtrl::new(300.0, 34.0, "Even-Odd Fill");
+    m_even_odd.set_status(even_odd);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_even_odd);
+
+    buf
+}
+
+/// AA test — radial dashes, ellipses, gradient lines, gradient triangles.
+/// Matches C++ aa_test.cpp.
+pub fn aa_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let gamma_val = params.get(0).copied().unwrap_or(1.6);
+
+    let w = width as f64;
+    let h = height as f64;
+    let cx = w / 2.0;
+    let cy = h / 2.0;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(0, 0, 0, 255)); // Black background
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut sa = SpanAllocator::new();
+
+    let r = cx.min(cy);
+
+    // 180 radial dashed lines
+    for i in (1..=180).rev() {
+        let n = 2.0 * std::f64::consts::PI * i as f64 / 180.0;
+        let x1 = cx + r * n.sin();
+        let y1 = cy + r * n.cos();
+        let dash_len = if i < 90 { i as f64 } else { 0.0 };
+
+        let mut p = PathStorage::new();
+        p.move_to(x1, y1);
+        p.line_to(cx, cy);
+
+        if dash_len > 0.0 {
+            let mut dash = ConvDash::new(&mut p);
+            dash.add_dash(dash_len, dash_len);
+            let mut stroke = ConvStroke::new(&mut dash);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+        } else {
+            let mut stroke = ConvStroke::new(&mut p);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+        }
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+            &Rgba8::new(255, 255, 255, 51)); // rgba(1,1,1,0.2)
+    }
+
+    // 20 ellipses — Group 1: Integral point sizes
+    for i in 1..=20 {
+        let mut ell = Ellipse::new(
+            20.0 + (i * (i + 1)) as f64 + 0.5,
+            20.5,
+            i as f64 / 2.0,
+            i as f64 / 2.0,
+            (8 + i) as u32,
+            false,
+        );
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 255));
+    }
+
+    // Group 2: Fractional point sizes
+    for i in 1..=20 {
+        let mut ell = Ellipse::new(
+            18.0 + i as f64 * 4.0 + 0.5,
+            33.5,
+            i as f64 / 20.0,
+            i as f64 / 20.0,
+            8,
+            false,
+        );
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 255));
+    }
+
+    // Group 3: Fractional positioning
+    for i in 1..=20 {
+        let mut ell = Ellipse::new(
+            18.0 + i as f64 * 4.0 + (i - 1) as f64 / 10.0 + 0.5,
+            27.0 + (i - 1) as f64 / 10.0 + 0.5,
+            0.5,
+            0.5,
+            8,
+            false,
+        );
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 255));
+    }
+
+    // Helper: draw a gradient line from (x1,y1) to (x2,y2) with given width and colors
+    macro_rules! draw_gradient_line {
+        ($ras:expr, $sl:expr, $rb:expr, $sa:expr,
+         $x1:expr, $y1:expr, $x2:expr, $y2:expr, $lw:expr, $c1:expr, $c2:expr) => {{
+            let dx = $x2 - $x1;
+            let dy = $y2 - $y1;
+            let d = (dx * dx + dy * dy).sqrt();
+            if d > 0.0001 {
+                let mut lut = GradientLut::new_default();
+                lut.add_color(0.0, $c1);
+                lut.add_color(1.0, $c2);
+                lut.build_lut();
+
+                let mut mtx = TransAffine::new();
+                mtx.multiply(&TransAffine::new_rotation(dy.atan2(dx)));
+                mtx.multiply(&TransAffine::new_translation($x1, $y1));
+                mtx.invert();
+
+                let grad_func = GradientX;
+                let interp = SpanInterpolatorLinear::new(mtx);
+                let mut grad = SpanGradient::new(interp, grad_func, &lut, 0.0, d);
+
+                let mut p = PathStorage::new();
+                p.move_to($x1, $y1);
+                p.line_to($x2, $y2);
+                let mut stroke = ConvStroke::new(&mut p);
+                stroke.set_width($lw);
+                $ras.reset();
+                $ras.add_path(&mut stroke, 0);
+                render_scanlines_aa($ras, $sl, $rb, $sa, &mut grad);
+            }
+        }};
+    }
+
+    // Gradient lines — Set 1: Integral line widths
+    for i in 1..=20 {
+        let x1 = 20.0 + (i * (i + 1)) as f64;
+        let y1 = 40.5;
+        let x2 = 20.0 + (i * (i + 1)) as f64 + ((i - 1) * 4) as f64;
+        let y2 = 100.5;
+        let c1 = Rgba8::new(255, 255, 255, 255);
+        let c2 = Rgba8::new(
+            ((i % 2) as f64 * 255.0) as u32,
+            ((i % 3) as f64 * 0.5 * 255.0) as u32,
+            ((i % 5) as f64 * 0.25 * 255.0) as u32,
+            255,
+        );
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, i as f64, c1, c2);
+    }
+
+    // Set 2: Fractional line lengths horizontal
+    for i in 1..=20 {
+        let x1 = 17.5 + i as f64 * 4.0;
+        let y1 = 107.0;
+        let x2 = 17.5 + i as f64 * 4.0 + i as f64 / 6.66666667;
+        let y2 = 107.0;
+        let c1 = Rgba8::new(255, 0, 0, 255);
+        let c2 = Rgba8::new(0, 0, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, 1.0, c1, c2);
+    }
+
+    // Set 3: Fractional line lengths vertical
+    for i in 1..=20 {
+        let x1 = 18.0 + i as f64 * 4.0;
+        let y1 = 112.5;
+        let x2 = 18.0 + i as f64 * 4.0;
+        let y2 = 112.5 + i as f64 / 6.66666667;
+        let c1 = Rgba8::new(255, 0, 0, 255);
+        let c2 = Rgba8::new(0, 0, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, 1.0, c1, c2);
+    }
+
+    // Set 4: Fractional line positioning
+    for i in 1..=20 {
+        let x1 = 21.5;
+        let y1 = 120.0 + (i - 1) as f64 * 3.1;
+        let x2 = 52.5;
+        let y2 = y1;
+        let c1 = Rgba8::new(255, 0, 0, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, 1.0, c1, c2);
+    }
+
+    // Set 5: Fractional width 2..0 green
+    for i in 1..=20 {
+        let x1 = 52.5;
+        let y1 = 118.0 + i as f64 * 3.0;
+        let x2 = 83.5;
+        let y2 = y1;
+        let lw = 2.0 - (i - 1) as f64 / 10.0;
+        let c1 = Rgba8::new(0, 255, 0, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, lw, c1, c2);
+    }
+
+    // Set 6: Stippled fractional width blue
+    for i in 1..=20 {
+        let x1 = 83.5;
+        let y1 = 119.0 + i as f64 * 3.0;
+        let x2 = 114.5;
+        let y2 = y1;
+        let lw = 2.0 - (i - 1) as f64 / 10.0;
+        let c1 = Rgba8::new(0, 0, 255, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        // Dashed version
+        let mut p = PathStorage::new();
+        p.move_to(x1, y1);
+        p.line_to(x2, y2);
+        let mut dash = ConvDash::new(&mut p);
+        dash.add_dash(3.0, 3.0);
+        let mut stroke = ConvStroke::new(&mut dash);
+        stroke.set_width(lw);
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let d = (dx * dx + dy * dy).sqrt();
+        if d > 0.0001 {
+            let mut lut = GradientLut::new_default();
+            lut.add_color(0.0, c1);
+            lut.add_color(1.0, c2);
+            lut.build_lut();
+            let mut mtx = TransAffine::new();
+            mtx.multiply(&TransAffine::new_rotation(dy.atan2(dx)));
+            mtx.multiply(&TransAffine::new_translation(x1, y1));
+            mtx.invert();
+            let interp = SpanInterpolatorLinear::new(mtx);
+            let mut grad = SpanGradient::new(interp, GradientX, &lut, 0.0, d);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut grad);
+        }
+    }
+
+    // Set 7: Integral line width, horizontal aligned (i<=10)
+    for i in 1..=10 {
+        let x1 = 125.5;
+        let y1 = 119.5 + (i + 2) as f64 * (i as f64 / 2.0);
+        let x2 = 135.5;
+        let y2 = y1;
+        let c1 = Rgba8::new(255, 255, 255, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, i as f64, c1, c2);
+    }
+
+    // Set 8: Fractional width 0..2, 1px H
+    for i in 1..=20 {
+        let x1 = 17.5 + i as f64 * 4.0;
+        let y1 = 192.0;
+        let x2 = 18.5 + i as f64 * 4.0;
+        let y2 = 192.0;
+        let lw = i as f64 / 10.0;
+        let c1 = Rgba8::new(255, 255, 255, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, lw, c1, c2);
+    }
+
+    // Set 9: Fractional positioning 1px
+    for i in 1..=20 {
+        let x1 = 17.5 + i as f64 * 4.0 + (i - 1) as f64 / 10.0;
+        let y1 = 186.0;
+        let x2 = 18.5 + i as f64 * 4.0 + (i - 1) as f64 / 10.0;
+        let y2 = 186.0;
+        let c1 = Rgba8::new(255, 255, 255, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        draw_gradient_line!(&mut ras, &mut sl, &mut rb, &mut sa, x1, y1, x2, y2, 1.0, c1, c2);
+    }
+
+    // 13 gradient triangles (Gouraud)
+    for i in 1..=13 {
+        let x1 = w - 150.0;
+        let y1 = h - 20.0 - i as f64 * (i as f64 + 1.5);
+        let x2 = w - 20.0;
+        let y2 = h - 20.0 - i as f64 * (i as f64 + 1.0);
+        let x3 = w - 20.0;
+        let y3 = h - 20.0 - i as f64 * (i as f64 + 2.0);
+
+        let c1 = Rgba8::new(255, 255, 255, 255);
+        let c2 = Rgba8::new(
+            ((i % 2) as f64 * 255.0) as u32,
+            ((i % 3) as f64 * 0.5 * 255.0) as u32,
+            ((i % 5) as f64 * 0.25 * 255.0) as u32,
+            255,
+        );
+
+        let mut gouraud = SpanGouraudRgba::new_with_triangle(
+            c1, c2, c2,
+            x1, y1, x2, y2, x3, y3,
+            0.0,
+        );
+        gouraud.prepare();
+        ras.reset();
+        ras.move_to_d(x1, y1);
+        ras.line_to_d(x2, y2);
+        ras.line_to_d(x3, y3);
+        render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut gouraud);
+    }
+
+    // Render gamma slider
+    let mut m_gamma = SliderCtrl::new(5.0, 5.0, 340.0, 12.0);
+    m_gamma.label("Gamma=%.3f");
+    m_gamma.range(0.1, 3.0);
+    m_gamma.set_value(gamma_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_gamma);
 
     buf
 }

@@ -27,6 +27,10 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'gradient_focal': () => import('./demos/gradient_focal.ts'),
   'idea': () => import('./demos/idea.ts'),
   'graph_test': () => import('./demos/graph_test.ts'),
+  'gamma_tuner': () => import('./demos/gamma_tuner.ts'),
+  'image_filters2': () => import('./demos/image_filters2.ts'),
+  'conv_dash_marker': () => import('./demos/conv_dash_marker.ts'),
+  'aa_test': () => import('./demos/aa_test.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -189,6 +193,26 @@ function renderHome(container: HTMLElement) {
           <h3>Graph Test</h3>
           <p>Random graph with 200 nodes and 100 edges — 5 rendering modes.</p>
         </a>
+        <a href="#/gamma_tuner" class="feature-card">
+          <span class="card-icon">&#947;</span>
+          <h3>Gamma Tuner</h3>
+          <p>Gradient background with alpha pattern and gamma correction controls.</p>
+        </a>
+        <a href="#/image_filters2" class="feature-card">
+          <span class="card-icon">&#128247;</span>
+          <h3>Image Filters 2</h3>
+          <p>4x4 test image filtered through 17 filter types with graph visualization.</p>
+        </a>
+        <a href="#/conv_dash_marker" class="feature-card">
+          <span class="card-icon">&#10230;</span>
+          <h3>Dash Marker</h3>
+          <p>Dashed strokes with cap styles on a draggable triangle.</p>
+        </a>
+        <a href="#/aa_test" class="feature-card">
+          <span class="card-icon">&#9646;</span>
+          <h3>AA Test</h3>
+          <p>Anti-aliasing quality test — radial lines, gradient lines, Gouraud triangles.</p>
+        </a>
       </div>
       <div class="about-section">
         <h2>About This Project</h2>
@@ -209,7 +233,7 @@ function renderHome(container: HTMLElement) {
             <div class="stat-label">Modules Ported</div>
           </div>
           <div class="stat">
-            <div class="stat-value">731</div>
+            <div class="stat-value">742</div>
             <div class="stat-label">Tests Passing</div>
           </div>
           <div class="stat">

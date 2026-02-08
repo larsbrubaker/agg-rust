@@ -32,6 +32,10 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
         "gradient_focal" => render::gradient_focal(width, height, params),
         "idea" => render::idea(width, height, params),
         "graph_test" => render::graph_test(width, height, params),
+        "gamma_tuner" => render::gamma_tuner(width, height, params),
+        "image_filters2" => render::image_filters2(width, height, params),
+        "conv_dash_marker" => render::conv_dash_marker_demo(width, height, params),
+        "aa_test" => render::aa_test(width, height, params),
         _ => render::fallback(width, height),
     }
 }
@@ -45,5 +49,5 @@ pub fn version() -> String {
 /// Get list of available demo names.
 #[wasm_bindgen]
 pub fn demo_names() -> String {
-    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test".to_string()
+    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test".to_string()
 }
