@@ -62,3 +62,14 @@ pub mod scanline_u;
 pub mod pixfmt_rgba;
 pub mod renderer_base;
 pub mod renderer_scanline;
+
+// Phase 4: Converter Pipeline
+pub mod conv_adaptor_vcgen;
+pub mod conv_contour;
+pub mod conv_curve;
+pub mod conv_dash;
+pub mod conv_stroke;
+pub mod conv_transform;
+pub mod vcgen_contour;
+pub mod vcgen_dash;
+pub mod vcgen_stroke;

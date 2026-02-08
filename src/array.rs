@@ -306,13 +306,13 @@ impl VertexSequence {
     /// If `closed` is true, also removes the last vertex if it's coincident
     /// with the first.
     pub fn close(&mut self, closed: bool) {
+        // C++: while(size > 1) { if((*this)[size-2]((*this)[size-1])) break; ... }
+        // operator() stores distance on [size-2], so we must mutate the actual
+        // vector element, not a copy.
         while self.vertices.len() > 1 {
             let len = self.vertices.len();
-            let keep = {
-                let mut prev = self.vertices[len - 2];
-                let last = self.vertices[len - 1];
-                prev.calc_dist(&last)
-            };
+            let last = self.vertices[len - 1]; // copy to avoid double borrow
+            let keep = self.vertices[len - 2].calc_dist(&last); // mutate in-place
             if keep {
                 break;
             }
@@ -324,11 +324,9 @@ impl VertexSequence {
         if closed {
             while self.vertices.len() > 1 {
                 let len = self.vertices.len();
-                let keep = {
-                    let mut last = self.vertices[len - 1];
-                    let first = self.vertices[0];
-                    last.calc_dist(&first)
-                };
+                // For closing: check distance from last vertex to first
+                let first = self.vertices[0]; // copy
+                let keep = self.vertices[len - 1].calc_dist(&first); // mutate in-place
                 if keep {
                     break;
                 }
@@ -343,6 +341,32 @@ impl VertexSequence {
 
     pub fn clear(&mut self) {
         self.vertices.clear();
+    }
+
+    /// Remove the last vertex.
+    /// Port of C++ `pod_bvector::remove_last`.
+    pub fn remove_last(&mut self) {
+        self.vertices.pop();
+    }
+
+    /// Get the previous vertex (wrapping index).
+    /// Port of C++ `pod_bvector::prev`.
+    pub fn prev(&self, idx: usize) -> &VertexDist {
+        let len = self.vertices.len();
+        &self.vertices[(idx + len - 1) % len]
+    }
+
+    /// Get the current vertex.
+    /// Port of C++ `pod_bvector::curr`.
+    pub fn curr(&self, idx: usize) -> &VertexDist {
+        &self.vertices[idx]
+    }
+
+    /// Get the next vertex (wrapping index).
+    /// Port of C++ `pod_bvector::next`.
+    pub fn next(&self, idx: usize) -> &VertexDist {
+        let len = self.vertices.len();
+        &self.vertices[(idx + 1) % len]
     }
 
     /// Get a reference to the underlying vertex slice.
@@ -373,6 +397,48 @@ impl core::ops::Index<usize> for VertexSequence {
 impl core::ops::IndexMut<usize> for VertexSequence {
     fn index_mut(&mut self, i: usize) -> &mut VertexDist {
         &mut self.vertices[i]
+    }
+}
+
+// ============================================================================
+// shorten_path
+// ============================================================================
+
+/// Shorten a vertex sequence by removing `s` distance-units from the end.
+///
+/// Port of C++ `shorten_path` from `agg_shorten_path.h`.
+pub fn shorten_path(vs: &mut VertexSequence, s: f64, closed: u32) {
+    if s > 0.0 && vs.size() > 1 {
+        let mut s = s;
+        let mut n = vs.size() as i32 - 2;
+        while n > 0 {
+            let d = vs[n as usize].dist;
+            if d > s {
+                break;
+            }
+            vs.remove_last();
+            s -= d;
+            n -= 1;
+        }
+        if vs.size() < 2 {
+            vs.remove_all();
+        } else {
+            let n = vs.size() - 1;
+            let prev_dist = vs[n - 1].dist;
+            let d = (prev_dist - s) / prev_dist;
+            let prev_x = vs[n - 1].x;
+            let prev_y = vs[n - 1].y;
+            let last_x = vs[n].x;
+            let last_y = vs[n].y;
+            vs[n].x = prev_x + (last_x - prev_x) * d;
+            vs[n].y = prev_y + (last_y - prev_y) * d;
+            // Check if prev and modified last are not coincident
+            let last_copy = vs[n];
+            if !vs.as_mut_slice()[n - 1].calc_dist(&last_copy) {
+                vs.remove_last();
+            }
+            vs.close(closed != 0);
+        }
     }
 }
 
@@ -516,5 +582,99 @@ mod tests {
                                             // Close with closed=true should remove vertex coincident with first
         seq.close(true);
         assert_eq!(seq.size(), 2);
+    }
+
+    #[test]
+    fn test_vertex_sequence_prev_curr_next() {
+        let mut seq = VertexSequence::new();
+        seq.add(VertexDist::new(0.0, 0.0));
+        seq.add(VertexDist::new(1.0, 0.0));
+        seq.add(VertexDist::new(2.0, 0.0));
+
+        // curr
+        assert_eq!(seq.curr(1).x, 1.0);
+        // next wraps
+        assert_eq!(seq.next(2).x, 0.0);
+        // prev wraps
+        assert_eq!(seq.prev(0).x, 2.0);
+        // normal prev
+        assert_eq!(seq.prev(2).x, 1.0);
+    }
+
+    #[test]
+    fn test_vertex_sequence_remove_last() {
+        let mut seq = VertexSequence::new();
+        seq.add(VertexDist::new(0.0, 0.0));
+        seq.add(VertexDist::new(1.0, 0.0));
+        seq.add(VertexDist::new(2.0, 0.0));
+        seq.remove_last();
+        assert_eq!(seq.size(), 2);
+        assert_eq!(seq[1].x, 1.0);
+    }
+
+    #[test]
+    fn test_shorten_path_basic() {
+        let mut seq = VertexSequence::new();
+        seq.add(VertexDist::new(0.0, 0.0));
+        seq.add(VertexDist::new(10.0, 0.0));
+        seq.add(VertexDist::new(20.0, 0.0));
+        // Force distances by closing (which triggers calc_dist)
+        seq.close(false);
+
+        // Shorten by 5 units from the end
+        shorten_path(&mut seq, 5.0, 0);
+        assert!(seq.size() >= 2);
+        // The last vertex should have moved closer
+        let last = seq[seq.size() - 1];
+        assert!(last.x < 20.0, "Last x={} should be < 20", last.x);
+    }
+
+    #[test]
+    fn test_shorten_path_zero() {
+        let mut seq = VertexSequence::new();
+        seq.add(VertexDist::new(0.0, 0.0));
+        seq.add(VertexDist::new(10.0, 0.0));
+        seq.close(false);
+
+        // Shorten by 0 — no change
+        shorten_path(&mut seq, 0.0, 0);
+        assert_eq!(seq.size(), 2);
+    }
+
+    #[test]
+    fn test_shorten_path_exceeds_length() {
+        let mut seq = VertexSequence::new();
+        seq.add(VertexDist::new(0.0, 0.0));
+        seq.add(VertexDist::new(10.0, 0.0));
+        seq.close(false);
+
+        // Shorten by more than total length — C++ overshoots (doesn't empty)
+        shorten_path(&mut seq, 100.0, 0);
+        // Path still has 2 vertices: the last is moved beyond start
+        assert_eq!(seq.size(), 2);
+        // Last x is negative (overshot past the start)
+        assert!(
+            seq[1].x < 0.0,
+            "Last vertex x={} should be negative (overshot)",
+            seq[1].x
+        );
+    }
+
+    #[test]
+    fn test_shorten_path_removes_segment() {
+        let mut seq = VertexSequence::new();
+        seq.add(VertexDist::new(0.0, 0.0));
+        seq.add(VertexDist::new(5.0, 0.0));
+        seq.add(VertexDist::new(10.0, 0.0));
+        seq.add(VertexDist::new(20.0, 0.0));
+        seq.close(false);
+
+        // Shorten by 12 — should remove last segment (len=10) and trim the one before
+        shorten_path(&mut seq, 12.0, 0);
+        // Path should be shorter than original
+        assert!(seq.size() >= 2);
+        let last = seq[seq.size() - 1];
+        // The path was shortened; last vertex should be closer to start
+        assert!(last.x < 20.0, "Last x={} should be < 20", last.x);
     }
 }

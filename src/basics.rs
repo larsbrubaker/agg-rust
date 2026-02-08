@@ -539,6 +539,18 @@ pub trait VertexSource {
     fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32;
 }
 
+/// Blanket implementation so `&mut T` can be used as a VertexSource.
+/// This allows pipeline stages to borrow their source instead of owning it.
+impl<T: VertexSource> VertexSource for &mut T {
+    fn rewind(&mut self, path_id: u32) {
+        (*self).rewind(path_id);
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        (*self).vertex(x, y)
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

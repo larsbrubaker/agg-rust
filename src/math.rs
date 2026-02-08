@@ -258,6 +258,27 @@ pub fn calc_polygon_area(vertices: &[crate::basics::PointD]) -> f64 {
     (sum + x * ys - y * xs) * 0.5
 }
 
+/// Signed area of a polygon defined by a slice of `VertexDist`.
+/// Same algorithm as `calc_polygon_area` but works with `VertexDist` slices
+/// (needed by `vcgen_contour`).
+pub fn calc_polygon_area_vd(vertices: &[crate::array::VertexDist]) -> f64 {
+    if vertices.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    let mut x = vertices[0].x;
+    let mut y = vertices[0].y;
+    let xs = x;
+    let ys = y;
+
+    for v in &vertices[1..] {
+        sum += x * v.y - y * v.x;
+        x = v.x;
+        y = v.y;
+    }
+    (sum + x * ys - y * xs) * 0.5
+}
+
 // ============================================================================
 // Fast integer square root (lookup table based)
 // ============================================================================
@@ -590,6 +611,38 @@ mod tests {
         ];
         let area = calc_polygon_area(&square);
         assert!((area - 1.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_calc_polygon_area_vd() {
+        use crate::array::VertexDist;
+        // Unit square: area = 1.0
+        let square = vec![
+            VertexDist::new(0.0, 0.0),
+            VertexDist::new(1.0, 0.0),
+            VertexDist::new(1.0, 1.0),
+            VertexDist::new(0.0, 1.0),
+        ];
+        let area = calc_polygon_area_vd(&square);
+        assert!((area - 1.0).abs() < EPSILON);
+
+        // Empty: area = 0
+        let empty: Vec<VertexDist> = vec![];
+        assert_eq!(calc_polygon_area_vd(&empty), 0.0);
+    }
+
+    #[test]
+    fn test_calc_polygon_area_vd_ccw() {
+        use crate::array::VertexDist;
+        // CCW square: area = -1.0
+        let square = vec![
+            VertexDist::new(0.0, 0.0),
+            VertexDist::new(0.0, 1.0),
+            VertexDist::new(1.0, 1.0),
+            VertexDist::new(1.0, 0.0),
+        ];
+        let area = calc_polygon_area_vd(&square);
+        assert!((area - (-1.0)).abs() < EPSILON);
     }
 
     #[test]
