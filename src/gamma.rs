@@ -346,6 +346,146 @@ impl Default for GammaLut {
 }
 
 // ============================================================================
+// Gamma Spline — interactive gamma curve via bicubic spline
+// ============================================================================
+
+/// Spline-based gamma correction curve.
+///
+/// Port of C++ `gamma_spline` from `ctrl/agg_gamma_spline.h`.
+/// Takes 4 control parameters `(kx1, ky1, kx2, ky2)` each in `[0.001..1.999]`
+/// and generates a smooth gamma curve through 4 interpolation points:
+///   - `(0, 0)`
+///   - `(kx1 * 0.25, ky1 * 0.25)`
+///   - `(1 - kx2 * 0.25, 1 - ky2 * 0.25)`
+///   - `(1, 1)`
+///
+/// Produces a 256-entry lookup table (`gamma()`) and supports evaluation (`y()`).
+/// Also implements a vertex source interface for rendering the curve.
+pub struct GammaSpline {
+    gamma: [u8; 256],
+    x: [f64; 4],
+    y_pts: [f64; 4],
+    spline: crate::bspline::Bspline,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    cur_x: f64,
+}
+
+impl GammaSpline {
+    pub fn new() -> Self {
+        let mut gs = Self {
+            gamma: [0; 256],
+            x: [0.0; 4],
+            y_pts: [0.0; 4],
+            spline: crate::bspline::Bspline::new(),
+            x1: 0.0,
+            y1: 0.0,
+            x2: 10.0,
+            y2: 10.0,
+            cur_x: 0.0,
+        };
+        gs.set_values(1.0, 1.0, 1.0, 1.0);
+        gs
+    }
+
+    /// Set the 4 control parameters and rebuild the spline and gamma table.
+    ///
+    /// Each parameter should be in `[0.001..1.999]`; values are clamped.
+    pub fn set_values(&mut self, kx1: f64, ky1: f64, kx2: f64, ky2: f64) {
+        let kx1 = kx1.clamp(0.001, 1.999);
+        let ky1 = ky1.clamp(0.001, 1.999);
+        let kx2 = kx2.clamp(0.001, 1.999);
+        let ky2 = ky2.clamp(0.001, 1.999);
+
+        self.x[0] = 0.0;
+        self.y_pts[0] = 0.0;
+        self.x[1] = kx1 * 0.25;
+        self.y_pts[1] = ky1 * 0.25;
+        self.x[2] = 1.0 - kx2 * 0.25;
+        self.y_pts[2] = 1.0 - ky2 * 0.25;
+        self.x[3] = 1.0;
+        self.y_pts[3] = 1.0;
+
+        self.spline.init(&self.x, &self.y_pts);
+
+        for i in 0..256 {
+            self.gamma[i] = (self.y(i as f64 / 255.0) * 255.0) as u8;
+        }
+    }
+
+    /// Get the 4 control parameters back from the stored spline points.
+    pub fn get_values(&self) -> (f64, f64, f64, f64) {
+        (
+            self.x[1] * 4.0,
+            self.y_pts[1] * 4.0,
+            (1.0 - self.x[2]) * 4.0,
+            (1.0 - self.y_pts[2]) * 4.0,
+        )
+    }
+
+    /// Get the 256-entry gamma lookup table.
+    pub fn gamma(&self) -> &[u8; 256] {
+        &self.gamma
+    }
+
+    /// Evaluate the spline curve at `x` (0..1) → result clamped to `[0..1]`.
+    pub fn y(&self, x: f64) -> f64 {
+        let x = x.clamp(0.0, 1.0);
+        let val = self.spline.get(x);
+        val.clamp(0.0, 1.0)
+    }
+
+    /// Set the bounding box for vertex source rendering.
+    pub fn set_box(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
+        self.x1 = x1;
+        self.y1 = y1;
+        self.x2 = x2;
+        self.y2 = y2;
+    }
+
+    /// Rewind vertex source iteration.
+    pub fn rewind(&mut self, _idx: u32) {
+        self.cur_x = 0.0;
+    }
+
+    /// Get the next vertex of the gamma curve path.
+    pub fn vertex(&mut self, vx: &mut f64, vy: &mut f64) -> u32 {
+        use crate::basics::{PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
+
+        if self.cur_x == 0.0 {
+            *vx = self.x1;
+            *vy = self.y1;
+            self.cur_x += 1.0 / (self.x2 - self.x1);
+            return PATH_CMD_MOVE_TO;
+        }
+
+        if self.cur_x > 1.0 {
+            return PATH_CMD_STOP;
+        }
+
+        *vx = self.x1 + self.cur_x * (self.x2 - self.x1);
+        *vy = self.y1 + self.y(self.cur_x) * (self.y2 - self.y1);
+
+        self.cur_x += 1.0 / (self.x2 - self.x1);
+        PATH_CMD_LINE_TO
+    }
+}
+
+impl Default for GammaSpline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GammaFunction for GammaSpline {
+    fn call(&self, x: f64) -> f64 {
+        self.y(x)
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -464,5 +604,95 @@ mod tests {
             "dir(128) at gamma 2.0 should be ~64, got {}",
             d
         );
+    }
+
+    // ====================================================================
+    // GammaSpline tests
+    // ====================================================================
+
+    #[test]
+    fn test_gamma_spline_default() {
+        let gs = GammaSpline::new();
+        // Default values(1,1,1,1): straight line
+        let (kx1, ky1, kx2, ky2) = gs.get_values();
+        assert!((kx1 - 1.0).abs() < 0.01);
+        assert!((ky1 - 1.0).abs() < 0.01);
+        assert!((kx2 - 1.0).abs() < 0.01);
+        assert!((ky2 - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_gamma_spline_identity_curve() {
+        let gs = GammaSpline::new();
+        // With default values, the curve should approximate identity
+        assert!((gs.y(0.0)).abs() < 0.01);
+        assert!((gs.y(1.0) - 1.0).abs() < 0.01);
+        assert!((gs.y(0.5) - 0.5).abs() < 0.05);
+    }
+
+    #[test]
+    fn test_gamma_spline_gamma_table() {
+        let gs = GammaSpline::new();
+        let gamma = gs.gamma();
+        // First and last entries
+        assert_eq!(gamma[0], 0);
+        assert_eq!(gamma[255], 255);
+        // Middle should be close to 128
+        assert!((gamma[128] as i32 - 128).unsigned_abs() <= 5);
+    }
+
+    #[test]
+    fn test_gamma_spline_roundtrip_values() {
+        let mut gs = GammaSpline::new();
+        gs.set_values(0.5, 1.5, 0.8, 1.2);
+        let (kx1, ky1, kx2, ky2) = gs.get_values();
+        assert!((kx1 - 0.5).abs() < 0.001);
+        assert!((ky1 - 1.5).abs() < 0.001);
+        assert!((kx2 - 0.8).abs() < 0.001);
+        assert!((ky2 - 1.2).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_gamma_spline_vertex_source() {
+        let mut gs = GammaSpline::new();
+        gs.set_box(0.0, 0.0, 100.0, 100.0);
+        gs.rewind(0);
+
+        let (mut x, mut y) = (0.0, 0.0);
+        let cmd = gs.vertex(&mut x, &mut y);
+        assert_eq!(cmd, crate::basics::PATH_CMD_MOVE_TO);
+        assert!((x - 0.0).abs() < 0.01);
+
+        // Should produce line_to vertices until > 1.0
+        let mut count = 0;
+        loop {
+            let cmd = gs.vertex(&mut x, &mut y);
+            if cmd == crate::basics::PATH_CMD_STOP {
+                break;
+            }
+            assert_eq!(cmd, crate::basics::PATH_CMD_LINE_TO);
+            count += 1;
+        }
+        assert!(count >= 99 && count <= 101); // ~100 pixels wide box
+    }
+
+    #[test]
+    fn test_gamma_spline_clamping() {
+        let mut gs = GammaSpline::new();
+        gs.set_values(0.0, 3.0, -1.0, 2.5);
+        let (kx1, ky1, kx2, ky2) = gs.get_values();
+        // Should be clamped to [0.001, 1.999]
+        assert!((kx1 - 0.001).abs() < 0.001);
+        assert!((ky1 - 1.999).abs() < 0.001);
+        assert!((kx2 - 0.001).abs() < 0.001);
+        assert!((ky2 - 1.999).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_gamma_spline_as_gamma_function() {
+        let gs = GammaSpline::new();
+        // GammaSpline implements GammaFunction
+        assert!((gs.call(0.0)).abs() < 0.01);
+        assert!((gs.call(1.0) - 1.0).abs() < 0.01);
     }
 }

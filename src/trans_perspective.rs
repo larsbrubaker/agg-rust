@@ -586,6 +586,20 @@ pub struct PerspectiveIteratorX {
 }
 
 impl PerspectiveIteratorX {
+    /// Create a default (identity-like) iterator at the origin.
+    pub fn default_new() -> Self {
+        Self {
+            den: 1.0,
+            den_step: 0.0,
+            nom_x: 0.0,
+            nom_x_step: 0.0,
+            nom_y: 0.0,
+            nom_y_step: 0.0,
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+
     fn new(px: f64, py: f64, step: f64, m: &TransPerspective) -> Self {
         let den = px * m.w0 + py * m.w1 + m.w2;
         let nom_x = px * m.sx + py * m.shx + m.tx;

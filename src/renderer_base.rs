@@ -258,6 +258,41 @@ impl<PF: PixelFormat> RendererBase<PF> {
             .blend_solid_hspan(x, y, len as u32, c, &covers[covers_offset..]);
     }
 
+    /// Blend a solid vertical span with per-pixel coverage (clipped).
+    pub fn blend_solid_vspan(
+        &mut self,
+        x: i32,
+        mut y: i32,
+        mut len: i32,
+        c: &PF::ColorType,
+        covers: &[CoverType],
+    ) {
+        if x > self.xmax() || x < self.xmin() {
+            return;
+        }
+
+        let mut covers_offset = 0usize;
+        if y < self.ymin() {
+            let d = self.ymin() - y;
+            len -= d;
+            if len <= 0 {
+                return;
+            }
+            covers_offset += d as usize;
+            y = self.ymin();
+        }
+        if y + len > self.ymax() + 1 {
+            len = self.ymax() - y + 1;
+            if len <= 0 {
+                return;
+            }
+        }
+        for i in 0..len as usize {
+            self.ren
+                .blend_pixel(x, y + i as i32, c, covers[covers_offset + i]);
+        }
+    }
+
     /// Blend a horizontal span with per-pixel colors (clipped).
     ///
     /// If `covers` is non-empty, each pixel uses its corresponding coverage.

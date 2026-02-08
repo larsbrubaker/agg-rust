@@ -837,6 +837,11 @@ impl Gray8 {
         (p as i32 + (((t >> Self::BASE_SHIFT) + t) >> Self::BASE_SHIFT)) as u8
     }
 
+    #[inline]
+    pub fn mult_cover(a: u8, b: CoverType) -> u8 {
+        Self::multiply(a, b)
+    }
+
     pub fn clear(&mut self) -> &mut Self {
         self.v = 0;
         self.a = 0;

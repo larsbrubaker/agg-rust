@@ -6,8 +6,7 @@
 //! The primary entry point is `render_scanlines_aa_solid()` which renders
 //! filled polygons with anti-aliased edges in a single solid color.
 
-use crate::color::Rgba8;
-use crate::pixfmt_rgba::{PixelFormat, PixfmtRgba32};
+use crate::pixfmt_rgba::PixelFormat;
 use crate::rasterizer_scanline_aa::{RasterizerScanlineAa, Scanline};
 use crate::renderer_base::RendererBase;
 use crate::scanline_u::ScanlineU8;
@@ -26,11 +25,11 @@ use crate::span_allocator::SpanAllocator;
 ///
 /// Works with `ScanlineU8` (unpacked per-pixel coverage). Each span has
 /// positive `len` and references into the covers array.
-pub fn render_scanlines_aa_solid(
+pub fn render_scanlines_aa_solid<PF: PixelFormat>(
     ras: &mut RasterizerScanlineAa,
     sl: &mut ScanlineU8,
-    ren: &mut RendererBase<PixfmtRgba32<'_>>,
-    color: &Rgba8,
+    ren: &mut RendererBase<PF>,
+    color: &PF::ColorType,
 ) {
     if !ras.rewind_scanlines() {
         return;
@@ -46,10 +45,10 @@ pub fn render_scanlines_aa_solid(
 ///
 /// Port of C++ `render_scanline_aa_solid()` specialized for ScanlineU8
 /// where all spans have positive len (per-pixel covers).
-fn render_scanline_aa_solid_u8(
+fn render_scanline_aa_solid_u8<PF: PixelFormat>(
     sl: &ScanlineU8,
-    ren: &mut RendererBase<PixfmtRgba32<'_>>,
-    color: &Rgba8,
+    ren: &mut RendererBase<PF>,
+    color: &PF::ColorType,
 ) {
     let y = sl.y();
     let spans = sl.begin();
@@ -80,20 +79,23 @@ fn render_scanline_aa_solid_u8(
 ///
 /// Port of C++ `renderer_scanline_aa_solid`. Wraps a `RendererBase` and
 /// a stored color for convenience.
-pub struct RendererScanlineAaSolid<'a, 'b> {
-    ren: &'a mut RendererBase<PixfmtRgba32<'b>>,
-    color: Rgba8,
+pub struct RendererScanlineAaSolid<'a, PF: PixelFormat> {
+    ren: &'a mut RendererBase<PF>,
+    color: PF::ColorType,
 }
 
-impl<'a, 'b> RendererScanlineAaSolid<'a, 'b> {
-    pub fn new(ren: &'a mut RendererBase<PixfmtRgba32<'b>>) -> Self {
+impl<'a, PF: PixelFormat> RendererScanlineAaSolid<'a, PF>
+where
+    PF::ColorType: Default,
+{
+    pub fn new(ren: &'a mut RendererBase<PF>) -> Self {
         Self {
             ren,
-            color: Rgba8::new(0, 0, 0, 255),
+            color: PF::ColorType::default(),
         }
     }
 
-    pub fn color(&mut self, c: Rgba8) {
+    pub fn color(&mut self, c: PF::ColorType) {
         self.color = c;
     }
 
@@ -204,9 +206,10 @@ fn render_scanline_aa<PF, SG>(
 mod tests {
     use super::*;
     use crate::basics::POLY_SUBPIXEL_SCALE;
+    use crate::color::Rgba8;
     use crate::ellipse::Ellipse;
     use crate::path_storage::PathStorage;
-    use crate::pixfmt_rgba::PixelFormat;
+    use crate::pixfmt_rgba::{PixelFormat, PixfmtRgba32};
     use crate::rendering_buffer::RowAccessor;
 
     const BPP: usize = 4;

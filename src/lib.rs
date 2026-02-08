@@ -59,6 +59,8 @@ pub mod scanline_p;
 pub mod scanline_u;
 
 // Phase 3C: Pixel Formats & Renderers
+pub mod pixfmt_gray;
+pub mod pixfmt_rgb;
 pub mod pixfmt_rgba;
 pub mod renderer_base;
 pub mod renderer_scanline;
@@ -105,3 +107,41 @@ pub mod trans_viewport;
 
 // Phase 8: Controls (interactive UI widgets rendered via AGG pipeline)
 pub mod ctrl;
+
+// Phase 9: Quick Transforms & Segmentator
+pub mod conv_adaptor_vpgen;
+pub mod conv_segmentator;
+pub mod span_interpolator_adaptor;
+pub mod trans_polar;
+pub mod trans_single_path;
+pub mod trans_warp_magnifier;
+pub mod vpgen_segmentator;
+
+// Phase 10: Patterns & Perspective Interpolator
+pub mod pattern_filters_rgba;
+pub mod span_interpolator_persp;
+pub mod span_pattern_rgba;
+
+// Phase 11: Blur & Multi-Clip
+pub mod blur;
+pub mod pixfmt_transposer;
+pub mod renderer_mclip;
+
+// Phase 12: Scanline Boolean Algebra
+pub mod scanline_boolean_algebra;
+pub mod scanline_storage_aa;
+pub mod scanline_storage_bin;
+
+// Phase 13: Outline AA Rasterizer
+pub mod line_aa_basics;
+pub mod rasterizer_outline_aa;
+pub mod renderer_outline_aa;
+
+// Phase 14: Compositing & Compound Rasterizer
+pub mod comp_op;
+pub mod rasterizer_compound_aa;
+
+// Phase 15: Raster Fonts
+pub mod embedded_raster_fonts;
+pub mod glyph_raster_bin;
+pub mod renderer_raster_text;

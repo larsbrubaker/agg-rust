@@ -753,6 +753,592 @@ impl VertexSource for RboxCtrl {
 }
 
 // ============================================================================
+// GammaCtrl — interactive gamma spline control
+// ============================================================================
+
+/// Interactive gamma correction curve control.
+///
+/// Renders 7 paths: background, border, gamma curve, grid/crosshairs,
+/// inactive point, active point, and text display.
+///
+/// Port of C++ `gamma_ctrl_impl` + `gamma_ctrl<ColorT>`.
+pub struct GammaCtrl {
+    // Widget bounds
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    // Gamma spline
+    gamma_spline: crate::gamma::GammaSpline,
+    // Visual parameters
+    border_width: f64,
+    border_extra: f64,
+    curve_width: f64,
+    grid_width: f64,
+    text_thickness: f64,
+    point_size: f64,
+    text_height: f64,
+    text_width: f64,
+    // Chart area
+    xc1: f64,
+    yc1: f64,
+    xc2: f64,
+    yc2: f64,
+    // Spline drawing area
+    xs1: f64,
+    ys1: f64,
+    xs2: f64,
+    ys2: f64,
+    // Text area
+    xt1: f64,
+    yt1: f64,
+    #[allow(dead_code)]
+    xt2: f64,
+    #[allow(dead_code)]
+    yt2: f64,
+    // Control point positions
+    xp1: f64,
+    yp1: f64,
+    xp2: f64,
+    yp2: f64,
+    // Interaction state
+    p1_active: bool,
+    mouse_point: u32,
+    pdx: f64,
+    pdy: f64,
+    // Colors (7 paths)
+    colors: [Rgba8; 7],
+    // Rendering state
+    vertices: Vec<(f64, f64, u32)>,
+    vertex_idx: usize,
+}
+
+impl GammaCtrl {
+    pub fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
+        let text_height = 9.0;
+        let border_width = 2.0;
+        let yc2 = y2 - text_height * 2.0;
+
+        let mut gc = Self {
+            x1,
+            y1,
+            x2,
+            y2,
+            gamma_spline: crate::gamma::GammaSpline::new(),
+            border_width,
+            border_extra: 0.0,
+            curve_width: 2.0,
+            grid_width: 0.2,
+            text_thickness: 1.5,
+            point_size: 5.0,
+            text_height,
+            text_width: 0.0,
+            xc1: x1,
+            yc1: y1,
+            xc2: x2,
+            yc2,
+            xs1: 0.0,
+            ys1: 0.0,
+            xs2: 0.0,
+            ys2: 0.0,
+            xt1: x1,
+            yt1: yc2,
+            xt2: x2,
+            yt2: y2,
+            xp1: 0.0,
+            yp1: 0.0,
+            xp2: 0.0,
+            yp2: 0.0,
+            p1_active: true,
+            mouse_point: 0,
+            pdx: 0.0,
+            pdy: 0.0,
+            colors: [
+                Rgba8::new(255, 255, 230, 255), // 0: background (1.0, 1.0, 0.9)
+                Rgba8::new(0, 0, 0, 255),       // 1: border (black)
+                Rgba8::new(0, 0, 0, 255),       // 2: curve (black)
+                Rgba8::new(51, 51, 0, 255),     // 3: grid (0.2, 0.2, 0.0)
+                Rgba8::new(0, 0, 0, 255),       // 4: inactive point (black)
+                Rgba8::new(255, 0, 0, 255),     // 5: active point (red)
+                Rgba8::new(0, 0, 0, 255),       // 6: text (black)
+            ],
+            vertices: Vec::new(),
+            vertex_idx: 0,
+        };
+        gc.calc_spline_box();
+        gc
+    }
+
+    fn calc_spline_box(&mut self) {
+        self.xs1 = self.xc1 + self.border_width;
+        self.ys1 = self.yc1 + self.border_width;
+        self.xs2 = self.xc2 - self.border_width;
+        self.ys2 = self.yc2 - self.border_width * 0.5;
+    }
+
+    fn calc_points(&mut self) {
+        let (kx1, ky1, kx2, ky2) = self.gamma_spline.get_values();
+        self.xp1 = self.xs1 + (self.xs2 - self.xs1) * kx1 * 0.25;
+        self.yp1 = self.ys1 + (self.ys2 - self.ys1) * ky1 * 0.25;
+        self.xp2 = self.xs2 - (self.xs2 - self.xs1) * kx2 * 0.25;
+        self.yp2 = self.ys2 - (self.ys2 - self.ys1) * ky2 * 0.25;
+    }
+
+    fn calc_values(&mut self) {
+        let kx1 = (self.xp1 - self.xs1) * 4.0 / (self.xs2 - self.xs1);
+        let ky1 = (self.yp1 - self.ys1) * 4.0 / (self.ys2 - self.ys1);
+        let kx2 = (self.xs2 - self.xp2) * 4.0 / (self.xs2 - self.xs1);
+        let ky2 = (self.ys2 - self.yp2) * 4.0 / (self.ys2 - self.ys1);
+        self.gamma_spline.set_values(kx1, ky1, kx2, ky2);
+    }
+
+    // --- Configuration ---
+
+    pub fn border_width(&mut self, t: f64, extra: f64) {
+        self.border_width = t;
+        self.border_extra = extra;
+        self.calc_spline_box();
+    }
+
+    pub fn curve_width(&mut self, t: f64) {
+        self.curve_width = t;
+    }
+
+    pub fn grid_width(&mut self, t: f64) {
+        self.grid_width = t;
+    }
+
+    pub fn text_thickness(&mut self, t: f64) {
+        self.text_thickness = t;
+    }
+
+    pub fn text_size(&mut self, h: f64, w: f64) {
+        self.text_width = w;
+        self.text_height = h;
+        self.yc2 = self.y2 - self.text_height * 2.0;
+        self.yt1 = self.y2 - self.text_height * 2.0;
+        self.calc_spline_box();
+    }
+
+    pub fn point_size(&mut self, s: f64) {
+        self.point_size = s;
+    }
+
+    // --- Spline value access ---
+
+    pub fn set_values(&mut self, kx1: f64, ky1: f64, kx2: f64, ky2: f64) {
+        self.gamma_spline.set_values(kx1, ky1, kx2, ky2);
+    }
+
+    pub fn get_values(&self) -> (f64, f64, f64, f64) {
+        self.gamma_spline.get_values()
+    }
+
+    pub fn gamma(&self) -> &[u8; 256] {
+        self.gamma_spline.gamma()
+    }
+
+    pub fn y(&self, x: f64) -> f64 {
+        self.gamma_spline.y(x)
+    }
+
+    pub fn get_gamma_spline(&self) -> &crate::gamma::GammaSpline {
+        &self.gamma_spline
+    }
+
+    pub fn change_active_point(&mut self) {
+        self.p1_active = !self.p1_active;
+    }
+
+    // --- Color setters ---
+
+    pub fn background_color(&mut self, c: Rgba8) {
+        self.colors[0] = c;
+    }
+    pub fn border_color(&mut self, c: Rgba8) {
+        self.colors[1] = c;
+    }
+    pub fn curve_color(&mut self, c: Rgba8) {
+        self.colors[2] = c;
+    }
+    pub fn grid_color(&mut self, c: Rgba8) {
+        self.colors[3] = c;
+    }
+    pub fn inactive_pnt_color(&mut self, c: Rgba8) {
+        self.colors[4] = c;
+    }
+    pub fn active_pnt_color(&mut self, c: Rgba8) {
+        self.colors[5] = c;
+    }
+    pub fn text_color(&mut self, c: Rgba8) {
+        self.colors[6] = c;
+    }
+
+    // --- Mouse interaction ---
+
+    pub fn in_rect(&self, x: f64, y: f64) -> bool {
+        x >= self.x1 && x <= self.x2 && y >= self.y1 && y <= self.y2
+    }
+
+    pub fn on_mouse_button_down(&mut self, x: f64, y: f64) -> bool {
+        self.calc_points();
+        let dist1 = ((x - self.xp1).powi(2) + (y - self.yp1).powi(2)).sqrt();
+        if dist1 <= self.point_size + 1.0 {
+            self.mouse_point = 1;
+            self.pdx = self.xp1 - x;
+            self.pdy = self.yp1 - y;
+            self.p1_active = true;
+            return true;
+        }
+        let dist2 = ((x - self.xp2).powi(2) + (y - self.yp2).powi(2)).sqrt();
+        if dist2 <= self.point_size + 1.0 {
+            self.mouse_point = 2;
+            self.pdx = self.xp2 - x;
+            self.pdy = self.yp2 - y;
+            self.p1_active = false;
+            return true;
+        }
+        false
+    }
+
+    pub fn on_mouse_button_up(&mut self, _x: f64, _y: f64) -> bool {
+        if self.mouse_point != 0 {
+            self.mouse_point = 0;
+            return true;
+        }
+        false
+    }
+
+    pub fn on_mouse_move(&mut self, x: f64, y: f64, button_flag: bool) -> bool {
+        if !button_flag {
+            return self.on_mouse_button_up(x, y);
+        }
+        if self.mouse_point == 1 {
+            self.xp1 = x + self.pdx;
+            self.yp1 = y + self.pdy;
+            self.calc_values();
+            return true;
+        }
+        if self.mouse_point == 2 {
+            self.xp2 = x + self.pdx;
+            self.yp2 = y + self.pdy;
+            self.calc_values();
+            return true;
+        }
+        false
+    }
+
+    pub fn on_arrow_keys(&mut self, left: bool, right: bool, down: bool, up: bool) -> bool {
+        let (mut kx1, mut ky1, mut kx2, mut ky2) = self.gamma_spline.get_values();
+        let mut ret = false;
+        if self.p1_active {
+            if left {
+                kx1 -= 0.005;
+                ret = true;
+            }
+            if right {
+                kx1 += 0.005;
+                ret = true;
+            }
+            if down {
+                ky1 -= 0.005;
+                ret = true;
+            }
+            if up {
+                ky1 += 0.005;
+                ret = true;
+            }
+        } else {
+            if left {
+                kx2 += 0.005;
+                ret = true;
+            }
+            if right {
+                kx2 -= 0.005;
+                ret = true;
+            }
+            if down {
+                ky2 += 0.005;
+                ret = true;
+            }
+            if up {
+                ky2 -= 0.005;
+                ret = true;
+            }
+        }
+        if ret {
+            self.gamma_spline.set_values(kx1, ky1, kx2, ky2);
+        }
+        ret
+    }
+
+    // --- Path generation helpers ---
+
+    /// Path 0: Background rectangle.
+    fn calc_background(&mut self) {
+        self.vertices.clear();
+        let be = self.border_extra;
+        self.vertices
+            .push((self.x1 - be, self.y1 - be, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y1 - be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y2 + be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 - be, self.y2 + be, PATH_CMD_LINE_TO));
+    }
+
+    /// Path 1: Border (3 contours: outer frame, inner hollow, separator line).
+    fn calc_border(&mut self) {
+        self.vertices.clear();
+        let bw = self.border_width;
+        // Outer rectangle
+        self.vertices
+            .push((self.x1, self.y1, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x2, self.y1, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2, self.y2, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1, self.y2, PATH_CMD_LINE_TO));
+        // Inner hollow
+        self.vertices
+            .push((self.x1 + bw, self.y1 + bw, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x1 + bw, self.y2 - bw, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 - bw, self.y2 - bw, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 - bw, self.y1 + bw, PATH_CMD_LINE_TO));
+        // Separator line between chart and text
+        self.vertices
+            .push((self.xc1 + bw, self.yc2 - bw * 0.5, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.xc2 - bw, self.yc2 - bw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.xc2 - bw, self.yc2 + bw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.xc1 + bw, self.yc2 + bw * 0.5, PATH_CMD_LINE_TO));
+    }
+
+    /// Path 2: Gamma curve (stroked spline).
+    fn calc_curve(&mut self) {
+        self.vertices.clear();
+        self.gamma_spline
+            .set_box(self.xs1, self.ys1, self.xs2, self.ys2);
+
+        let mut spline_copy = crate::gamma::GammaSpline::new();
+        // Re-use the same values
+        let (kx1, ky1, kx2, ky2) = self.gamma_spline.get_values();
+        spline_copy.set_values(kx1, ky1, kx2, ky2);
+        spline_copy.set_box(self.xs1, self.ys1, self.xs2, self.ys2);
+
+        // Generate spline vertices, then stroke
+        let mut path_verts = Vec::new();
+        spline_copy.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = spline_copy.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            path_verts.push((x, y, cmd));
+        }
+
+        // Build a custom vertex source from the captured vertices
+        let mut path = crate::path_storage::PathStorage::new();
+        for (i, &(x, y, cmd)) in path_verts.iter().enumerate() {
+            if i == 0 {
+                path.move_to(x, y);
+            } else {
+                path.line_to(x, y);
+            }
+            let _ = cmd;
+        }
+
+        let mut stroke = ConvStroke::new(&mut path);
+        stroke.set_width(self.curve_width);
+        stroke.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = stroke.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+
+    /// Path 3: Grid (center lines + crosshairs at control points).
+    fn calc_grid(&mut self) {
+        self.vertices.clear();
+        self.calc_points();
+
+        let gw = self.grid_width;
+        let (xs1, ys1, xs2, ys2) = (self.xs1, self.ys1, self.xs2, self.ys2);
+        let ymid = (ys1 + ys2) * 0.5;
+        let xmid = (xs1 + xs2) * 0.5;
+
+        // Horizontal center line
+        self.vertices.push((xs1, ymid - gw * 0.5, PATH_CMD_MOVE_TO));
+        self.vertices.push((xs2, ymid - gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices.push((xs2, ymid + gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices.push((xs1, ymid + gw * 0.5, PATH_CMD_LINE_TO));
+
+        // Vertical center line
+        self.vertices.push((xmid - gw * 0.5, ys1, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((xmid - gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xmid + gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xmid + gw * 0.5, ys1, PATH_CMD_LINE_TO));
+
+        // Crosshair at point 1
+        let (xp1, yp1) = (self.xp1, self.yp1);
+        self.vertices
+            .push((xs1, yp1 - gw * 0.5, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((xp1 - gw * 0.5, yp1 - gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xp1 - gw * 0.5, ys1, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xp1 + gw * 0.5, ys1, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xp1 + gw * 0.5, yp1 + gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xs1, yp1 + gw * 0.5, PATH_CMD_LINE_TO));
+
+        // Crosshair at point 2
+        let (xp2, yp2) = (self.xp2, self.yp2);
+        self.vertices
+            .push((xs2, yp2 + gw * 0.5, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((xp2 + gw * 0.5, yp2 + gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xp2 + gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xp2 - gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xp2 - gw * 0.5, yp2 - gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((xs2, yp2 - gw * 0.5, PATH_CMD_LINE_TO));
+    }
+
+    /// Path 4: Inactive control point (ellipse).
+    fn calc_inactive_point(&mut self) {
+        self.vertices.clear();
+        self.calc_points();
+        let (cx, cy) = if self.p1_active {
+            (self.xp2, self.yp2)
+        } else {
+            (self.xp1, self.yp1)
+        };
+        let mut ell = Ellipse::new(cx, cy, self.point_size, self.point_size, 32, false);
+        ell.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = ell.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+
+    /// Path 5: Active control point (ellipse).
+    fn calc_active_point(&mut self) {
+        self.vertices.clear();
+        self.calc_points();
+        let (cx, cy) = if self.p1_active {
+            (self.xp1, self.yp1)
+        } else {
+            (self.xp2, self.yp2)
+        };
+        let mut ell = Ellipse::new(cx, cy, self.point_size, self.point_size, 32, false);
+        ell.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = ell.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+
+    /// Path 6: Text display showing current kx1, ky1, kx2, ky2 values.
+    fn calc_text_display(&mut self) {
+        self.vertices.clear();
+        let (kx1, ky1, kx2, ky2) = self.gamma_spline.get_values();
+        let text = format!("{:.3} {:.3} {:.3} {:.3}", kx1, ky1, kx2, ky2);
+
+        let mut txt = GsvText::new();
+        txt.text(&text);
+        txt.size(self.text_height, self.text_width);
+        txt.start_point(
+            self.xt1 + self.border_width * 2.0,
+            (self.yt1 + self.y2) * 0.5 - self.text_height * 0.5,
+        );
+
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(self.text_thickness);
+        stroke.set_line_join(LineJoin::Round);
+        stroke.set_line_cap(LineCap::Round);
+
+        stroke.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = stroke.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+}
+
+impl Ctrl for GammaCtrl {
+    fn num_paths(&self) -> u32 {
+        7
+    }
+
+    fn color(&self, path_id: u32) -> Rgba8 {
+        self.colors[path_id.min(6) as usize]
+    }
+}
+
+impl VertexSource for GammaCtrl {
+    fn rewind(&mut self, path_id: u32) {
+        self.vertex_idx = 0;
+        match path_id {
+            0 => self.calc_background(),
+            1 => self.calc_border(),
+            2 => self.calc_curve(),
+            3 => self.calc_grid(),
+            4 => self.calc_inactive_point(),
+            5 => self.calc_active_point(),
+            6 => self.calc_text_display(),
+            _ => {
+                self.vertices.clear();
+            }
+        }
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        if self.vertex_idx < self.vertices.len() {
+            let (vx, vy, cmd) = self.vertices[self.vertex_idx];
+            *x = vx;
+            *y = vy;
+            self.vertex_idx += 1;
+            cmd
+        } else {
+            PATH_CMD_STOP
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -899,5 +1485,168 @@ mod tests {
         let (mut x, mut y) = (0.0, 0.0);
         let cmd = r.vertex(&mut x, &mut y);
         assert_eq!(cmd, PATH_CMD_STOP);
+    }
+
+    // ====================================================================
+    // GammaCtrl tests
+    // ====================================================================
+
+    #[test]
+    fn test_gamma_ctrl_basic() {
+        let gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        assert_eq!(gc.num_paths(), 7);
+    }
+
+    #[test]
+    fn test_gamma_ctrl_default_values() {
+        let gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        let (kx1, ky1, kx2, ky2) = gc.get_values();
+        assert!((kx1 - 1.0).abs() < 0.01);
+        assert!((ky1 - 1.0).abs() < 0.01);
+        assert!((kx2 - 1.0).abs() < 0.01);
+        assert!((ky2 - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_gamma_ctrl_set_values() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        gc.set_values(0.5, 1.5, 0.8, 1.2);
+        let (kx1, ky1, kx2, ky2) = gc.get_values();
+        assert!((kx1 - 0.5).abs() < 0.001);
+        assert!((ky1 - 1.5).abs() < 0.001);
+        assert!((kx2 - 0.8).abs() < 0.001);
+        assert!((ky2 - 1.2).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_gamma_ctrl_gamma_table() {
+        let gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        let gamma = gc.gamma();
+        assert_eq!(gamma[0], 0);
+        assert_eq!(gamma[255], 255);
+    }
+
+    #[test]
+    fn test_gamma_ctrl_background_path() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        gc.rewind(0);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert_eq!(count, 4); // Rectangle
+    }
+
+    #[test]
+    fn test_gamma_ctrl_border_path() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        gc.rewind(1);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert_eq!(count, 12); // 3 contours * 4 vertices
+    }
+
+    #[test]
+    fn test_gamma_ctrl_curve_path() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        gc.rewind(2);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert!(count > 10, "Curve path should have many vertices, got {count}");
+    }
+
+    #[test]
+    fn test_gamma_ctrl_grid_path() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        gc.rewind(3);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert_eq!(count, 20); // 4 contours: 4+4+6+6
+    }
+
+    #[test]
+    fn test_gamma_ctrl_points_path() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        // Path 4: inactive point (ellipse with 32 segments)
+        gc.rewind(4);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert!(count >= 32);
+
+        // Path 5: active point
+        gc.rewind(5);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert!(count >= 32);
+    }
+
+    #[test]
+    fn test_gamma_ctrl_text_path() {
+        let mut gc = GammaCtrl::new(10.0, 10.0, 200.0, 200.0);
+        gc.rewind(6);
+        let mut count = 0;
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = gc.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            count += 1;
+        }
+        assert!(count > 0, "Text path should have vertices");
+    }
+
+    #[test]
+    fn test_gamma_ctrl_mouse_interaction() {
+        let mut gc = GammaCtrl::new(0.0, 0.0, 200.0, 200.0);
+        // in_rect
+        assert!(gc.in_rect(100.0, 100.0));
+        assert!(!gc.in_rect(300.0, 300.0));
+
+        // Arrow key adjustment
+        let changed = gc.on_arrow_keys(false, true, false, false);
+        assert!(changed);
+        let (kx1, _, _, _) = gc.get_values();
+        assert!((kx1 - 1.005).abs() < 0.001);
     }
 }
