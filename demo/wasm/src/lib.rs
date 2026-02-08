@@ -36,6 +36,9 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
         "image_filters2" => render::image_filters2(width, height, params),
         "conv_dash_marker" => render::conv_dash_marker_demo(width, height, params),
         "aa_test" => render::aa_test(width, height, params),
+        "bspline" => render::bspline_demo(width, height, params),
+        "image_perspective" => render::image_perspective_demo(width, height, params),
+        "alpha_mask" => render::alpha_mask_demo(width, height, params),
         _ => render::fallback(width, height),
     }
 }
@@ -49,5 +52,5 @@ pub fn version() -> String {
 /// Get list of available demo names.
 #[wasm_bindgen]
 pub fn demo_names() -> String {
-    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test".to_string()
+    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask".to_string()
 }

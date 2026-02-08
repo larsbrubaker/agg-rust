@@ -6,6 +6,8 @@
 use crate::basics::iround;
 use crate::dda_line::Dda2LineInterpolator;
 use crate::trans_affine::TransAffine;
+use crate::trans_bilinear::TransBilinear;
+use crate::trans_perspective::TransPerspective;
 
 /// Subpixel precision constants for span interpolation.
 pub const SUBPIXEL_SHIFT: u32 = 8;
@@ -24,6 +26,32 @@ impl Transformer for TransAffine {
     fn transform(&self, x: &mut f64, y: &mut f64) {
         self.transform(x, y);
     }
+}
+
+impl Transformer for TransBilinear {
+    fn transform(&self, x: &mut f64, y: &mut f64) {
+        self.transform(x, y);
+    }
+}
+
+impl Transformer for TransPerspective {
+    fn transform(&self, x: &mut f64, y: &mut f64) {
+        self.transform(x, y);
+    }
+}
+
+// ============================================================================
+// SpanInterpolator trait
+// ============================================================================
+
+/// Trait for span interpolators used by image filter span generators.
+///
+/// All span interpolators must provide `begin`, `next`, and `coordinates`
+/// methods. This mirrors the C++ template interface used by span generators.
+pub trait SpanInterpolator {
+    fn begin(&mut self, x: f64, y: f64, len: u32);
+    fn next(&mut self);
+    fn coordinates(&self, x: &mut i32, y: &mut i32);
 }
 
 // ============================================================================
@@ -111,6 +139,18 @@ impl<T: Transformer> SpanInterpolatorLinear<T> {
     pub fn coordinates(&self, x: &mut i32, y: &mut i32) {
         *x = self.li_x.y();
         *y = self.li_y.y();
+    }
+}
+
+impl<T: Transformer> SpanInterpolator for SpanInterpolatorLinear<T> {
+    fn begin(&mut self, x: f64, y: f64, len: u32) {
+        self.begin(x, y, len);
+    }
+    fn next(&mut self) {
+        self.next();
+    }
+    fn coordinates(&self, x: &mut i32, y: &mut i32) {
+        self.coordinates(x, y);
     }
 }
 
@@ -241,6 +281,18 @@ impl<T: Transformer> SpanInterpolatorLinearSubdiv<T> {
     pub fn coordinates(&self, x: &mut i32, y: &mut i32) {
         *x = self.li_x.y();
         *y = self.li_y.y();
+    }
+}
+
+impl<T: Transformer> SpanInterpolator for SpanInterpolatorLinearSubdiv<T> {
+    fn begin(&mut self, x: f64, y: f64, len: u32) {
+        self.begin(x, y, len);
+    }
+    fn next(&mut self) {
+        self.next();
+    }
+    fn coordinates(&self, x: &mut i32, y: &mut i32) {
+        self.coordinates(x, y);
     }
 }
 

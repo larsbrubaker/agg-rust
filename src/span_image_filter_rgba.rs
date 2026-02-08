@@ -13,7 +13,7 @@ use crate::image_filters::{
 use crate::renderer_scanline::SpanGenerator;
 use crate::rendering_buffer::RowAccessor;
 use crate::span_image_filter::{SpanImageFilterBase, SpanImageResampleAffine};
-use crate::span_interpolator_linear::SpanInterpolatorLinear;
+use crate::span_interpolator_linear::{SpanInterpolator, SpanInterpolatorLinear};
 use crate::trans_affine::TransAffine;
 
 /// Base mask for 8-bit color (255).
@@ -50,7 +50,7 @@ impl<'a, S: ImageSource, I> SpanImageFilterRgbaNn<'a, S, I> {
     }
 }
 
-impl<S: ImageSource> SpanGenerator for SpanImageFilterRgbaNn<'_, S, SpanInterpolatorLinear> {
+impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaNn<'_, S, I> {
     type Color = Rgba8;
 
     fn prepare(&mut self) {}
@@ -115,7 +115,7 @@ impl<'a, S: ImageSource, I> SpanImageFilterRgbaBilinear<'a, S, I> {
     }
 }
 
-impl<S: ImageSource> SpanGenerator for SpanImageFilterRgbaBilinear<'_, S, SpanInterpolatorLinear> {
+impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaBilinear<'_, S, I> {
     type Color = Rgba8;
 
     fn prepare(&mut self) {}
@@ -235,7 +235,7 @@ impl<'a, I> SpanImageFilterRgbaBilinearClip<'a, I> {
     }
 }
 
-impl SpanGenerator for SpanImageFilterRgbaBilinearClip<'_, SpanInterpolatorLinear> {
+impl<I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaBilinearClip<'_, I> {
     type Color = Rgba8;
 
     fn prepare(&mut self) {}
@@ -428,7 +428,7 @@ impl<'a, S: ImageSource, I> SpanImageFilterRgba2x2<'a, S, I> {
     }
 }
 
-impl<S: ImageSource> SpanGenerator for SpanImageFilterRgba2x2<'_, S, SpanInterpolatorLinear> {
+impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgba2x2<'_, S, I> {
     type Color = Rgba8;
 
     fn prepare(&mut self) {}
@@ -563,7 +563,7 @@ impl<'a, S: ImageSource, I> SpanImageFilterRgbaGen<'a, S, I> {
     }
 }
 
-impl<S: ImageSource> SpanGenerator for SpanImageFilterRgbaGen<'_, S, SpanInterpolatorLinear> {
+impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaGen<'_, S, I> {
     type Color = Rgba8;
 
     fn prepare(&mut self) {}

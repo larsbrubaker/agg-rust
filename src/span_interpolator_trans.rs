@@ -5,7 +5,7 @@
 //! only endpoints and interpolates, this calls `transform()` for each pixel.
 
 use crate::basics::iround;
-use crate::span_interpolator_linear::Transformer;
+use crate::span_interpolator_linear::{SpanInterpolator, Transformer};
 
 /// Subpixel precision constants (matching span_interpolator_linear).
 const SUBPIXEL_SHIFT: u32 = 8;
@@ -82,6 +82,18 @@ impl<T: Transformer> SpanInterpolatorTrans<T> {
     pub fn coordinates(&self, x: &mut i32, y: &mut i32) {
         *x = self.ix;
         *y = self.iy;
+    }
+}
+
+impl<T: Transformer> SpanInterpolator for SpanInterpolatorTrans<T> {
+    fn begin(&mut self, x: f64, y: f64, len: u32) {
+        self.begin(x, y, len);
+    }
+    fn next(&mut self) {
+        self.next();
+    }
+    fn coordinates(&self, x: &mut i32, y: &mut i32) {
+        self.coordinates(x, y);
     }
 }
 

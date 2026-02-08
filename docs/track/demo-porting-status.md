@@ -5,13 +5,15 @@ Cross-reference of all 75 C++ demos from `cpp-references/agg-web/demo/` against 
 Reference screenshots: `cpp-references/agg-web/demo/<name>/<name>.gif|png|jpg`
 Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
-## Currently Implemented (26 demos)
+## Currently Implemented (29 demos)
 
 | Demo | C++ Original | Window | Status |
 |------|-------------|--------|--------|
 | aa_demo | aa_demo.cpp | 600x400 | Done - fixed colors, vertices, threshold |
 | aa_test | aa_test.cpp | 480x350 | Done - radial dashes, ellipses, gradient lines, Gouraud triangles |
+| alpha_mask | alpha_mask.cpp | 512x400 | Done - lion with elliptical alpha mask (manual compositing) |
 | bezier_div | bezier_div.cpp | 600x600 | Done |
+| bspline | bspline.cpp | 600x600 | Done - 6 draggable control points, B-spline curve |
 | circles | circles.cpp | 400x400 | Done |
 | conv_contour | conv_contour.cpp | 600x600 | Done |
 | conv_dash | conv_dash_marker.cpp | 600x600 | Done |
@@ -27,6 +29,7 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | idea | idea.cpp | 250x280 | Done - fixed polygon data, transform chain |
 | image_filters | image_filters.cpp | 430x340 | Done - iterative rotation, 17 filters |
 | image_filters2 | image_filters2.cpp | 500x340 | Done - 4x4 test image, 17 filters, kernel graph |
+| image_perspective | image_perspective.cpp | 600x600 | Done - affine/bilinear/perspective image transform |
 | image_fltr_graph | image_fltr_graph.cpp | 780x300 | Done - 16 checkboxes, 3 curve types |
 | image1 | image1.cpp | 600x500 | Done |
 | line_thickness | (custom) | 600x400 | Done |
@@ -36,16 +39,13 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | rounded_rect | rounded_rect.cpp | 600x400 | Done |
 | shapes | (custom) | 600x400 | Done |
 
-## Can Port Now (8 demos - all required Rust modules exist)
+## Can Port Now (5 demos - all required Rust modules exist)
 
 | Demo | C++ File | Window | Key Modules Needed | Priority |
 |------|----------|--------|-------------------|----------|
 | alpha_gradient | alpha_gradient.cpp | 512x400 | span_gradient, alpha | HIGH |
-| alpha_mask | alpha_mask.cpp | 640x480 | alpha_mask_u8 | MED |
 | alpha_mask3 | alpha_mask3.cpp | 640x480 | alpha_mask_u8 | MED |
-| bspline | bspline.cpp | 600x600 | bspline | MED |
 | image_alpha | image_alpha.cpp | ~430x340 | span_image_filter_rgba | HIGH |
-| image_perspective | image_perspective.cpp | ~430x340 | trans_perspective | HIGH |
 | image_transforms | image_transforms.cpp | ~430x340 | span_image_filter_rgba | HIGH |
 | mol_view | mol_view.cpp | 400x400 | ellipse, gradient | MED |
 
@@ -123,8 +123,8 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
 | Category | Count |
 |----------|-------|
-| Implemented | 22 |
-| Can port now | 12 |
+| Implemented | 29 |
+| Can port now | 5 |
 | Deferred (missing modules) | 30 |
 | Not applicable | 11 |
 | **Total C++ demos** | **75** |

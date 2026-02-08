@@ -31,6 +31,9 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'image_filters2': () => import('./demos/image_filters2.ts'),
   'conv_dash_marker': () => import('./demos/conv_dash_marker.ts'),
   'aa_test': () => import('./demos/aa_test.ts'),
+  'bspline': () => import('./demos/bspline.ts'),
+  'image_perspective': () => import('./demos/image_perspective.ts'),
+  'alpha_mask': () => import('./demos/alpha_mask.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -212,6 +215,21 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">&#9646;</span>
           <h3>AA Test</h3>
           <p>Anti-aliasing quality test — radial lines, gradient lines, Gouraud triangles.</p>
+        </a>
+        <a href="#/bspline" class="feature-card">
+          <span class="card-icon">&#8765;</span>
+          <h3>B-Spline</h3>
+          <p>B-spline curve through 6 draggable control points with adjustable density.</p>
+        </a>
+        <a href="#/image_perspective" class="feature-card">
+          <span class="card-icon">&#127912;</span>
+          <h3>Image Perspective</h3>
+          <p>Image transformed through affine/bilinear/perspective quad corners.</p>
+        </a>
+        <a href="#/alpha_mask" class="feature-card">
+          <span class="card-icon">&#9673;</span>
+          <h3>Alpha Mask</h3>
+          <p>Lion with elliptical alpha mask — rotate, scale, and skew.</p>
         </a>
       </div>
       <div class="about-section">

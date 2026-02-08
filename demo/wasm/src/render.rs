@@ -41,10 +41,13 @@ use agg_rust::span_gradient::{
     SpanGradient,
 };
 use agg_rust::span_image_filter_rgba::{
-    SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn, SpanImageFilterRgbaGen,
+    SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn, SpanImageFilterRgba2x2,
+    SpanImageFilterRgbaGen,
 };
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
+use agg_rust::span_interpolator_trans::SpanInterpolatorTrans;
 use agg_rust::trans_affine::TransAffine;
+use agg_rust::bspline::Bspline;
 use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
 
@@ -3681,6 +3684,348 @@ pub fn aa_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     m_gamma.range(0.1, 3.0);
     m_gamma.set_value(gamma_val);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_gamma);
+
+    buf
+}
+
+/// BSpline — 6 draggable control points, B-spline curve through them.
+/// Matches C++ bspline.cpp.
+pub fn bspline_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let w = width as f64;
+    let h = height as f64;
+
+    // 6 control points
+    let px0 = params.get(0).copied().unwrap_or(100.0);
+    let py0 = params.get(1).copied().unwrap_or(h - 100.0);
+    let px1 = params.get(2).copied().unwrap_or(w - 100.0);
+    let py1 = params.get(3).copied().unwrap_or(h - 100.0);
+    let px2 = params.get(4).copied().unwrap_or(w - 100.0);
+    let py2 = params.get(5).copied().unwrap_or(100.0);
+    let px3 = params.get(6).copied().unwrap_or(100.0);
+    let py3 = params.get(7).copied().unwrap_or(100.0);
+    let px4 = params.get(8).copied().unwrap_or(w / 2.0);
+    let py4 = params.get(9).copied().unwrap_or(h / 2.0);
+    let px5 = params.get(10).copied().unwrap_or(w / 2.0);
+    let py5 = params.get(11).copied().unwrap_or(h / 3.0);
+    let num_points = params.get(12).copied().unwrap_or(20.0);
+    let close = params.get(13).copied().unwrap_or(0.0) > 0.5;
+
+    let pts_x = [px0, px1, px2, px3, px4, px5];
+    let pts_y = [py0, py1, py2, py3, py4, py5];
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    let n = 6usize;
+
+    // Create separate x and y bsplines parameterized by t = [0..n-1] or [0..n]
+    let t_vals: Vec<f64> = (0..n).map(|i| i as f64).collect();
+    let mut sx = Bspline::new();
+    let mut sy = Bspline::new();
+
+    if close {
+        // For closed curve, duplicate first point at end
+        let mut tx = t_vals.clone();
+        tx.push(n as f64);
+        let mut vx = pts_x.to_vec();
+        vx.push(pts_x[0]);
+        let mut vy = pts_y.to_vec();
+        vy.push(pts_y[0]);
+        sx.init(&tx, &vx);
+        sy.init(&tx, &vy);
+    } else {
+        sx.init(&t_vals, &pts_x);
+        sy.init(&t_vals, &pts_y);
+    }
+
+    // Build path by sampling the spline
+    let step = 1.0 / num_points.max(1.0);
+    let t_max = if close { n as f64 } else { (n - 1) as f64 };
+    let mut path = PathStorage::new();
+    let mut first = true;
+    let mut t = 0.0;
+    while t <= t_max + step * 0.5 {
+        let x = sx.get(t);
+        let y = sy.get(t);
+        if first {
+            path.move_to(x, y);
+            first = false;
+        } else {
+            path.line_to(x, y);
+        }
+        t += step;
+    }
+
+    // Stroke the bspline curve
+    let mut stroke = ConvStroke::new(&mut path);
+    stroke.set_width(2.0);
+    ras.reset();
+    ras.add_path(&mut stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    // Draw control polygon (lines connecting points)
+    let mut poly_path = PathStorage::new();
+    poly_path.move_to(pts_x[0], pts_y[0]);
+    for i in 1..n {
+        poly_path.line_to(pts_x[i], pts_y[i]);
+    }
+    if close {
+        poly_path.close_polygon(0);
+    }
+    let mut poly_stroke = ConvStroke::new(&mut poly_path);
+    poly_stroke.set_width(1.0);
+    ras.reset();
+    ras.add_path(&mut poly_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+        &Rgba8::new(0, 76, 127, 153)); // rgba(0, 0.3, 0.5, 0.6)
+
+    // Draw control points as circles
+    for i in 0..n {
+        let mut ell = Ellipse::new(pts_x[i], pts_y[i], 5.0, 5.0, 20, false);
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+            &Rgba8::new(0, 76, 127, 153));
+    }
+
+    // Render controls
+    let mut m_num = SliderCtrl::new(5.0, 5.0, 340.0, 12.0);
+    m_num.label("Number of intermediate Points = %.3f");
+    m_num.range(1.0, 40.0);
+    m_num.set_value(num_points);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_num);
+
+    let mut m_close = CboxCtrl::new(350.0, 5.0, "Close");
+    m_close.set_status(close);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_close);
+
+    buf
+}
+
+/// Image perspective — spheres image through quad transform.
+/// Matches C++ image_perspective.cpp.
+pub fn image_perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let w = width as f64;
+    let h = height as f64;
+
+    let q0x = params.get(0).copied().unwrap_or(100.0);
+    let q0y = params.get(1).copied().unwrap_or(100.0);
+    let q1x = params.get(2).copied().unwrap_or(w - 100.0);
+    let q1y = params.get(3).copied().unwrap_or(100.0);
+    let q2x = params.get(4).copied().unwrap_or(w - 100.0);
+    let q2y = params.get(5).copied().unwrap_or(h - 100.0);
+    let q3x = params.get(6).copied().unwrap_or(100.0);
+    let q3y = params.get(7).copied().unwrap_or(h - 100.0);
+    let trans_type = params.get(8).copied().unwrap_or(2.0) as i32; // 0=affine, 1=bilinear, 2=perspective
+
+    let quad = [q0x, q0y, q1x, q1y, q2x, q2y, q3x, q3y];
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut sa = SpanAllocator::new();
+
+    // Load source image
+    let (img_w, img_h, mut img_data) = load_spheres_image();
+    let mut img_ra = RowAccessor::new();
+    let img_stride = (img_w * 4) as i32;
+    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+
+    let g_x1 = 0.0_f64;
+    let g_y1 = 0.0_f64;
+    let g_x2 = img_w as f64;
+    let g_y2 = img_h as f64;
+
+    // For affine mode, force parallelogram
+    let mut quad_adj = quad;
+    if trans_type == 0 {
+        quad_adj[6] = quad_adj[0] + (quad_adj[4] - quad_adj[2]);
+        quad_adj[7] = quad_adj[1] + (quad_adj[5] - quad_adj[3]);
+    }
+
+    // Rasterize quad area
+    ras.reset();
+    ras.move_to_d(quad_adj[0], quad_adj[1]);
+    ras.line_to_d(quad_adj[2], quad_adj[3]);
+    ras.line_to_d(quad_adj[4], quad_adj[5]);
+    ras.line_to_d(quad_adj[6], quad_adj[7]);
+
+    let mut source = ImageAccessorClone::<4>::new(&img_ra);
+
+    // Create filter for bilinear/perspective modes
+    let mut filter = ImageFilterLut::new();
+    filter.calculate(&ImageFilterBilinear, false);
+
+    match trans_type {
+        0 => {
+            // Affine parallelogram — use TransAffine
+            let mut mtx = TransAffine::new();
+            // We need quad→quad but just use the parl_to_parl approach
+            let src_parl = [g_x1, g_y1, g_x2, g_y1, g_x2, g_y2];
+            let dst_parl = [quad_adj[0], quad_adj[1], quad_adj[2], quad_adj[3], quad_adj[4], quad_adj[5]];
+            mtx.parl_to_parl(&dst_parl, &src_parl);
+            let mut interp = SpanInterpolatorLinear::new(mtx);
+            let mut sg = SpanImageFilterRgbaNn::new(&mut source, &mut interp);
+            render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+        }
+        1 => {
+            // Bilinear
+            let tb = TransBilinear::new_quad_to_rect(&quad_adj, g_x1, g_y1, g_x2, g_y2);
+            if tb.is_valid() {
+                let mut interp = SpanInterpolatorTrans::new(tb);
+                let mut sg = SpanImageFilterRgba2x2::new(&mut source, &mut interp, &filter);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+            }
+        }
+        _ => {
+            // Perspective
+            let mut tp = TransPerspective::new();
+            tp.quad_to_rect(&quad_adj, g_x1, g_y1, g_x2, g_y2);
+            if tp.is_valid() {
+                let mut interp = SpanInterpolatorTrans::new(tp);
+                let mut sg = SpanImageFilterRgba2x2::new(&mut source, &mut interp, &filter);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+            }
+        }
+    }
+
+    // Draw quad overlay
+    let mut quad_path = PathStorage::new();
+    quad_path.move_to(quad_adj[0], quad_adj[1]);
+    quad_path.line_to(quad_adj[2], quad_adj[3]);
+    quad_path.line_to(quad_adj[4], quad_adj[5]);
+    quad_path.line_to(quad_adj[6], quad_adj[7]);
+    quad_path.close_polygon(0);
+    ras.reset();
+    ras.add_path(&mut quad_path, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+        &Rgba8::new(0, 76, 127, 153)); // rgba(0, 0.3, 0.5, 0.6)
+
+    // Render controls
+    let mut m_trans = RboxCtrl::new(420.0, 5.0, 590.0, 65.0);
+    m_trans.add_item("Affine Parallelogram");
+    m_trans.add_item("Bilinear");
+    m_trans.add_item("Perspective");
+    m_trans.set_cur_item(trans_type);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_trans);
+
+    buf
+}
+
+/// Alpha mask — lion with elliptical alpha mask.
+/// Simplified from C++ alpha_mask.cpp (manual compositing instead of ScanlineU8Am).
+pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let angle_rad = params.get(0).copied().unwrap_or(0.0);
+    let scale = params.get(1).copied().unwrap_or(1.0).max(0.01);
+    let skew_x = params.get(2).copied().unwrap_or(0.0);
+    let skew_y = params.get(3).copied().unwrap_or(0.0);
+
+    let w = width as f64;
+    let h = height as f64;
+
+    // Generate alpha mask: 10 random ellipses in grayscale
+    let mask_size = (width * height) as usize;
+    let mut mask = vec![0u8; mask_size];
+    {
+        // Simple deterministic "random" based on seed
+        let mut seed = 1234u32;
+        let rng = |s: &mut u32| -> u32 {
+            *s = s.wrapping_mul(1103515245).wrapping_add(12345);
+            (*s >> 16) & 0x7FFF
+        };
+
+        // Render 10 random ellipses into the mask
+        // Each pixel in mask stores max alpha from any overlapping ellipse
+        for _e in 0..10 {
+            let cx = (rng(&mut seed) as f64 / 32767.0) * w;
+            let cy = (rng(&mut seed) as f64 / 32767.0) * h;
+            let rx = (rng(&mut seed) as f64 / 32767.0) * 100.0 + 20.0;
+            let ry = (rng(&mut seed) as f64 / 32767.0) * 100.0 + 20.0;
+            let alpha = (rng(&mut seed) & 0xFF) as u8;
+
+            // Rasterize ellipse to mask using simple coverage
+            let x_min = ((cx - rx) as i32).max(0);
+            let x_max = ((cx + rx) as i32 + 1).min(width as i32 - 1);
+            let y_min = ((cy - ry) as i32).max(0);
+            let y_max = ((cy + ry) as i32 + 1).min(height as i32 - 1);
+
+            for y in y_min..=y_max {
+                for x in x_min..=x_max {
+                    let dx = (x as f64 - cx) / rx;
+                    let dy = (y as f64 - cy) / ry;
+                    let d2 = dx * dx + dy * dy;
+                    if d2 <= 1.0 {
+                        let idx = (y as u32 * width + x as u32) as usize;
+                        let val = mask[idx] as u32 + alpha as u32;
+                        mask[idx] = val.min(255) as u8;
+                    }
+                }
+            }
+        }
+    }
+
+    // Render lion to a temp buffer
+    let (mut path, colors, path_idx) = crate::lion_data::parse_lion();
+    let npaths = colors.len();
+
+    let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
+    let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
+        agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
+    );
+    let base_dx = (bbox.x1 + bbox.x2) / 2.0;
+    let base_dy = (bbox.y1 + bbox.y2) / 2.0;
+
+    let mut mtx = TransAffine::new();
+    mtx.multiply(&TransAffine::new_translation(-base_dx, -base_dy));
+    mtx.multiply(&TransAffine::new_scaling(scale, scale));
+    mtx.multiply(&TransAffine::new_rotation(angle_rad + std::f64::consts::PI));
+    mtx.multiply(&TransAffine::new_skewing(skew_x / 1000.0, skew_y / 1000.0));
+    mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0));
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    // Render lion with transform
+    let mut transformed = ConvTransform::new(&mut path, mtx);
+    for i in 0..npaths {
+        let start = path_idx[i] as u32;
+        ras.reset();
+        ras.add_path(&mut transformed, start);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &colors[i]);
+    }
+
+    // Apply alpha mask: multiply each pixel's alpha by mask value
+    for y in 0..height {
+        for x in 0..width {
+            let mask_val = mask[(y * width + x) as usize] as u32;
+            let idx = ((y * width + x) * 4) as usize;
+            // Multiply RGB by mask/255 (pre-multiply alpha effect)
+            buf[idx] = ((buf[idx] as u32 * mask_val) / 255) as u8;
+            buf[idx + 1] = ((buf[idx + 1] as u32 * mask_val) / 255) as u8;
+            buf[idx + 2] = ((buf[idx + 2] as u32 * mask_val) / 255) as u8;
+            buf[idx + 3] = ((buf[idx + 3] as u32 * mask_val) / 255) as u8;
+        }
+    }
 
     buf
 }
