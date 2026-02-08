@@ -9,6 +9,75 @@
 use crate::rendering_buffer::RowAccessor;
 
 // ============================================================================
+// ImageSource trait
+// ============================================================================
+
+/// Trait for image pixel sources used by span image filters.
+///
+/// All image accessor types implement this trait, providing a common
+/// interface for the span generators to read pixels.
+pub trait ImageSource {
+    /// Begin reading a span at (x, y) with `len` pixels. Returns first pixel.
+    fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8];
+
+    /// Advance to the next pixel in the x direction.
+    fn next_x(&mut self) -> &[u8];
+
+    /// Advance to the next row (y+1), resetting x to the span start.
+    fn next_y(&mut self) -> &[u8];
+}
+
+impl<const PIX_WIDTH: usize> ImageSource for ImageAccessorClip<'_, PIX_WIDTH> {
+    fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8] {
+        self.span(x, y, len)
+    }
+    fn next_x(&mut self) -> &[u8] {
+        self.next_x()
+    }
+    fn next_y(&mut self) -> &[u8] {
+        self.next_y()
+    }
+}
+
+impl<const PIX_WIDTH: usize> ImageSource for ImageAccessorNoClip<'_, PIX_WIDTH> {
+    fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8] {
+        self.span(x, y, len)
+    }
+    fn next_x(&mut self) -> &[u8] {
+        self.next_x()
+    }
+    fn next_y(&mut self) -> &[u8] {
+        self.next_y()
+    }
+}
+
+impl<const PIX_WIDTH: usize> ImageSource for ImageAccessorClone<'_, PIX_WIDTH> {
+    fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8] {
+        self.span(x, y, len)
+    }
+    fn next_x(&mut self) -> &[u8] {
+        self.next_x()
+    }
+    fn next_y(&mut self) -> &[u8] {
+        self.next_y()
+    }
+}
+
+impl<const PIX_WIDTH: usize, WX: WrapMode, WY: WrapMode> ImageSource
+    for ImageAccessorWrap<'_, PIX_WIDTH, WX, WY>
+{
+    fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8] {
+        self.span(x, y, len)
+    }
+    fn next_x(&mut self) -> &[u8] {
+        self.next_x()
+    }
+    fn next_y(&mut self) -> &[u8] {
+        self.next_y()
+    }
+}
+
+// ============================================================================
 // WrapMode trait
 // ============================================================================
 

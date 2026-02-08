@@ -92,3 +92,13 @@ pub mod image_filters;
 pub mod span_image_filter;
 pub mod trans_bilinear;
 pub mod trans_perspective;
+
+// Phase 7: Image Span Filters & Demo Infrastructure
+pub mod ellipse_bresenham;
+pub mod rasterizer_outline;
+pub mod renderer_primitives;
+pub mod span_converter;
+pub mod span_image_filter_rgba;
+pub mod span_interpolator_trans;
+pub mod span_subdiv_adaptor;
+pub mod trans_viewport;

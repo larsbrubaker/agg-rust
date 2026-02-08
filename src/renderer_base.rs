@@ -182,6 +182,49 @@ impl<PF: PixelFormat> RendererBase<PF> {
         self.ren.blend_hline(x1, y, (x2 - x1 + 1) as u32, c, cover);
     }
 
+    /// Blend a vertical line (clipped). y1, y2 are inclusive endpoints.
+    pub fn blend_vline(
+        &mut self,
+        x: i32,
+        mut y1: i32,
+        mut y2: i32,
+        c: &PF::ColorType,
+        cover: CoverType,
+    ) {
+        if y1 > y2 {
+            std::mem::swap(&mut y1, &mut y2);
+        }
+        if x > self.xmax() || x < self.xmin() || y1 > self.ymax() || y2 < self.ymin() {
+            return;
+        }
+        y1 = y1.max(self.ymin());
+        y2 = y2.min(self.ymax());
+        for y in y1..=y2 {
+            self.ren.blend_pixel(x, y, c, cover);
+        }
+    }
+
+    /// Blend a filled rectangle (clipped).
+    pub fn blend_bar(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        c: &PF::ColorType,
+        cover: CoverType,
+    ) {
+        let mut rc = crate::basics::RectI::new(x1, y1, x2, y2);
+        rc.normalize();
+        if !rc.clip(&self.clip_box) {
+            return;
+        }
+        for y in rc.y1..=rc.y2 {
+            self.ren
+                .blend_hline(rc.x1, y, (rc.x2 - rc.x1 + 1) as u32, c, cover);
+        }
+    }
+
     /// Blend a solid horizontal span with per-pixel coverage (clipped).
     pub fn blend_solid_hspan(
         &mut self,
