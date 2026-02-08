@@ -27,6 +27,7 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
         "gsv_text" => render::gsv_text_demo(width, height, params),
         "perspective" => render::perspective_demo(width, height, params),
         "image_fltr_graph" => render::image_fltr_graph(width, height, params),
+        "image1" => render::image1(width, height, params),
         _ => render::fallback(width, height),
     }
 }
@@ -40,5 +41,5 @@ pub fn version() -> String {
 /// Get list of available demo names.
 #[wasm_bindgen]
 pub fn demo_names() -> String {
-    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph".to_string()
+    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1".to_string()
 }

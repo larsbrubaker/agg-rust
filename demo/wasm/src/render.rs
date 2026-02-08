@@ -36,6 +36,7 @@ use agg_rust::span_gradient::{
     GradientConic, GradientDiamond, GradientRadial, GradientSqrtXY, GradientX, GradientXY,
     SpanGradient,
 };
+use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_bilinear::TransBilinear;
@@ -1711,6 +1712,192 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.reset();
         ras.add_path(&mut stroke, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 120, 255));
+    }
+
+    buf
+}
+
+// ============================================================================
+// Image1 — Image Affine Transformations with Bilinear Filtering
+// ============================================================================
+
+/// Generate a procedural "spheres" test image (RGBA, 256x256).
+///
+/// Creates a grid of 3D-looking spheres with different colors, similar to
+/// the original AGG "spheres.bmp" test image used by image1.cpp.
+fn generate_spheres_image(w: u32, h: u32) -> Vec<u8> {
+    let mut data = vec![0u8; (w * h * 4) as usize];
+
+    // Background: dark blue-gray gradient
+    for y in 0..h {
+        for x in 0..w {
+            let off = ((y * w + x) * 4) as usize;
+            let t = y as f64 / h as f64;
+            data[off] = (40.0 + 20.0 * t) as u8; // R
+            data[off + 1] = (50.0 + 30.0 * t) as u8; // G
+            data[off + 2] = (70.0 + 40.0 * t) as u8; // B
+            data[off + 3] = 255; // A
+        }
+    }
+
+    // Draw spheres in a 4x4 grid
+    let sphere_colors: [(f64, f64, f64); 16] = [
+        (1.0, 0.3, 0.2), // red
+        (0.2, 0.8, 0.3), // green
+        (0.3, 0.4, 1.0), // blue
+        (1.0, 0.8, 0.1), // yellow
+        (0.9, 0.3, 0.8), // magenta
+        (0.2, 0.9, 0.9), // cyan
+        (1.0, 0.5, 0.0), // orange
+        (0.6, 0.3, 0.9), // purple
+        (0.8, 0.8, 0.8), // silver
+        (0.3, 0.7, 0.3), // forest green
+        (0.9, 0.2, 0.4), // crimson
+        (0.4, 0.6, 0.9), // sky blue
+        (0.7, 0.5, 0.2), // brown
+        (0.5, 0.9, 0.5), // lime
+        (0.9, 0.6, 0.7), // pink
+        (0.3, 0.3, 0.7), // navy
+    ];
+
+    let grid = 4;
+    let cell_w = w as f64 / grid as f64;
+    let cell_h = h as f64 / grid as f64;
+    let radius = cell_w.min(cell_h) * 0.4;
+
+    for row in 0..grid {
+        for col in 0..grid {
+            let cx = (col as f64 + 0.5) * cell_w;
+            let cy = (row as f64 + 0.5) * cell_h;
+            let (sr, sg, sb) = sphere_colors[row * grid + col];
+
+            // Light source offset (upper-left)
+            let lx = cx - radius * 0.3;
+            let ly = cy - radius * 0.3;
+
+            for y in 0..h {
+                for x in 0..w {
+                    let dx = x as f64 - cx;
+                    let dy = y as f64 - cy;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist < radius {
+                        // Sphere shading: diffuse + specular
+                        let dl = ((x as f64 - lx).powi(2) + (y as f64 - ly).powi(2)).sqrt();
+                        let norm_d = dl / (radius * 1.5);
+                        let diffuse = (1.0 - norm_d).max(0.0);
+                        let shade = 0.15 + 0.85 * diffuse;
+
+                        // Specular highlight
+                        let spec = if norm_d < 0.3 {
+                            ((0.3 - norm_d) / 0.3).powi(4) * 0.7
+                        } else {
+                            0.0
+                        };
+
+                        // Edge darkening
+                        let edge = 1.0 - (dist / radius).powi(3);
+
+                        let r = ((sr * shade * edge + spec) * 255.0).min(255.0) as u8;
+                        let g = ((sg * shade * edge + spec) * 255.0).min(255.0) as u8;
+                        let b = ((sb * shade * edge + spec) * 255.0).min(255.0) as u8;
+
+                        let off = ((y * w + x) * 4) as usize;
+                        data[off] = r;
+                        data[off + 1] = g;
+                        data[off + 2] = b;
+                        data[off + 3] = 255;
+                    }
+                }
+            }
+        }
+    }
+
+    data
+}
+
+/// Render image1 demo: image affine transformations with bilinear filtering.
+///
+/// Matches C++ `image1.cpp`:
+/// - Procedural source image rotated/scaled through an ellipse clip
+/// - SpanImageFilterRgbaBilinearClip for smooth bilinear interpolation
+/// - Two transform matrices: one for the ellipse shape, one for the image sampling
+///
+/// params: [angle_deg, scale]
+pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let angle_deg = params.get(0).copied().unwrap_or(0.0);
+    let scale = params.get(1).copied().unwrap_or(1.0).max(0.1);
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+
+    // Clear to white
+    {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        rb.clear(&Rgba8::new(255, 255, 255, 255));
+    }
+
+    // Generate procedural source image (256x256 "spheres")
+    let img_w: u32 = 256;
+    let img_h: u32 = 256;
+    let mut img_data = generate_spheres_image(img_w, img_h);
+    let img_stride = (img_w * 4) as i32;
+    let mut img_ra = RowAccessor::new();
+    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+
+    let iw = width as f64;
+    let ih = height as f64;
+    let angle_rad = angle_deg * std::f64::consts::PI / 180.0;
+
+    // Source (ellipse) transform — matching C++ image1.cpp src_mtx
+    let mut src_mtx = TransAffine::new();
+    src_mtx.multiply(&TransAffine::new_translation(-iw / 2.0 - 10.0, -ih / 2.0 - 20.0 - 10.0));
+    src_mtx.multiply(&TransAffine::new_rotation(angle_rad));
+    src_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
+    src_mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0 + 20.0));
+
+    // Image transform — matching C++ image1.cpp img_mtx (inverted for sampling)
+    let mut img_mtx = TransAffine::new();
+    img_mtx.multiply(&TransAffine::new_translation(-iw / 2.0 + 10.0, -ih / 2.0 + 20.0 + 10.0));
+    img_mtx.multiply(&TransAffine::new_rotation(angle_rad));
+    img_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
+    img_mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0 + 20.0));
+    img_mtx.invert();
+
+    // Span interpolator with the inverted image transform
+    let mut interpolator = SpanInterpolatorLinear::new(img_mtx);
+
+    // Bilinear filter with semi-transparent green background (matching C++ rgba_pre(0, 0.4, 0, 0.5))
+    let mut sg = SpanImageFilterRgbaBilinearClip::new(
+        &img_ra,
+        Rgba8::new(0, 102, 0, 128),
+        &mut interpolator,
+    );
+
+    // Rasterize an ellipse clipping region — matching C++ image1.cpp
+    let r = iw.min(ih - 60.0);
+    let mut ell = Ellipse::new(
+        iw / 2.0 + 10.0,
+        ih / 2.0 + 20.0 + 10.0,
+        r / 2.0 + 16.0,
+        r / 2.0 + 16.0,
+        200,
+        false,
+    );
+    let mut tr = ConvTransform::new(&mut ell, src_mtx);
+
+    let mut ras = RasterizerScanlineAa::new();
+    ras.clip_box(0.0, 0.0, iw, ih);
+    ras.add_path(&mut tr, 0);
+
+    let mut sl = ScanlineU8::new();
+    let mut alloc = SpanAllocator::<Rgba8>::new();
+
+    {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
     }
 
     buf

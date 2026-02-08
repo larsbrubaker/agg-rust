@@ -22,6 +22,7 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'gsv_text': () => import('./demos/gsv_text.ts'),
   'perspective': () => import('./demos/perspective.ts'),
   'image_fltr_graph': () => import('./demos/image_fltr_graph.ts'),
+  'image1': () => import('./demos/image1.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -141,6 +142,11 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">&#8767;</span>
           <h3>Filter Graph</h3>
           <p>Image filter kernel weight function visualization &mdash; 16 filters.</p>
+        </a>
+        <a href="#/image1" class="feature-card">
+          <span class="card-icon">&#127912;</span>
+          <h3>Image Transforms</h3>
+          <p>Procedural sphere image with affine rotation/scaling through a bilinear filter.</p>
         </a>
       </div>
       <div class="about-section">
