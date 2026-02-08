@@ -39,6 +39,11 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
         "bspline" => render::bspline_demo(width, height, params),
         "image_perspective" => render::image_perspective_demo(width, height, params),
         "alpha_mask" => render::alpha_mask_demo(width, height, params),
+        "alpha_gradient" => render::alpha_gradient(width, height, params),
+        "image_alpha" => render::image_alpha(width, height, params),
+        "alpha_mask3" => render::alpha_mask3(width, height, params),
+        "image_transforms" => render::image_transforms_demo(width, height, params),
+        "mol_view" => render::mol_view(width, height, params),
         _ => render::fallback(width, height),
     }
 }
@@ -52,5 +57,5 @@ pub fn version() -> String {
 /// Get list of available demo names.
 #[wasm_bindgen]
 pub fn demo_names() -> String {
-    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask".to_string()
+    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask,alpha_gradient,image_alpha,alpha_mask3,image_transforms,mol_view".to_string()
 }

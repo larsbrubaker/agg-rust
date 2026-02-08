@@ -5,13 +5,15 @@ Cross-reference of all 75 C++ demos from `cpp-references/agg-web/demo/` against 
 Reference screenshots: `cpp-references/agg-web/demo/<name>/<name>.gif|png|jpg`
 Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
-## Currently Implemented (29 demos)
+## Currently Implemented (34 demos)
 
 | Demo | C++ Original | Window | Status |
 |------|-------------|--------|--------|
 | aa_demo | aa_demo.cpp | 600x400 | Done - fixed colors, vertices, threshold |
 | aa_test | aa_test.cpp | 480x350 | Done - radial dashes, ellipses, gradient lines, Gouraud triangles |
+| alpha_gradient | alpha_gradient.cpp | 512x400 | Done - gradient with alpha curve control, random ellipse background |
 | alpha_mask | alpha_mask.cpp | 512x400 | Done - lion with elliptical alpha mask (manual compositing) |
+| alpha_mask3 | alpha_mask3.cpp | 640x520 | Done - alpha mask polygon clipping (AND/SUB), 5 scenarios |
 | bezier_div | bezier_div.cpp | 600x600 | Done |
 | bspline | bspline.cpp | 600x600 | Done - 6 draggable control points, B-spline curve |
 | circles | circles.cpp | 400x400 | Done |
@@ -27,27 +29,20 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | graph_test | graph_test.cpp | 700x530 | Done |
 | gsv_text | (custom) | 600x400 | Done |
 | idea | idea.cpp | 250x280 | Done - fixed polygon data, transform chain |
+| image_alpha | image_alpha.cpp | 512x400 | Done - brightness-to-alpha mapping, random ellipse background |
 | image_filters | image_filters.cpp | 430x340 | Done - iterative rotation, 17 filters |
 | image_filters2 | image_filters2.cpp | 500x340 | Done - 4x4 test image, 17 filters, kernel graph |
 | image_perspective | image_perspective.cpp | 600x600 | Done - affine/bilinear/perspective image transform |
+| image_transforms | image_transforms.cpp | 430x340 | Done - star polygon + image, 7 transform modes |
 | image_fltr_graph | image_fltr_graph.cpp | 780x300 | Done - 16 checkboxes, 3 curve types |
 | image1 | image1.cpp | 600x500 | Done |
 | line_thickness | (custom) | 600x400 | Done |
 | lion | lion.cpp | 512x400 | Done |
+| mol_view | mol_view.cpp | 400x400 | Done - molecular structure viewer (Caffeine/Aspirin/Benzene) |
 | perspective | perspective.cpp | 600x600 | Done |
 | rasterizers | rasterizers.cpp | 600x400 | Done |
 | rounded_rect | rounded_rect.cpp | 600x400 | Done |
 | shapes | (custom) | 600x400 | Done |
-
-## Can Port Now (5 demos - all required Rust modules exist)
-
-| Demo | C++ File | Window | Key Modules Needed | Priority |
-|------|----------|--------|-------------------|----------|
-| alpha_gradient | alpha_gradient.cpp | 512x400 | span_gradient, alpha | HIGH |
-| alpha_mask3 | alpha_mask3.cpp | 640x480 | alpha_mask_u8 | MED |
-| image_alpha | image_alpha.cpp | ~430x340 | span_image_filter_rgba | HIGH |
-| image_transforms | image_transforms.cpp | ~430x340 | span_image_filter_rgba | HIGH |
-| mol_view | mol_view.cpp | 400x400 | ellipse, gradient | MED |
 
 ## Deferred (30 demos - need missing Rust modules)
 
@@ -123,8 +118,8 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
 | Category | Count |
 |----------|-------|
-| Implemented | 29 |
-| Can port now | 5 |
+| Implemented | 34 |
+| Can port now | 0 |
 | Deferred (missing modules) | 30 |
 | Not applicable | 11 |
 | **Total C++ demos** | **75** |

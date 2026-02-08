@@ -34,6 +34,11 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'bspline': () => import('./demos/bspline.ts'),
   'image_perspective': () => import('./demos/image_perspective.ts'),
   'alpha_mask': () => import('./demos/alpha_mask.ts'),
+  'alpha_gradient': () => import('./demos/alpha_gradient.ts'),
+  'image_alpha': () => import('./demos/image_alpha.ts'),
+  'alpha_mask3': () => import('./demos/alpha_mask3.ts'),
+  'image_transforms': () => import('./demos/image_transforms.ts'),
+  'mol_view': () => import('./demos/mol_view.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -230,6 +235,31 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">&#9673;</span>
           <h3>Alpha Mask</h3>
           <p>Lion with elliptical alpha mask — rotate, scale, and skew.</p>
+        </a>
+        <a href="#/alpha_gradient" class="feature-card">
+          <span class="card-icon">&#9698;</span>
+          <h3>Alpha Gradient</h3>
+          <p>Gradient with alpha curve control over random ellipse background.</p>
+        </a>
+        <a href="#/image_alpha" class="feature-card">
+          <span class="card-icon">&#127912;</span>
+          <h3>Image Alpha</h3>
+          <p>Image with brightness-to-alpha mapping over random ellipses.</p>
+        </a>
+        <a href="#/alpha_mask3" class="feature-card">
+          <span class="card-icon">&#9673;</span>
+          <h3>Alpha Mask 3</h3>
+          <p>Alpha mask polygon clipping with AND/SUB operations.</p>
+        </a>
+        <a href="#/image_transforms" class="feature-card">
+          <span class="card-icon">&#127912;</span>
+          <h3>Image Transforms</h3>
+          <p>Star polygon textured with image through 7 transform modes.</p>
+        </a>
+        <a href="#/mol_view" class="feature-card">
+          <span class="card-icon">&#9883;</span>
+          <h3>Molecule Viewer</h3>
+          <p>Molecular structure viewer with rotate, scale, and pan controls.</p>
         </a>
       </div>
       <div class="about-section">
