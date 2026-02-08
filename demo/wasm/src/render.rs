@@ -762,45 +762,64 @@ pub fn circles(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Render a rounded rectangle with draggable corners.
 ///
 /// params[0..4] = x1,y1, x2,y2 (two corners)
-/// params[4] = corner radius (default 20)
-/// params[5] = outline width (default 2)
+/// params[4] = corner radius (default 25)
+/// params[5] = subpixel offset (default 0)
+/// params[6] = white_on_black (0 or 1, default 0)
 pub fn rounded_rect_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let x1 = params.get(0).copied().unwrap_or(100.0);
     let y1 = params.get(1).copied().unwrap_or(80.0);
     let x2 = params.get(2).copied().unwrap_or(400.0);
     let y2 = params.get(3).copied().unwrap_or(280.0);
-    let radius = params.get(4).copied().unwrap_or(20.0);
-    let outline_w = params.get(5).copied().unwrap_or(2.0);
+    let radius = params.get(4).copied().unwrap_or(25.0);
+    let offset = params.get(5).copied().unwrap_or(0.0);
+    let white_on_black = params.get(6).copied().unwrap_or(0.0) > 0.5;
+
+    let (bg, fg) = if white_on_black {
+        (Rgba8::new(0, 0, 0, 255), Rgba8::new(255, 255, 255, 255))
+    } else {
+        (Rgba8::new(255, 255, 255, 255), Rgba8::new(0, 0, 0, 255))
+    };
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
     setup_renderer(&mut buf, &mut ra, width, height);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 255, 255));
+    rb.clear(&bg);
 
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
+    // Apply subpixel offset
+    let ox1 = x1 + offset;
+    let oy1 = y1 + offset;
+    let ox2 = x2 + offset;
+    let oy2 = y2 + offset;
+
     // Fill
-    let mut rrect = RoundedRect::new(x1, y1, x2, y2, radius);
+    let fill_color = if white_on_black {
+        Rgba8::new(40, 40, 60, 255)
+    } else {
+        Rgba8::new(255, 230, 200, 255)
+    };
+    let mut rrect = RoundedRect::new(ox1, oy1, ox2, oy2, radius);
     ras.reset();
     ras.add_path(&mut rrect, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 230, 200, 255));
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &fill_color);
 
     // Stroke
-    let mut rrect2 = RoundedRect::new(x1, y1, x2, y2, radius);
+    let mut rrect2 = RoundedRect::new(ox1, oy1, ox2, oy2, radius);
     let mut stroke = ConvStroke::new(&mut rrect2);
-    stroke.set_width(outline_w);
+    stroke.set_width(1.0);
     ras.reset();
     ras.add_path(&mut stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(100, 60, 30, 255));
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &fg);
 
     // Inscribed circle
     {
-        let cx = (x1 + x2) / 2.0;
-        let cy = (y1 + y2) / 2.0;
-        let r = ((x2 - x1).min(y2 - y1) / 2.0 - radius).max(10.0);
+        let cx = (ox1 + ox2) / 2.0;
+        let cy = (oy1 + oy2) / 2.0;
+        let r = ((ox2 - ox1).min(oy2 - oy1) / 2.0 - radius).max(10.0);
         let mut ell = Ellipse::new(cx, cy, r, r, 64, false);
         ras.reset();
         ras.add_path(&mut ell, 0);
@@ -816,12 +835,22 @@ pub fn rounded_rect_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
 
-    // Render AGG slider controls — matching C++ rounded_rect.cpp
+    // Render AGG controls — matching C++ rounded_rect.cpp
     let mut s_radius = SliderCtrl::new(10.0, 10.0, 590.0, 19.0);
     s_radius.label("radius=%4.3f");
     s_radius.range(0.0, 50.0);
     s_radius.set_value(radius);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
+
+    let mut s_offset = SliderCtrl::new(10.0, 30.0, 590.0, 39.0);
+    s_offset.label("subpixel offset=%4.3f");
+    s_offset.range(-2.0, 3.0);
+    s_offset.set_value(offset);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_offset);
+
+    let mut c_wob = CboxCtrl::new(10.0, 50.0, "White on black");
+    c_wob.set_status(white_on_black);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_wob);
 
     buf
 }
@@ -978,10 +1007,12 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Render gamma correction visualization with ellipses.
 ///
 /// params[0] = thickness (default 1.0)
-/// params[1] = gamma (default 1.0)
+/// params[1] = contrast (default 1.0)
+/// params[2] = gamma (default 1.0)
 pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let thickness = params.get(0).copied().unwrap_or(1.0).max(0.1);
-    let gamma_val = params.get(1).copied().unwrap_or(1.0).max(0.1);
+    let _contrast = params.get(1).copied().unwrap_or(1.0);
+    let gamma_val = params.get(2).copied().unwrap_or(1.0).max(0.1);
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -1078,6 +1109,12 @@ pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     s_thick.set_value(thickness);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_thick);
 
+    let mut s_contrast = SliderCtrl::new(5.0, 20.0, 395.0, 26.0);
+    s_contrast.label("Contrast");
+    s_contrast.range(0.0, 1.0);
+    s_contrast.set_value(_contrast);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_contrast);
+
     let mut s_gamma = SliderCtrl::new(5.0, 35.0, 395.0, 41.0);
     s_gamma.label("Gamma=%3.2f");
     s_gamma.range(0.5, 3.0);
@@ -1091,9 +1128,13 @@ pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Line Thickness — matches C++ line_thickness.cpp
 // ============================================================================
 
-/// Render lines of varying thickness.
+/// Render lines of varying thickness — matching C++ line_thickness.cpp.
 ///
 /// params[0..4] = x0,y0, x1,y1 (line endpoints)
+/// params[4] = line thickness (default 1.0)
+/// params[5] = blur radius (default 1.5, display only)
+/// params[6] = monochrome (0 or 1, default 1, display only)
+/// params[7] = invert (0 or 1, default 0, display only)
 pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
@@ -1101,6 +1142,10 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let y0 = params.get(1).copied().unwrap_or(h * 0.5);
     let x1 = params.get(2).copied().unwrap_or(w * 0.95);
     let y1 = params.get(3).copied().unwrap_or(h * 0.5);
+    let thickness = params.get(4).copied().unwrap_or(1.0);
+    let _blur = params.get(5).copied().unwrap_or(1.5);
+    let _monochrome = params.get(6).copied().unwrap_or(1.0) > 0.5;
+    let _invert = params.get(7).copied().unwrap_or(0.0) > 0.5;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -1145,12 +1190,26 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
 
-    // AGG control matching C++ line_thickness.cpp
-    let mut s_thick = SliderCtrl::new(10.0, 10.0, (width as f64) - 10.0, 19.0);
+    // AGG controls matching C++ line_thickness.cpp
+    let mut s_thick = SliderCtrl::new(10.0, 10.0, 630.0, 19.0);
     s_thick.label("Line thickness=%1.2f");
     s_thick.range(0.0, 5.0);
-    s_thick.set_value(1.0);
+    s_thick.set_value(thickness);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_thick);
+
+    let mut s_blur = SliderCtrl::new(10.0, 30.0, 630.0, 39.0);
+    s_blur.label("Blur radius=%1.2f");
+    s_blur.range(0.0, 2.0);
+    s_blur.set_value(_blur);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_blur);
+
+    let mut c_mono = CboxCtrl::new(10.0, 50.0, "Monochrome");
+    c_mono.set_status(_monochrome);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_mono);
+
+    let mut c_invert = CboxCtrl::new(10.0, 70.0, "Invert");
+    c_invert.set_status(_invert);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_invert);
 
     buf
 }
@@ -1164,13 +1223,13 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[0..6] = x0,y0, x1,y1, x2,y2
 /// params[6] = gamma (unused), params[7] = alpha 0-1
 pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(100.0);
+    let vx0 = params.get(0).copied().unwrap_or(157.0);
     let vy0 = params.get(1).copied().unwrap_or(60.0);
-    let vx1 = params.get(2).copied().unwrap_or(400.0);
-    let vy1 = params.get(3).copied().unwrap_or(80.0);
-    let vx2 = params.get(4).copied().unwrap_or(250.0);
-    let vy2 = params.get(5).copied().unwrap_or(350.0);
-    let _gamma = params.get(6).copied().unwrap_or(1.0);
+    let vx1 = params.get(2).copied().unwrap_or(369.0);
+    let vy1 = params.get(3).copied().unwrap_or(170.0);
+    let vx2 = params.get(4).copied().unwrap_or(243.0);
+    let vy2 = params.get(5).copied().unwrap_or(310.0);
+    let _gamma = params.get(6).copied().unwrap_or(0.5);
     let alpha = params.get(7).copied().unwrap_or(1.0);
 
     let mut buf = Vec::new();
@@ -1339,13 +1398,13 @@ pub fn conv_contour_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     r_close.set_cur_item(close_mode);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_close);
 
-    let mut s_width = SliderCtrl::new(140.0, 14.0, 440.0, 22.0);
+    let mut s_width = SliderCtrl::new(140.0, 14.0, 430.0, 22.0);
     s_width.label("Width=%1.2f");
     s_width.range(-100.0, 100.0);
     s_width.set_value(contour_w);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
 
-    let mut c_auto = CboxCtrl::new(140.0, 30.0, "Autodetect orientation");
+    let mut c_auto = CboxCtrl::new(140.0, 30.0, "Autodetect orientation if not defined");
     c_auto.set_status(auto_detect);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_auto);
 
@@ -1363,6 +1422,7 @@ pub fn conv_contour_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[7] = stroke width (default 3.0)
 /// params[8] = close polygon (0 or 1, default 0)
 /// params[9] = even_odd fill (0 or 1, default 0)
+/// params[10] = smooth value (default 1.0, display only)
 pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let vx0 = params.get(0).copied().unwrap_or(157.0);
     let vy0 = params.get(1).copied().unwrap_or(60.0);
@@ -1374,6 +1434,7 @@ pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let sw = params.get(7).copied().unwrap_or(3.0).max(0.5);
     let close = params.get(8).copied().unwrap_or(0.0) > 0.5;
     let even_odd = params.get(9).copied().unwrap_or(0.0) > 0.5;
+    let smooth = params.get(10).copied().unwrap_or(1.0);
 
     let cap = match cap_idx {
         1 => LineCap::Square,
@@ -1453,11 +1514,17 @@ pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     r_cap.set_cur_item(cap_idx);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_cap);
 
-    let mut s_width = SliderCtrl::new(140.0, 14.0, 290.0, 22.0);
+    let mut s_width = SliderCtrl::new(140.0, 14.0, 280.0, 22.0);
     s_width.label("Width=%1.2f");
     s_width.range(0.0, 10.0);
     s_width.set_value(sw);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+
+    let mut s_smooth = SliderCtrl::new(290.0, 14.0, 490.0, 22.0);
+    s_smooth.label("Smooth=%1.2f");
+    s_smooth.range(0.0, 2.0);
+    s_smooth.set_value(smooth);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_smooth);
 
     let mut c_close = CboxCtrl::new(140.0, 30.0, "Close Polygons");
     c_close.set_status(close);

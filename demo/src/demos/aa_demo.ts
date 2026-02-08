@@ -9,7 +9,7 @@ export function init(container: HTMLElement) {
     'Anti-aliasing visualization — enlarged pixel view of a triangle.',
   );
 
-  const W = 600, H = 500;
+  const W = 600, H = 400;
 
   const vertices: Vertex[] = [
     { x: 100, y: 48 },

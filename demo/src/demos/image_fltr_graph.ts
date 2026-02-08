@@ -8,7 +8,7 @@ export function init(container: HTMLElement) {
     'Visualization of image filter weight functions — matching C++ image_fltr_graph.cpp.',
   );
 
-  const W = 600, H = 400;
+  const W = 780, H = 300;
   let filterIdx = 0;
   let radius = 4.0;
 

@@ -9,7 +9,7 @@ export function init(container: HTMLElement) {
     '6 sub-triangles with draggable vertices — matching C++ gouraud.cpp.',
   );
 
-  const W = 512, H = 400;
+  const W = 400, H = 320;
 
   const vertices: Vertex[] = [
     { x: 57, y: 60 },

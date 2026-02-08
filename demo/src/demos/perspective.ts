@@ -9,7 +9,7 @@ export function init(container: HTMLElement) {
     'Lion with bilinear/perspective quad transform — matching C++ perspective.cpp.',
   );
 
-  const W = 600, H = 500;
+  const W = 600, H = 600;
 
   const ox = (W - 240) / 2;
   const oy = (H - 380) / 2;

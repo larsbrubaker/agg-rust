@@ -13,8 +13,8 @@ export function init(container: HTMLElement) {
   let scale = 1.0;
   let skewX = 0;
   let skewY = 0;
-  let alpha = 255;
-  const W = 600, H = 600;
+  let alpha = 26;
+  const W = 512, H = 400;
 
   function draw() {
     renderToCanvas({
@@ -31,7 +31,7 @@ export function init(container: HTMLElement) {
     onRightDrag: (x, y) => { skewX = x; skewY = y; draw(); },
   });
 
-  const slAlpha = addSlider(sidebar, 'Alpha', 0, 255, 255, 1, v => { alpha = v; draw(); });
+  const slAlpha = addSlider(sidebar, 'Alpha', 0, 255, 26, 1, v => { alpha = v; draw(); });
 
   const canvasControls: CanvasControl[] = [
     { type: 'slider', x1: 5, y1: 5, x2: 507, y2: 12, min: 0, max: 255, sidebarEl: slAlpha, onChange: v => { alpha = v; draw(); } },

@@ -9,7 +9,7 @@ export function init(container: HTMLElement) {
     'Stroke joins, caps, and dashed overlay — matching C++ conv_stroke.cpp.',
   );
 
-  const W = 600, H = 400;
+  const W = 500, H = 330;
 
   const vertices: Vertex[] = [
     { x: 157, y: 60 },

@@ -9,7 +9,7 @@ export function init(container: HTMLElement) {
     'Cubic Bezier curve with draggable control points — matching C++ bezier_div.cpp.',
   );
 
-  const W = 600, H = 500;
+  const W = 655, H = 520;
 
   const vertices: Vertex[] = [
     { x: 170, y: 424 },

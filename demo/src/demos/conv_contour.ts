@@ -28,8 +28,8 @@ export function init(container: HTMLElement) {
 
   const canvasControls: CanvasControl[] = [
     { type: 'radio', x1: 10, y1: 10, x2: 130, y2: 80, numItems: 3, sidebarEls: radioEls, onChange: v => { closeMode = v; draw(); } },
-    { type: 'slider', x1: 140, y1: 14, x2: 440, y2: 22, min: -100, max: 100, sidebarEl: slWidth, onChange: v => { contourWidth = v; draw(); } },
-    { type: 'checkbox', x1: 140, y1: 25, x2: 350, y2: 40, sidebarEl: cbAuto, onChange: v => { autoDetect = v ? 1 : 0; draw(); } },
+    { type: 'slider', x1: 140, y1: 14, x2: 430, y2: 22, min: -100, max: 100, sidebarEl: slWidth, onChange: v => { contourWidth = v; draw(); } },
+    { type: 'checkbox', x1: 140, y1: 25, x2: 430, y2: 40, sidebarEl: cbAuto, onChange: v => { autoDetect = v ? 1 : 0; draw(); } },
   ];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 

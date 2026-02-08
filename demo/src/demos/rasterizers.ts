@@ -9,15 +9,15 @@ export function init(container: HTMLElement) {
     'Filled and stroked triangle with draggable vertices.',
   );
 
-  const W = 600, H = 400;
+  const W = 500, H = 330;
 
   const vertices: Vertex[] = [
-    { x: 100, y: 60 },
-    { x: 400, y: 80 },
-    { x: 250, y: 350 },
+    { x: 157, y: 60 },
+    { x: 369, y: 170 },
+    { x: 243, y: 310 },
   ];
 
-  let gammaVal = 1.0;
+  let gammaVal = 0.5;
   let alpha = 1.0;
 
   function draw() {
@@ -42,7 +42,7 @@ export function init(container: HTMLElement) {
     onDrag: draw,
   });
 
-  const slGamma = addSlider(sidebar, 'Gamma', 0.0, 1.0, 1.0, 0.01, v => { gammaVal = v; draw(); });
+  const slGamma = addSlider(sidebar, 'Gamma', 0.0, 1.0, 0.5, 0.01, v => { gammaVal = v; draw(); });
   const slAlpha = addSlider(sidebar, 'Alpha', 0.0, 1.0, 1.0, 0.01, v => { alpha = v; draw(); });
 
   const canvasControls: CanvasControl[] = [
