@@ -5,14 +5,14 @@ export interface Vertex {
   y: number;
 }
 
-/** Get mouse position relative to canvas, accounting for CSS scaling. */
+/** Get mouse position relative to canvas in AGG coordinates (origin bottom-left). */
 function canvasPos(canvas: HTMLCanvasElement, e: MouseEvent): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   return {
     x: (e.clientX - rect.left) * scaleX,
-    y: (e.clientY - rect.top) * scaleY,
+    y: canvas.height - (e.clientY - rect.top) * scaleY,
   };
 }
 

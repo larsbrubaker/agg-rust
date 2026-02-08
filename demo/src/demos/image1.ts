@@ -4,10 +4,10 @@ export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
     container,
     'Image Affine Transforms',
-    'Procedural sphere image rotated/scaled through an ellipse with bilinear filtering. Port of image1.cpp.',
+    'Original AGG spheres image rotated/scaled through an ellipse with bilinear filtering. Port of image1.cpp.',
   );
 
-  const W = 600, H = 500;
+  const W = 340, H = 360;
   let angle = 0;
   let scale = 1.0;
 

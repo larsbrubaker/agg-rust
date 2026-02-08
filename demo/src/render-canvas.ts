@@ -19,6 +19,7 @@ export function renderToCanvas(opts: RenderOptions): void {
 
   canvas.width = width;
   canvas.height = height;
+  canvas.style.transform = 'scaleY(-1)';
   const ctx = canvas.getContext('2d')!;
 
   const t0 = performance.now();

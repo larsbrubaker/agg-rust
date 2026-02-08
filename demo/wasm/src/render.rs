@@ -55,6 +55,7 @@ fn setup_renderer(
     unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
 }
 
+
 // ============================================================================
 // Fallback
 // ============================================================================
@@ -1807,94 +1808,34 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 ///
 /// Creates a grid of 3D-looking spheres with different colors, similar to
 /// the original AGG "spheres.bmp" test image used by image1.cpp.
-fn generate_spheres_image(w: u32, h: u32) -> Vec<u8> {
-    let mut data = vec![0u8; (w * h * 4) as usize];
+/// Original AGG "spheres.bmp" embedded at compile time (320x300, 24-bit BGR).
+static SPHERES_BMP: &[u8] = include_bytes!("spheres.bmp");
 
-    // Background: dark blue-gray gradient
-    for y in 0..h {
-        for x in 0..w {
-            let off = ((y * w + x) * 4) as usize;
-            let t = y as f64 / h as f64;
-            data[off] = (40.0 + 20.0 * t) as u8; // R
-            data[off + 1] = (50.0 + 30.0 * t) as u8; // G
-            data[off + 2] = (70.0 + 40.0 * t) as u8; // B
-            data[off + 3] = 255; // A
+/// Decode the embedded spheres BMP into RGBA pixels. Returns (width, height, rgba_data).
+fn load_spheres_image() -> (u32, u32, Vec<u8>) {
+    let d = SPHERES_BMP;
+    let offset = u32::from_le_bytes([d[10], d[11], d[12], d[13]]) as usize;
+    let w = i32::from_le_bytes([d[18], d[19], d[20], d[21]]) as u32;
+    let h = i32::from_le_bytes([d[22], d[23], d[24], d[25]]) as u32;
+    let bpp = u16::from_le_bytes([d[28], d[29]]) as usize;
+    let bytes_per_pixel = bpp / 8;
+    let row_size = ((w as usize * bytes_per_pixel + 3) / 4) * 4; // BMP rows are 4-byte aligned
+
+    let mut rgba = vec![255u8; (w * h * 4) as usize];
+    for y in 0..h as usize {
+        // BMP stores rows bottom-to-top; row 0 in BMP = bottom of image
+        let src_row = offset + y * row_size;
+        let dst_row = y * w as usize * 4;
+        for x in 0..w as usize {
+            let si = src_row + x * bytes_per_pixel;
+            let di = dst_row + x * 4;
+            rgba[di] = d[si + 2];     // R (BMP is BGR)
+            rgba[di + 1] = d[si + 1]; // G
+            rgba[di + 2] = d[si];     // B
+            rgba[di + 3] = 255;       // A
         }
     }
-
-    // Draw spheres in a 4x4 grid
-    let sphere_colors: [(f64, f64, f64); 16] = [
-        (1.0, 0.3, 0.2), // red
-        (0.2, 0.8, 0.3), // green
-        (0.3, 0.4, 1.0), // blue
-        (1.0, 0.8, 0.1), // yellow
-        (0.9, 0.3, 0.8), // magenta
-        (0.2, 0.9, 0.9), // cyan
-        (1.0, 0.5, 0.0), // orange
-        (0.6, 0.3, 0.9), // purple
-        (0.8, 0.8, 0.8), // silver
-        (0.3, 0.7, 0.3), // forest green
-        (0.9, 0.2, 0.4), // crimson
-        (0.4, 0.6, 0.9), // sky blue
-        (0.7, 0.5, 0.2), // brown
-        (0.5, 0.9, 0.5), // lime
-        (0.9, 0.6, 0.7), // pink
-        (0.3, 0.3, 0.7), // navy
-    ];
-
-    let grid = 4;
-    let cell_w = w as f64 / grid as f64;
-    let cell_h = h as f64 / grid as f64;
-    let radius = cell_w.min(cell_h) * 0.4;
-
-    for row in 0..grid {
-        for col in 0..grid {
-            let cx = (col as f64 + 0.5) * cell_w;
-            let cy = (row as f64 + 0.5) * cell_h;
-            let (sr, sg, sb) = sphere_colors[row * grid + col];
-
-            // Light source offset (upper-left)
-            let lx = cx - radius * 0.3;
-            let ly = cy - radius * 0.3;
-
-            for y in 0..h {
-                for x in 0..w {
-                    let dx = x as f64 - cx;
-                    let dy = y as f64 - cy;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist < radius {
-                        // Sphere shading: diffuse + specular
-                        let dl = ((x as f64 - lx).powi(2) + (y as f64 - ly).powi(2)).sqrt();
-                        let norm_d = dl / (radius * 1.5);
-                        let diffuse = (1.0 - norm_d).max(0.0);
-                        let shade = 0.15 + 0.85 * diffuse;
-
-                        // Specular highlight
-                        let spec = if norm_d < 0.3 {
-                            ((0.3 - norm_d) / 0.3).powi(4) * 0.7
-                        } else {
-                            0.0
-                        };
-
-                        // Edge darkening
-                        let edge = 1.0 - (dist / radius).powi(3);
-
-                        let r = ((sr * shade * edge + spec) * 255.0).min(255.0) as u8;
-                        let g = ((sg * shade * edge + spec) * 255.0).min(255.0) as u8;
-                        let b = ((sb * shade * edge + spec) * 255.0).min(255.0) as u8;
-
-                        let off = ((y * w + x) * 4) as usize;
-                        data[off] = r;
-                        data[off + 1] = g;
-                        data[off + 2] = b;
-                        data[off + 3] = 255;
-                    }
-                }
-            }
-        }
-    }
-
-    data
+    (w, h, rgba)
 }
 
 /// Render image1 demo: image affine transformations with bilinear filtering.
@@ -1920,10 +1861,8 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         rb.clear(&Rgba8::new(255, 255, 255, 255));
     }
 
-    // Generate procedural source image (256x256 "spheres")
-    let img_w: u32 = 256;
-    let img_h: u32 = 256;
-    let mut img_data = generate_spheres_image(img_w, img_h);
+    // Load the original AGG spheres.bmp (320x300)
+    let (img_w, img_h, mut img_data) = load_spheres_image();
     let img_stride = (img_w * 4) as i32;
     let mut img_ra = RowAccessor::new();
     unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
