@@ -27,8 +27,8 @@
 //! 5. **Renderer** — blends pixels into the output buffer
 
 // Phase 1: Foundation Types & Math
-// pub mod basics;
-// pub mod math;
-// pub mod array;
-// pub mod color;
-// pub mod gamma;
+pub mod array;
+pub mod basics;
+pub mod color;
+pub mod gamma;
+pub mod math;
