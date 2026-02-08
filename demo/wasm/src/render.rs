@@ -4,6 +4,7 @@
 //! The buffer is width * height * 4 bytes (RGBA order).
 
 use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
+use agg_rust::curves::Curve4Div;
 use agg_rust::bounding_rect::bounding_rect;
 use agg_rust::color::Rgba8;
 use agg_rust::conv_contour::ConvContour;
@@ -34,7 +35,8 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_gradient::{
-    GradientConic, GradientDiamond, GradientRadial, GradientSqrtXY, GradientX, GradientXY,
+    GradientConic, GradientDiamond, GradientRadial, GradientRadialFocus,
+    GradientReflectAdaptor, GradientSqrtXY, GradientX, GradientXY,
     SpanGradient,
 };
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
@@ -2087,6 +2089,500 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         s_scale.set_value(scale);
         render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_scale);
     }
+
+    buf
+}
+
+// ============================================================================
+// Gradient Focal — radial gradient with movable focal point
+// ============================================================================
+
+/// Render a radial gradient with movable focal point, matching C++ gradient_focal.cpp.
+///
+/// params[0] = focal_x (default width/2)
+/// params[1] = focal_y (default height/2)
+/// params[2] = gamma (default 1.0)
+pub fn gradient_focal(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let w = width as f64;
+    let h = height as f64;
+    let cx = w / 2.0;
+    let cy = h / 2.0;
+    let focal_x = params.get(0).copied().unwrap_or(cx);
+    let focal_y = params.get(1).copied().unwrap_or(cy);
+    let _gamma = params.get(2).copied().unwrap_or(1.0);
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut alloc: SpanAllocator<Rgba8> = SpanAllocator::new();
+
+    // Build gradient LUT with 4 color stops, matching C++ gradient_focal.cpp
+    let mut lut = GradientLut::new(1024);
+    lut.add_color(0.0, Rgba8::new(0, 255, 0, 255));      // Green
+    lut.add_color(0.2, Rgba8::new(120, 0, 0, 255));       // Dark red
+    lut.add_color(0.7, Rgba8::new(120, 120, 0, 255));     // Yellow-brown
+    lut.add_color(1.0, Rgba8::new(0, 0, 255, 255));       // Blue
+    lut.build_lut();
+
+    // Gradient setup: radial focus with reflect adaptor
+    let r = 100.0;
+    let fx = focal_x - cx;
+    let fy = focal_y - cy;
+    let grad_func = GradientRadialFocus::new(r, fx, fy);
+    let grad_adaptor = GradientReflectAdaptor::new(grad_func);
+
+    // Transform: translate to center, invert for sampling
+    let mut mtx = TransAffine::new();
+    mtx.multiply(&TransAffine::new_translation(cx, cy));
+    mtx.invert();
+
+    let interp = SpanInterpolatorLinear::new(mtx);
+    let mut grad = SpanGradient::new(interp, grad_adaptor, &lut, 0.0, r);
+
+    // Full-screen rectangle
+    let mut path = PathStorage::new();
+    path.move_to(0.0, 0.0);
+    path.line_to(w, 0.0);
+    path.line_to(w, h);
+    path.line_to(0.0, h);
+    path.close_polygon(0);
+    ras.reset();
+    ras.add_path(&mut path, 0);
+    render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut grad);
+
+    // Draw gradient boundary circle (white, stroked)
+    {
+        let ell = Ellipse::new(cx, cy, r, r, 64, false);
+        let mut stroke = ConvStroke::new(ell);
+        stroke.set_width(2.0);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 200));
+    }
+
+    // Draw focal point marker
+    {
+        let mut ell = Ellipse::new(focal_x, focal_y, 4.0, 4.0, 16, false);
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 255));
+    }
+
+    // Render AGG control — matching C++ gradient_focal.cpp
+    let mut s_gamma = SliderCtrl::new(5.0, 5.0, 340.0, 12.0);
+    s_gamma.label("Gamma = %.3f");
+    s_gamma.range(0.5, 2.5);
+    s_gamma.set_value(_gamma);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
+
+    buf
+}
+
+// ============================================================================
+// Idea — rotating light bulb icon, matches C++ idea.cpp
+// ============================================================================
+
+/// Render the "idea" light bulb icon with rotation.
+///
+/// params[0] = rotation angle in degrees (default 0)
+/// params[1] = even_odd fill (0 or 1, default 0)
+/// params[2] = draft mode (0 or 1, default 0)
+/// params[3] = roundoff (0 or 1, default 0)
+/// params[4] = angle delta (default 0.01, for display)
+/// params[5] = rotate enabled (0 or 1, default 0)
+pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let angle_deg = params.get(0).copied().unwrap_or(0.0);
+    let even_odd = params.get(1).copied().unwrap_or(0.0) > 0.5;
+    let _draft = params.get(2).copied().unwrap_or(0.0) > 0.5;
+    let roundoff = params.get(3).copied().unwrap_or(0.0) > 0.5;
+    let angle_delta = params.get(4).copied().unwrap_or(0.01);
+    let rotate = params.get(5).copied().unwrap_or(0.0) > 0.5;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    if even_odd {
+        ras.filling_rule(agg_rust::basics::FillingRule::EvenOdd);
+    }
+
+    let w = width as f64;
+    let h = height as f64;
+
+    // Path attributes for each layer
+    struct PathAttr {
+        fill: Rgba8,
+        stroke: Rgba8,
+        stroke_width: f64,
+    }
+
+    let attrs = [
+        PathAttr { fill: Rgba8::new(255, 255, 0, 255), stroke: Rgba8::new(0, 0, 0, 255), stroke_width: 1.0 },
+        PathAttr { fill: Rgba8::new(255, 255, 200, 255), stroke: Rgba8::new(90, 0, 0, 255), stroke_width: 0.7 },
+        PathAttr { fill: Rgba8::new(0, 0, 0, 255), stroke: Rgba8::new(0, 0, 0, 255), stroke_width: 0.0 },
+    ];
+
+    // Bulb outline
+    let poly_bulb: &[(f64, f64)] = &[
+        (-29.0, -26.0), (-9.0, -33.0), (0.0, -44.0), (9.0, -33.0), (29.0, -26.0),
+        (36.0, -9.0), (17.0, 0.0), (36.0, 9.0), (29.0, 26.0), (9.0, 33.0),
+        (0.0, 44.0), (-9.0, 33.0), (-29.0, 26.0), (-36.0, 9.0), (-17.0, 0.0),
+        (-36.0, -9.0), (-29.0, -26.0), (-9.0, -33.0), (0.0, -44.0), (9.0, -33.0),
+    ];
+
+    // Light beams
+    let poly_beam1: &[(f64, f64)] = &[(-48.0, -6.0), (-48.0, 6.0), (-56.0, 6.0), (-56.0, -6.0)];
+    let poly_beam2: &[(f64, f64)] = &[(6.0, -48.0), (-6.0, -48.0), (-6.0, -56.0), (6.0, -56.0)];
+    let poly_beam3: &[(f64, f64)] = &[(48.0, 6.0), (48.0, -6.0), (56.0, -6.0), (56.0, 6.0)];
+    let poly_beam4: &[(f64, f64)] = &[(-6.0, 48.0), (6.0, 48.0), (6.0, 56.0), (-6.0, 56.0)];
+
+    // Figure parts
+    let poly_fig1: &[(f64, f64)] = &[(-6.0, -7.0), (-14.0, -10.0), (-14.0, 92.0), (-6.0, 95.0)];
+    let poly_fig2: &[(f64, f64)] = &[(6.0, -7.0), (14.0, -10.0), (14.0, 92.0), (6.0, 95.0)];
+    let poly_fig3: &[(f64, f64)] = &[(-14.0, 92.0), (-14.0, 100.0), (14.0, 100.0), (14.0, 92.0)];
+    let poly_fig4: &[(f64, f64)] = &[(-18.0, 100.0), (-18.0, 108.0), (18.0, 108.0), (18.0, 100.0)];
+    let poly_fig5: &[(f64, f64)] = &[(-21.0, 108.0), (-21.0, 113.0), (21.0, 113.0), (21.0, 108.0)];
+    let poly_fig6: &[(f64, f64)] = &[(-24.0, 113.0), (-24.0, 118.0), (24.0, 118.0), (24.0, 113.0)];
+
+    // Group paths by attribute: (polygons, attr_index)
+    let groups: [(&[&[(f64, f64)]], usize); 3] = [
+        (&[poly_bulb], 0),
+        (&[poly_beam1, poly_beam2, poly_beam3, poly_beam4], 1),
+        (&[poly_fig1, poly_fig2, poly_fig3, poly_fig4, poly_fig5, poly_fig6], 2),
+    ];
+
+    // Transform: rotate, scale to fit window, translate to center
+    let scale = (w.min(h) / 300.0).min(2.0);
+    let mut mtx = TransAffine::new();
+    mtx.multiply(&TransAffine::new_rotation(angle_deg * std::f64::consts::PI / 180.0));
+    mtx.multiply(&TransAffine::new_scaling_uniform(scale));
+    mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0 + 10.0));
+
+    for (polys, attr_idx) in &groups {
+        let attr = &attrs[*attr_idx];
+
+        for poly in *polys {
+            let mut path = PathStorage::new();
+            for (i, (px, py)) in poly.iter().enumerate() {
+                let (x, y) = if roundoff {
+                    let mut tx = *px;
+                    let mut ty = *py;
+                    mtx.transform(&mut tx, &mut ty);
+                    ((tx + 0.5).floor(), (ty + 0.5).floor())
+                } else {
+                    (*px, *py)
+                };
+                if i == 0 { path.move_to(x, y); } else { path.line_to(x, y); }
+            }
+            path.close_polygon(0);
+
+            // Fill
+            ras.reset();
+            if roundoff {
+                ras.add_path(&mut path, 0);
+            } else {
+                let mut transformed = ConvTransform::new(&mut path, mtx);
+                ras.add_path(&mut transformed, 0);
+            }
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &attr.fill);
+
+            // Stroke (if width > 0)
+            if attr.stroke_width > 0.01 {
+                let mut path2 = PathStorage::new();
+                for (i, (px, py)) in poly.iter().enumerate() {
+                    if i == 0 { path2.move_to(*px, *py); } else { path2.line_to(*px, *py); }
+                }
+                path2.close_polygon(0);
+
+                let transformed = ConvTransform::new(&mut path2, mtx);
+                let mut stroke = ConvStroke::new(transformed);
+                stroke.set_width(attr.stroke_width);
+                ras.reset();
+                ras.add_path(&mut stroke, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &attr.stroke);
+            }
+        }
+    }
+
+    ras.filling_rule(agg_rust::basics::FillingRule::NonZero);
+
+    // Render AGG controls — matching C++ idea.cpp
+    let mut c_rotate = CboxCtrl::new(10.0, 3.0, "Rotate");
+    c_rotate.set_status(rotate);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_rotate);
+
+    let mut c_even_odd = CboxCtrl::new(60.0, 3.0, "Even-Odd");
+    c_even_odd.set_status(even_odd);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_even_odd);
+
+    let mut c_draft = CboxCtrl::new(130.0, 3.0, "Draft");
+    c_draft.set_status(_draft);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_draft);
+
+    let mut c_roundoff = CboxCtrl::new(175.0, 3.0, "Roundoff");
+    c_roundoff.set_status(roundoff);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_roundoff);
+
+    let mut s_angle = SliderCtrl::new(10.0, 21.0, 240.0, 27.0);
+    s_angle.label("Step=%4.3f degree");
+    s_angle.set_value(angle_delta);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_angle);
+
+    buf
+}
+
+// ============================================================================
+// Graph Test — random graph with various edge rendering modes
+// Matches C++ graph_test.cpp (simplified: no arrowheads, requires conv_marker_adaptor)
+// ============================================================================
+
+/// Simple portable PRNG matching C's srand(100)/rand() pattern.
+struct SimpleRng(u32);
+impl SimpleRng {
+    fn new(seed: u32) -> Self { SimpleRng(seed) }
+    fn next(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(1103515245).wrapping_add(12345);
+        (self.0 >> 16) & 0x7FFF
+    }
+    fn next_f64(&mut self) -> f64 {
+        self.next() as f64 / 32767.0
+    }
+}
+
+struct GraphNode { x: f64, y: f64 }
+struct GraphEdge { n1: usize, n2: usize }
+
+/// Generate a random graph with seeded PRNG.
+fn generate_graph(num_nodes: usize, num_edges: usize) -> (Vec<GraphNode>, Vec<GraphEdge>) {
+    let mut rng = SimpleRng::new(100);
+    let nodes: Vec<GraphNode> = (0..num_nodes).map(|_| GraphNode {
+        x: rng.next_f64() * 0.75 + 0.2,
+        y: rng.next_f64() * 0.85 + 0.1,
+    }).collect();
+
+    let mut edges = Vec::with_capacity(num_edges);
+    while edges.len() < num_edges {
+        let n1 = rng.next() as usize % num_nodes;
+        let n2 = rng.next() as usize % num_nodes;
+        if n1 != n2 {
+            edges.push(GraphEdge { n1, n2 });
+        }
+    }
+    (nodes, edges)
+}
+
+/// Render graph_test demo.
+///
+/// params[0] = edge type (0=solid, 1=bezier, 2=dashed, 3=polygonsAA, 4=polygonsBin)
+/// params[1] = stroke width (0-5, default 2)
+/// params[2] = draw_nodes (0 or 1, default 1)
+/// params[3] = draw_edges (0 or 1, default 1)
+/// params[4] = draft mode (0 or 1, default 0)
+/// params[5] = translucent (0 or 1, default 0)
+pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let edge_type = params.get(0).copied().unwrap_or(0.0) as usize;
+    let stroke_width = params.get(1).copied().unwrap_or(2.0);
+    let draw_nodes = params.get(2).copied().unwrap_or(1.0) > 0.5;
+    let draw_edges = params.get(3).copied().unwrap_or(1.0) > 0.5;
+    let _draft = params.get(4).copied().unwrap_or(0.0) > 0.5;
+    let translucent = params.get(5).copied().unwrap_or(0.0) > 0.5;
+
+    let w = width as f64;
+    let h = height as f64;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut alloc: SpanAllocator<Rgba8> = SpanAllocator::new();
+
+    // Build gradient LUT for nodes (yellow→blue, 256 colors)
+    let mut grad_colors = Vec::with_capacity(256);
+    for i in 0..256 {
+        let t = i as f64 / 255.0;
+        let r = ((1.0 - t) * 255.0) as u32;
+        let g = ((1.0 - t) * 255.0) as u32;
+        let b = (t * 255.0) as u32;
+        let a = ((1.0 - t) * 0.25 * 255.0 + t * 255.0) as u32;
+        grad_colors.push(Rgba8::new(r, g, b, a));
+    }
+
+    let (nodes, edges) = generate_graph(200, 100);
+
+    // Deterministic random colors for edges
+    let mut color_rng = SimpleRng::new(100);
+    // Skip the node generation RNG calls to stay in sync
+    for _ in 0..(200 * 2 + 100 * 2) { color_rng.next(); }
+
+    let alpha: u32 = if translucent { 80 } else { 255 };
+
+    // Draw edges
+    if draw_edges {
+        let mut edge_rng = SimpleRng::new(42); // separate seed for edge colors
+        for edge in &edges {
+            let n1 = &nodes[edge.n1];
+            let n2 = &nodes[edge.n2];
+            let x1 = n1.x * w;
+            let y1 = n1.y * h;
+            let x2 = n2.x * w;
+            let y2 = n2.y * h;
+
+            let r = edge_rng.next() & 0x7F;
+            let g = edge_rng.next() & 0x7F;
+            let b = edge_rng.next() & 0x7F;
+            let edge_color = Rgba8::new(r, g, b, alpha as u32);
+
+            match edge_type {
+                0 => {
+                    // Solid lines
+                    let mut path = PathStorage::new();
+                    path.move_to(x1, y1);
+                    path.line_to(x2, y2);
+                    let mut stroke = ConvStroke::new(path);
+                    stroke.set_width(stroke_width);
+                    ras.reset();
+                    ras.add_path(&mut stroke, 0);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &edge_color);
+                }
+                1 => {
+                    // Bezier curves
+                    let k = 0.5;
+                    let curve = Curve4Div::new_with_points(
+                        x1, y1,
+                        x1 - (y2 - y1) * k, y1 + (x2 - x1) * k,
+                        x2 + (y2 - y1) * k, y2 - (x2 - x1) * k,
+                        x2, y2,
+                    );
+                    let mut stroke = ConvStroke::new(curve);
+                    stroke.set_width(stroke_width);
+                    ras.reset();
+                    ras.add_path(&mut stroke, 0);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &edge_color);
+                }
+                2 => {
+                    // Dashed curves
+                    let k = 0.5;
+                    let curve = Curve4Div::new_with_points(
+                        x1, y1,
+                        x1 - (y2 - y1) * k, y1 + (x2 - x1) * k,
+                        x2 + (y2 - y1) * k, y2 - (x2 - x1) * k,
+                        x2, y2,
+                    );
+                    let mut dash = ConvDash::new(curve);
+                    dash.add_dash(6.0, 3.0);
+                    let mut stroke = ConvStroke::new(dash);
+                    stroke.set_width(stroke_width);
+                    ras.reset();
+                    ras.add_path(&mut stroke, 0);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &edge_color);
+                }
+                3 | 4 => {
+                    // Polygons (AA for type 3, threshold for type 4)
+                    let k = 0.5;
+                    let mut curve = Curve4Div::new_with_points(
+                        x1, y1,
+                        x1 - (y2 - y1) * k, y1 + (x2 - x1) * k,
+                        x2 + (y2 - y1) * k, y2 - (x2 - x1) * k,
+                        x2, y2,
+                    );
+                    ras.reset();
+                    ras.add_path(&mut curve, 0);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &edge_color);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Draw nodes — gradient-filled circles matching C++ draw_nodes_fine
+    if draw_nodes {
+        for node in &nodes {
+            let nx = node.x * w;
+            let ny = node.y * h;
+            let node_size = 5.0 * stroke_width;
+
+            // Outer circle with radial gradient
+            let grad_func = GradientRadial;
+            let mut mtx = TransAffine::new();
+            mtx.multiply(&TransAffine::new_scaling_uniform(stroke_width / 2.0));
+            mtx.multiply(&TransAffine::new_translation(nx, ny));
+            mtx.invert();
+            let interp = SpanInterpolatorLinear::new(mtx);
+
+            let mut lut = GradientLut::new(256);
+            lut.add_color(0.0, grad_colors[50]);
+            lut.add_color(0.5, grad_colors[147]);
+            lut.add_color(1.0, grad_colors[255]);
+            lut.build_lut();
+
+            let mut grad = SpanGradient::new(interp, grad_func, &lut, 0.0, 10.0);
+
+            let mut ell = Ellipse::new(nx, ny, node_size, node_size, 32, false);
+            ras.reset();
+            ras.add_path(&mut ell, 0);
+            render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut grad);
+
+            // Inner filled circle
+            let mut ell2 = Ellipse::new(nx, ny, node_size * 0.4, node_size * 0.4, 16, false);
+            ras.reset();
+            ras.add_path(&mut ell2, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &grad_colors[50]);
+        }
+    }
+
+    // Render AGG controls — matching C++ graph_test.cpp layout
+    let mut r_type = RboxCtrl::new(5.0, 35.0, 110.0, 110.0);
+    r_type.text_size(8.0, 4.0);
+    r_type.add_item("Solid lines");
+    r_type.add_item("Bezier curves");
+    r_type.add_item("Dashed curves");
+    r_type.add_item("Polygons AA");
+    r_type.add_item("Polygons Bin");
+    r_type.set_cur_item(edge_type as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_type);
+
+    let mut s_width = SliderCtrl::new(190.0, 8.0, 390.0, 15.0);
+    s_width.label("Width=%1.2f");
+    s_width.range(0.0, 5.0);
+    s_width.num_steps(20);
+    s_width.set_value(stroke_width);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+
+    let mut c_draw_nodes = CboxCtrl::new(398.0, 21.0, "Draw Nodes");
+    c_draw_nodes.text_size(8.0, 4.0);
+    c_draw_nodes.set_status(draw_nodes);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_draw_nodes);
+
+    let mut c_draw_edges = CboxCtrl::new(488.0, 21.0, "Draw Edges");
+    c_draw_edges.text_size(8.0, 4.0);
+    c_draw_edges.set_status(draw_edges);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_draw_edges);
+
+    let mut c_draft = CboxCtrl::new(488.0, 6.0, "Draft Mode");
+    c_draft.text_size(8.0, 4.0);
+    c_draft.set_status(_draft);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_draft);
+
+    let mut c_translucent = CboxCtrl::new(190.0, 21.0, "Translucent Mode");
+    c_translucent.set_status(translucent);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_translucent);
 
     buf
 }

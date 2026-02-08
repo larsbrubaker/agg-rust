@@ -23,6 +23,9 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'perspective': () => import('./demos/perspective.ts'),
   'image_fltr_graph': () => import('./demos/image_fltr_graph.ts'),
   'image1': () => import('./demos/image1.ts'),
+  'gradient_focal': () => import('./demos/gradient_focal.ts'),
+  'idea': () => import('./demos/idea.ts'),
+  'graph_test': () => import('./demos/graph_test.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -147,6 +150,21 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">&#127912;</span>
           <h3>Image Transforms</h3>
           <p>Procedural sphere image with affine rotation/scaling through a bilinear filter.</p>
+        </a>
+        <a href="#/gradient_focal" class="feature-card">
+          <span class="card-icon">&#9737;</span>
+          <h3>Gradient Focal</h3>
+          <p>Radial gradient with moveable focal point and reflect adaptor.</p>
+        </a>
+        <a href="#/idea" class="feature-card">
+          <span class="card-icon">&#128161;</span>
+          <h3>Idea</h3>
+          <p>Rotating light bulb icon with even-odd fill, draft, and roundoff options.</p>
+        </a>
+        <a href="#/graph_test" class="feature-card">
+          <span class="card-icon">&#128200;</span>
+          <h3>Graph Test</h3>
+          <p>Random graph with 200 nodes and 100 edges — 5 rendering modes.</p>
         </a>
       </div>
       <div class="about-section">
