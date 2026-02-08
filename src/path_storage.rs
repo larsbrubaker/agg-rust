@@ -20,6 +20,7 @@ use crate::math::{calc_distance, VERTEX_DIST_EPSILON};
 /// commands. Implements `VertexSource` for use in the rendering pipeline.
 ///
 /// Port of C++ `agg::path_storage` (typedef for `path_base<vertex_block_storage<double>>`).
+#[derive(Clone)]
 pub struct PathStorage {
     vertices: Vec<VertexD>,
     iterator: usize,
@@ -58,6 +59,13 @@ impl PathStorage {
             self.vertices.push(VertexD::new(0.0, 0.0, PATH_CMD_STOP));
         }
         self.vertices.len()
+    }
+
+    /// Add a vertex with an explicit command.
+    ///
+    /// Port of C++ `path_storage::add_vertex(x, y, cmd)`.
+    pub fn add_vertex(&mut self, x: f64, y: f64, cmd: u32) {
+        self.vertices.push(VertexD::new(x, y, cmd));
     }
 
     /// Add a move_to command.

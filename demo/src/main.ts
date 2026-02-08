@@ -20,6 +20,8 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'conv_contour': () => import('./demos/conv_contour.ts'),
   'conv_dash': () => import('./demos/conv_dash.ts'),
   'gsv_text': () => import('./demos/gsv_text.ts'),
+  'perspective': () => import('./demos/perspective.ts'),
+  'image_fltr_graph': () => import('./demos/image_fltr_graph.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -129,6 +131,16 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">A</span>
           <h3>GSV Text</h3>
           <p>Built-in vector text engine with adjustable size and stroke width.</p>
+        </a>
+        <a href="#/perspective" class="feature-card">
+          <span class="card-icon">&#9670;</span>
+          <h3>Perspective</h3>
+          <p>Lion with bilinear/perspective quad transform &mdash; drag corners to warp.</p>
+        </a>
+        <a href="#/image_fltr_graph" class="feature-card">
+          <span class="card-icon">&#8767;</span>
+          <h3>Filter Graph</h3>
+          <p>Image filter kernel weight function visualization &mdash; 16 filters.</p>
         </a>
       </div>
       <div class="about-section">

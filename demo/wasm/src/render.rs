@@ -4,6 +4,7 @@
 //! The buffer is width * height * 4 bytes (RGBA order).
 
 use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
+use agg_rust::bounding_rect::bounding_rect;
 use agg_rust::color::Rgba8;
 use agg_rust::conv_contour::ConvContour;
 use agg_rust::conv_curve::ConvCurve;
@@ -13,6 +14,13 @@ use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gradient_lut::GradientLut;
 use agg_rust::gsv_text::GsvText;
+use agg_rust::image_filters::{
+    ImageFilterBilinear, ImageFilterBicubic, ImageFilterSpline16, ImageFilterSpline36,
+    ImageFilterHanning, ImageFilterHamming, ImageFilterHermite, ImageFilterKaiser,
+    ImageFilterQuadric, ImageFilterCatrom, ImageFilterGaussian, ImageFilterBessel,
+    ImageFilterMitchell, ImageFilterSinc, ImageFilterLanczos, ImageFilterBlackman,
+    ImageFilterFunction,
+};
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
@@ -30,6 +38,8 @@ use agg_rust::span_gradient::{
 };
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
+use agg_rust::trans_bilinear::TransBilinear;
+use agg_rust::trans_perspective::TransPerspective;
 
 /// Create a rendering buffer, pixel format, and renderer base from dimensions.
 fn setup_renderer(
@@ -1421,6 +1431,286 @@ pub fn gsv_text_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.reset();
         ras.add_path(&mut stroke, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(140, 140, 140, 200));
+    }
+
+    buf
+}
+
+// ============================================================================
+// Perspective — lion with bilinear/perspective quad transform
+// ============================================================================
+
+/// Render the lion with perspective or bilinear transformation.
+/// Matches C++ perspective.cpp — 4 draggable quad corners.
+///
+/// params[0..8] = q0x,q0y, q1x,q1y, q2x,q2y, q3x,q3y (quad corners)
+/// params[8] = transform type (0=bilinear, 1=perspective)
+pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let (mut path, colors, path_idx) = crate::lion_data::parse_lion();
+    let npaths = colors.len();
+
+    // Compute bounding rect of lion paths
+    let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
+    let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
+        agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
+    );
+
+    // Default quad = bounding rect corners (possibly offset to center)
+    let w = width as f64;
+    let h = height as f64;
+    let ox = (w - (bbox.x2 - bbox.x1)) / 2.0 - bbox.x1;
+    let oy = (h - (bbox.y2 - bbox.y1)) / 2.0 - bbox.y1;
+
+    let q0x = params.get(0).copied().unwrap_or(bbox.x1 + ox);
+    let q0y = params.get(1).copied().unwrap_or(bbox.y1 + oy);
+    let q1x = params.get(2).copied().unwrap_or(bbox.x2 + ox);
+    let q1y = params.get(3).copied().unwrap_or(bbox.y1 + oy);
+    let q2x = params.get(4).copied().unwrap_or(bbox.x2 + ox);
+    let q2y = params.get(5).copied().unwrap_or(bbox.y2 + oy);
+    let q3x = params.get(6).copied().unwrap_or(bbox.x1 + ox);
+    let q3y = params.get(7).copied().unwrap_or(bbox.y2 + oy);
+    let trans_type = params.get(8).copied().unwrap_or(0.0) as i32;
+
+    let quad = [q0x, q0y, q1x, q1y, q2x, q2y, q3x, q3y];
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    // Create transform function (rect → quad)
+    enum TransformKind {
+        Bilinear(TransBilinear),
+        Perspective(TransPerspective),
+    }
+
+    let transform = if trans_type == 0 {
+        TransformKind::Bilinear(TransBilinear::new_rect_to_quad(
+            bbox.x1, bbox.y1, bbox.x2, bbox.y2, &quad,
+        ))
+    } else {
+        let mut tp = TransPerspective::new();
+        tp.rect_to_quad(bbox.x1, bbox.y1, bbox.x2, bbox.y2, &quad);
+        TransformKind::Perspective(tp)
+    };
+
+    let valid = match &transform {
+        TransformKind::Bilinear(tb) => tb.is_valid(),
+        TransformKind::Perspective(tp) => tp.is_valid(),
+    };
+
+    if valid {
+        // Transform all lion vertices in-place
+        let n_verts = path.total_vertices();
+        for vi in 0..n_verts {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = path.vertex_idx(vi, &mut x, &mut y);
+            if is_vertex(cmd) {
+                match &transform {
+                    TransformKind::Bilinear(tb) => tb.transform(&mut x, &mut y),
+                    TransformKind::Perspective(tp) => tp.transform(&mut x, &mut y),
+                }
+                path.modify_vertex(vi, x, y);
+            }
+        }
+
+        // Render each colored lion path
+        for i in 0..npaths {
+            let start = path_idx[i] as u32;
+            ras.reset();
+            ras.add_path(&mut path, start);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &colors[i]);
+        }
+    }
+
+    // Draw quad outline
+    {
+        let mut quad_path = PathStorage::new();
+        quad_path.move_to(q0x, q0y);
+        quad_path.line_to(q1x, q1y);
+        quad_path.line_to(q2x, q2y);
+        quad_path.line_to(q3x, q3y);
+        quad_path.close_polygon(0);
+        let mut stroke = ConvStroke::new(&mut quad_path);
+        stroke.set_width(2.0);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(50, 50, 200, 200));
+    }
+
+    // Quad corner markers
+    for (cx, cy) in &[(q0x, q0y), (q1x, q1y), (q2x, q2y), (q3x, q3y)] {
+        let mut ell = Ellipse::new(*cx, *cy, 6.0, 6.0, 16, false);
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
+    }
+
+    buf
+}
+
+// ============================================================================
+// Image Filter Graph — filter kernel visualization
+// ============================================================================
+
+/// Render image filter weight function graphs.
+/// Matches C++ image_fltr_graph.cpp — select a filter, see its kernel shape.
+///
+/// params[0] = filter index (0–15, default 0)
+/// params[1] = radius for variable-radius filters (default 4.0)
+pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let filter_idx = params.get(0).copied().unwrap_or(0.0) as usize;
+    let custom_radius = params.get(1).copied().unwrap_or(4.0).clamp(2.0, 8.0);
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    let w = width as f64;
+    let h = height as f64;
+
+    // Plot area
+    let x_start = 10.0;
+    let x_end = w - 10.0;
+    let y_start = 30.0;
+    let y_end = h - 10.0;
+    let x_width = x_end - x_start;
+    let y_height = y_end - y_start;
+    let y_baseline = y_start + y_height / 6.0; // Baseline for weight = 0
+
+    // Get filter function and radius
+    let (radius, filter_name): (f64, &str) = match filter_idx {
+        0 => (ImageFilterBilinear.radius(), "Bilinear"),
+        1 => (ImageFilterBicubic.radius(), "Bicubic"),
+        2 => (ImageFilterSpline16.radius(), "Spline16"),
+        3 => (ImageFilterSpline36.radius(), "Spline36"),
+        4 => (ImageFilterHanning.radius(), "Hanning"),
+        5 => (ImageFilterHamming.radius(), "Hamming"),
+        6 => (ImageFilterHermite.radius(), "Hermite"),
+        7 => (ImageFilterKaiser::new(5.0).radius(), "Kaiser"),
+        8 => (ImageFilterQuadric.radius(), "Quadric"),
+        9 => (ImageFilterCatrom.radius(), "Catrom"),
+        10 => (ImageFilterGaussian.radius(), "Gaussian"),
+        11 => (ImageFilterBessel.radius(), "Bessel"),
+        12 => (ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0).radius(), "Mitchell"),
+        13 => (custom_radius, "Sinc"),
+        14 => (custom_radius, "Lanczos"),
+        15 => (custom_radius, "Blackman"),
+        _ => (ImageFilterBilinear.radius(), "Bilinear"),
+    };
+
+    // Grid lines
+    let n_grid = 16;
+    for i in 0..=n_grid {
+        let t = i as f64 / n_grid as f64;
+        let x = x_start + t * x_width;
+        let mut line = PathStorage::new();
+        line.move_to(x, y_start);
+        line.line_to(x, y_end);
+        let mut stroke = ConvStroke::new(&mut line);
+        stroke.set_width(if i == n_grid / 2 { 1.0 } else { 0.3 });
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        let gray = if i == n_grid / 2 { 80 } else { 180 };
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(gray, gray, gray, 200));
+    }
+
+    // Baseline (y = 0 weight)
+    {
+        let mut line = PathStorage::new();
+        line.move_to(x_start, y_baseline);
+        line.line_to(x_end, y_baseline);
+        let mut stroke = ConvStroke::new(&mut line);
+        stroke.set_width(1.0);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 200));
+    }
+
+    // Plot filter weight curve
+    let center_x = x_start + x_width / 2.0;
+    let x_scale = x_width / (2.0 * radius);
+    let y_scale = -(y_end - y_baseline); // Negative: weight=1 goes up
+
+    let n_points = (x_width as usize).max(200);
+    let mut curve_path = PathStorage::new();
+
+    // Macro to plot any filter function
+    macro_rules! plot_filter {
+        ($filter:expr) => {{
+            for i in 0..=n_points {
+                let t = i as f64 / n_points as f64;
+                let x_screen = x_start + t * x_width;
+                let x_filter = (x_screen - center_x) / x_scale; // Map to filter coords [-radius, radius]
+                let weight = if x_filter.abs() <= radius {
+                    $filter.calc_weight(x_filter)
+                } else {
+                    0.0
+                };
+                let y_screen = y_baseline + weight * y_scale;
+                if i == 0 {
+                    curve_path.move_to(x_screen, y_screen);
+                } else {
+                    curve_path.line_to(x_screen, y_screen);
+                }
+            }
+        }};
+    }
+
+    match filter_idx {
+        0 => plot_filter!(ImageFilterBilinear),
+        1 => plot_filter!(ImageFilterBicubic),
+        2 => plot_filter!(ImageFilterSpline16),
+        3 => plot_filter!(ImageFilterSpline36),
+        4 => plot_filter!(ImageFilterHanning),
+        5 => plot_filter!(ImageFilterHamming),
+        6 => plot_filter!(ImageFilterHermite),
+        7 => plot_filter!(ImageFilterKaiser::new(5.0)),
+        8 => plot_filter!(ImageFilterQuadric),
+        9 => plot_filter!(ImageFilterCatrom),
+        10 => plot_filter!(ImageFilterGaussian),
+        11 => plot_filter!(ImageFilterBessel),
+        12 => plot_filter!(ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0)),
+        13 => plot_filter!(ImageFilterSinc::new(custom_radius)),
+        14 => plot_filter!(ImageFilterLanczos::new(custom_radius)),
+        15 => plot_filter!(ImageFilterBlackman::new(custom_radius)),
+        _ => plot_filter!(ImageFilterBilinear),
+    }
+
+    // Render the curve
+    {
+        let mut stroke = ConvStroke::new(&mut curve_path);
+        stroke.set_width(2.0);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 0, 0, 255));
+    }
+
+    // Filter name label
+    {
+        let label = format!("{} (r={:.1})", filter_name, radius);
+        let mut txt = GsvText::new();
+        txt.size(16.0, 0.0);
+        txt.start_point(x_start + 5.0, y_start + 2.0);
+        txt.text(&label);
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(1.2);
+        stroke.set_line_cap(LineCap::Round);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 120, 255));
     }
 
     buf
