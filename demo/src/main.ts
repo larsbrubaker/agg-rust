@@ -17,6 +17,9 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'gamma_correction': () => import('./demos/gamma_correction.ts'),
   'line_thickness': () => import('./demos/line_thickness.ts'),
   'rasterizers': () => import('./demos/rasterizers.ts'),
+  'conv_contour': () => import('./demos/conv_contour.ts'),
+  'conv_dash': () => import('./demos/conv_dash.ts'),
+  'gsv_text': () => import('./demos/gsv_text.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -111,6 +114,21 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">&#9651;</span>
           <h3>Rasterizers</h3>
           <p>Filled and stroked triangle with alpha control.</p>
+        </a>
+        <a href="#/conv_contour" class="feature-card">
+          <span class="card-icon">&#9674;</span>
+          <h3>Conv Contour</h3>
+          <p>Letter "A" with adjustable contour width and orientation control.</p>
+        </a>
+        <a href="#/conv_dash" class="feature-card">
+          <span class="card-icon">&#9473;</span>
+          <h3>Conv Dash</h3>
+          <p>Dashed stroke patterns with cap styles on a draggable triangle.</p>
+        </a>
+        <a href="#/gsv_text" class="feature-card">
+          <span class="card-icon">A</span>
+          <h3>GSV Text</h3>
+          <p>Built-in vector text engine with adjustable size and stroke width.</p>
         </a>
       </div>
       <div class="about-section">

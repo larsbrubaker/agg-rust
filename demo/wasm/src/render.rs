@@ -3,13 +3,16 @@
 //! Each function renders a specific demo into an RGBA pixel buffer.
 //! The buffer is width * height * 4 bytes (RGBA order).
 
+use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
 use agg_rust::color::Rgba8;
+use agg_rust::conv_contour::ConvContour;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gradient_lut::GradientLut;
+use agg_rust::gsv_text::GsvText;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
@@ -26,7 +29,6 @@ use agg_rust::span_gradient::{
     SpanGradient,
 };
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
-use agg_rust::basics::{is_stop, is_vertex, VertexSource};
 use agg_rust::trans_affine::TransAffine;
 
 /// Create a rendering buffer, pixel format, and renderer base from dimensions.
@@ -1102,6 +1104,323 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.reset();
         ras.add_path(&mut ell, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
+    }
+
+    buf
+}
+
+// ============================================================================
+// Conv Contour — matches C++ conv_contour.cpp
+// ============================================================================
+
+/// Render contour demo — letter "A" shape with adjustable contour width.
+///
+/// params[0] = close mode (0=close, 1=close_cw, 2=close_ccw)
+/// params[1] = contour width [-100, 100] (default 0)
+/// params[2] = auto_detect orientation (0 or 1, default 1)
+pub fn conv_contour_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let close_mode = params.get(0).copied().unwrap_or(0.0) as i32;
+    let contour_w = params.get(1).copied().unwrap_or(0.0);
+    let auto_detect = params.get(2).copied().unwrap_or(1.0) > 0.5;
+
+    let flag = match close_mode {
+        1 => PATH_FLAGS_CW,
+        2 => PATH_FLAGS_CCW,
+        _ => 0,
+    };
+
+    // Build the letter "A" path, matching C++ conv_contour.cpp compose_path()
+    let mut path = PathStorage::new();
+
+    // Outer contour
+    path.move_to(28.47, 6.45);
+    path.curve3(21.58, 1.12, 19.82, 0.29);
+    path.curve3(17.19, -0.93, 14.21, -0.93);
+    path.curve3(9.57, -0.93, 6.57, 2.25);
+    path.curve3(3.56, 5.42, 3.56, 10.60);
+    path.curve3(3.56, 13.87, 5.03, 16.26);
+    path.curve3(7.03, 19.58, 11.99, 22.51);
+    path.curve3(16.94, 25.44, 28.47, 29.64);
+    path.line_to(28.47, 31.40);
+    path.curve3(28.47, 38.09, 26.34, 40.58);
+    path.curve3(24.22, 43.07, 20.17, 43.07);
+    path.curve3(17.09, 43.07, 15.28, 41.41);
+    path.curve3(13.43, 39.75, 13.43, 37.60);
+    path.line_to(13.53, 34.77);
+    path.curve3(13.53, 32.52, 12.38, 31.30);
+    path.curve3(11.23, 30.08, 9.38, 30.08);
+    path.curve3(7.57, 30.08, 6.42, 31.35);
+    path.curve3(5.27, 32.62, 5.27, 34.81);
+    path.curve3(5.27, 39.01, 9.57, 42.53);
+    path.curve3(13.87, 46.04, 21.63, 46.04);
+    path.curve3(27.59, 46.04, 31.40, 44.04);
+    path.curve3(34.28, 42.53, 35.64, 39.31);
+    path.curve3(36.52, 37.21, 36.52, 30.71);
+    path.line_to(36.52, 15.53);
+    path.curve3(36.52, 9.13, 36.77, 7.69);
+    path.curve3(37.01, 6.25, 37.57, 5.76);
+    path.curve3(38.13, 5.27, 38.87, 5.27);
+    path.curve3(39.65, 5.27, 40.23, 5.62);
+    path.curve3(41.26, 6.25, 44.19, 9.18);
+    path.line_to(44.19, 6.45);
+    path.curve3(38.72, -0.88, 33.74, -0.88);
+    path.curve3(31.35, -0.88, 29.93, 0.78);
+    path.curve3(28.52, 2.44, 28.47, 6.45);
+    path.close_polygon(flag);
+
+    // Inner contour (hole in the "A")
+    path.move_to(28.47, 9.62);
+    path.line_to(28.47, 26.66);
+    path.curve3(21.09, 23.73, 18.95, 22.51);
+    path.curve3(15.09, 20.36, 13.43, 18.02);
+    path.curve3(11.77, 15.67, 11.77, 12.89);
+    path.curve3(11.77, 9.38, 13.87, 7.06);
+    path.curve3(15.97, 4.74, 18.70, 4.74);
+    path.curve3(22.41, 4.74, 28.47, 9.62);
+    path.close_polygon(flag);
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    // Transform: scale 4x, translate to center of canvas (matching C++ scale=4.0, translate(150,100))
+    let mut mtx = TransAffine::new();
+    mtx.multiply(&TransAffine::new_scaling_uniform(4.0));
+    mtx.multiply(&TransAffine::new_translation(150.0, 100.0));
+
+    // Pipeline: path → conv_transform → conv_curve → conv_contour
+    let trans = ConvTransform::new(&mut path, mtx);
+    let curve = ConvCurve::new(trans);
+    let mut contour = ConvContour::new(curve);
+    contour.set_width(contour_w);
+    contour.set_auto_detect_orientation(auto_detect);
+
+    ras.reset();
+    ras.add_path(&mut contour, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    buf
+}
+
+// ============================================================================
+// Conv Dash — triangle with dash patterns and cap styles
+// ============================================================================
+
+/// Render a triangle with dashed stroke, matching core of C++ conv_dash_marker.cpp.
+///
+/// params[0..6] = x0,y0, x1,y1, x2,y2 (3 vertex positions)
+/// params[6] = cap type (0=butt, 1=square, 2=round)
+/// params[7] = stroke width (default 3.0)
+/// params[8] = close polygon (0 or 1, default 0)
+/// params[9] = even_odd fill (0 or 1, default 0)
+pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let vx0 = params.get(0).copied().unwrap_or(157.0);
+    let vy0 = params.get(1).copied().unwrap_or(60.0);
+    let vx1 = params.get(2).copied().unwrap_or(469.0);
+    let vy1 = params.get(3).copied().unwrap_or(170.0);
+    let vx2 = params.get(4).copied().unwrap_or(243.0);
+    let vy2 = params.get(5).copied().unwrap_or(310.0);
+    let cap_idx = params.get(6).copied().unwrap_or(0.0) as i32;
+    let sw = params.get(7).copied().unwrap_or(3.0).max(0.5);
+    let close = params.get(8).copied().unwrap_or(0.0) > 0.5;
+    let even_odd = params.get(9).copied().unwrap_or(0.0) > 0.5;
+
+    let cap = match cap_idx {
+        1 => LineCap::Square,
+        2 => LineCap::Round,
+        _ => LineCap::Butt,
+    };
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    // Build triangle path
+    let mut path = PathStorage::new();
+    path.move_to(vx0, vy0);
+    path.line_to(vx1, vy1);
+    path.line_to(vx2, vy2);
+    if close {
+        path.close_polygon(0);
+    }
+
+    // Layer 1: Filled triangle (semi-transparent)
+    {
+        ras.reset();
+        if even_odd {
+            ras.filling_rule(agg_rust::basics::FillingRule::EvenOdd);
+        }
+        ras.add_path(&mut path, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(178, 128, 25, 128));
+        ras.filling_rule(agg_rust::basics::FillingRule::NonZero);
+    }
+
+    // Layer 2: Solid stroke outline
+    {
+        let mut stroke = ConvStroke::new(&mut path);
+        stroke.set_width(sw);
+        stroke.set_line_cap(cap);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 204));
+    }
+
+    // Layer 3: Dashed stroke overlay
+    {
+        let mut dash = ConvDash::new(&mut path);
+        dash.add_dash(20.0, 5.0);
+        dash.add_dash(5.0, 5.0);
+        dash.dash_start(10.0);
+        let mut stroke = ConvStroke::new(dash);
+        stroke.set_width(sw);
+        stroke.set_line_cap(cap);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    }
+
+    // Vertex markers
+    for (vx, vy) in &[(vx0, vy0), (vx1, vy1), (vx2, vy2)] {
+        let mut ell = Ellipse::new(*vx, *vy, 5.0, 5.0, 16, false);
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
+    }
+
+    buf
+}
+
+// ============================================================================
+// GSV Text — text rendering demo
+// ============================================================================
+
+/// Render text using the built-in GSV text engine.
+///
+/// params[0] = text size (default 24)
+/// params[1] = stroke width (default 1.0)
+/// params[2] = x offset (default 20)
+/// params[3] = y offset (default 40)
+pub fn gsv_text_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let text_size = params.get(0).copied().unwrap_or(24.0).max(4.0);
+    let stroke_w = params.get(1).copied().unwrap_or(1.0).max(0.1);
+    let x_off = params.get(2).copied().unwrap_or(20.0);
+    let y_off = params.get(3).copied().unwrap_or(40.0);
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    let w = width as f64;
+    let h = height as f64;
+
+    // Title
+    {
+        let mut txt = GsvText::new();
+        txt.size(text_size * 1.5, 0.0);
+        txt.start_point(x_off, y_off);
+        txt.text("AGG for Rust - GSV Text");
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(stroke_w * 1.5);
+        stroke.set_line_cap(LineCap::Round);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 50, 120, 255));
+    }
+
+    // Subtitle
+    {
+        let mut txt = GsvText::new();
+        txt.size(text_size * 0.7, 0.0);
+        txt.start_point(x_off, y_off + text_size * 2.0);
+        txt.text("Built-in vector font — no dependencies");
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(stroke_w * 0.7);
+        stroke.set_line_cap(LineCap::Round);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(100, 100, 100, 255));
+    }
+
+    // Sample text lines at different sizes
+    let samples = [
+        ("ABCDEFGHIJKLM", Rgba8::new(200, 0, 0, 255)),
+        ("NOPQRSTUVWXYZ", Rgba8::new(0, 150, 0, 255)),
+        ("abcdefghijklm", Rgba8::new(0, 0, 200, 255)),
+        ("nopqrstuvwxyz", Rgba8::new(150, 100, 0, 255)),
+        ("0123456789 !@#$%", Rgba8::new(0, 100, 150, 255)),
+    ];
+
+    let base_y = y_off + text_size * 4.0;
+    for (i, (text, color)) in samples.iter().enumerate() {
+        let y = base_y + i as f64 * (text_size * 1.5);
+        if y + text_size > h {
+            break;
+        }
+        let mut txt = GsvText::new();
+        txt.size(text_size, 0.0);
+        txt.start_point(x_off, y);
+        txt.text(text);
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(stroke_w);
+        stroke.set_line_cap(LineCap::Round);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+    }
+
+    // Paragraph at bottom — large text
+    let large_y = base_y + samples.len() as f64 * (text_size * 1.5) + text_size;
+    if large_y + text_size * 3.0 < h {
+        let mut txt = GsvText::new();
+        txt.size(text_size * 2.5, 0.0);
+        txt.start_point(x_off, large_y);
+        txt.text("Aa Bb Cc");
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(stroke_w * 2.0);
+        stroke.set_line_cap(LineCap::Round);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(30, 30, 30, 255));
+    }
+
+    // Size label at top-right
+    {
+        let label = format!("Size: {:.0}px  Stroke: {:.1}", text_size, stroke_w);
+        let mut txt = GsvText::new();
+        txt.size(12.0, 0.0);
+        txt.start_point(w - 200.0, 20.0);
+        txt.text(&label);
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(0.8);
+        stroke.set_line_cap(LineCap::Round);
+        stroke.set_line_join(LineJoin::Round);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(140, 140, 140, 200));
     }
 
     buf
