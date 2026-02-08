@@ -1,0 +1,8 @@
+/target
+*.svg
+*.png
+*.bmp
+node_modules/
+demo/dist/
+demo/public/pkg/
+bun.lock

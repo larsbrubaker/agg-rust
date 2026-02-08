@@ -1,0 +1,20 @@
+[package]
+name = "agg-rust"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "BSD-3-Clause"
+description = "Pure Rust port of Anti-Grain Geometry (AGG) 2.6 - high quality 2D vector graphics rendering"
+repository = "https://github.com/larsbrubaker/agg-rust"
+keywords = ["graphics", "rendering", "anti-aliasing", "2d", "vector"]
+categories = ["graphics", "rendering"]
+exclude = ["demo/", "docs/", "tests/", ".github/", ".claude/", "benches/", "scripts/", "cpp-references/"]
+
+[workspace]
+members = [".", "demo/wasm"]
+
+[dependencies]
+# No external dependencies for core library (matching AGG's zero-dependency philosophy)
+
+[dev-dependencies]
+criterion = "0.5"
