@@ -82,3 +82,13 @@ pub mod span_gouraud_rgba;
 pub mod span_gradient;
 pub mod span_interpolator_linear;
 pub mod span_solid;
+
+// Phase 6: Transforms, Image Filters, Text & Alpha Masking
+pub mod alpha_mask_u8;
+pub mod conv_marker;
+pub mod gsv_text;
+pub mod image_accessors;
+pub mod image_filters;
+pub mod span_image_filter;
+pub mod trans_bilinear;
+pub mod trans_perspective;
