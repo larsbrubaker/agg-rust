@@ -49,3 +49,16 @@ pub mod rendering_buffer;
 pub mod rounded_rect;
 pub mod simul_eq;
 pub mod trans_affine;
+
+// Phase 3: Scanline Rasterizer
+pub mod rasterizer_cells_aa;
+pub mod rasterizer_scanline_aa;
+pub mod rasterizer_sl_clip;
+pub mod scanline_bin;
+pub mod scanline_p;
+pub mod scanline_u;
+
+// Phase 3C: Pixel Formats & Renderers
+pub mod pixfmt_rgba;
+pub mod renderer_base;
+pub mod renderer_scanline;
