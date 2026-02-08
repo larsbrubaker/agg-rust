@@ -7,10 +7,11 @@
 //! filled polygons with anti-aliased edges in a single solid color.
 
 use crate::color::Rgba8;
-use crate::pixfmt_rgba::PixfmtRgba32;
+use crate::pixfmt_rgba::{PixelFormat, PixfmtRgba32};
 use crate::rasterizer_scanline_aa::{RasterizerScanlineAa, Scanline};
 use crate::renderer_base::RendererBase;
 use crate::scanline_u::ScanlineU8;
+use crate::span_allocator::SpanAllocator;
 
 // ============================================================================
 // render_scanlines_aa_solid — the main rendering driver
@@ -99,6 +100,99 @@ impl<'a, 'b> RendererScanlineAaSolid<'a, 'b> {
     /// Render all scanlines from the rasterizer.
     pub fn render(&mut self, ras: &mut RasterizerScanlineAa, sl: &mut ScanlineU8) {
         render_scanlines_aa_solid(ras, sl, self.ren, &self.color);
+    }
+}
+
+// ============================================================================
+// SpanGenerator trait
+// ============================================================================
+
+/// Trait for span generators that produce per-pixel colors.
+///
+/// Span generators are called during rendering to fill color arrays
+/// for each scanline span. The renderer then blends these colors into
+/// the output buffer.
+///
+/// Port of the C++ span generator concept used by `render_scanlines_aa`.
+pub trait SpanGenerator {
+    type Color;
+
+    /// Called once before rendering begins.
+    fn prepare(&mut self);
+
+    /// Generate colors for a horizontal span.
+    ///
+    /// Fills `span[0..len]` with colors for pixels starting at (x, y).
+    fn generate(&mut self, span: &mut [Self::Color], x: i32, y: i32, len: u32);
+}
+
+// ============================================================================
+// render_scanlines_aa — generic span generator rendering
+// ============================================================================
+
+/// Render all scanlines from the rasterizer using a span generator.
+///
+/// This is the generic rendering function that supports gradients, patterns,
+/// and other per-pixel color effects. For each scanline span, the span
+/// generator produces an array of colors which are blended into the output.
+///
+/// Port of C++ `render_scanlines_aa()` (span generator variant).
+pub fn render_scanlines_aa<PF, SG>(
+    ras: &mut RasterizerScanlineAa,
+    sl: &mut ScanlineU8,
+    ren: &mut RendererBase<PF>,
+    alloc: &mut SpanAllocator<SG::Color>,
+    span_gen: &mut SG,
+) where
+    PF: PixelFormat<ColorType = SG::Color>,
+    SG: SpanGenerator,
+    SG::Color: Default + Clone,
+{
+    if !ras.rewind_scanlines() {
+        return;
+    }
+
+    sl.reset(ras.min_x(), ras.max_x());
+    span_gen.prepare();
+    while ras.sweep_scanline(sl) {
+        render_scanline_aa(sl, ren, alloc, span_gen);
+    }
+}
+
+/// Render a single scanline using a span generator.
+///
+/// Port of C++ `render_scanline_aa()` (span generator variant).
+fn render_scanline_aa<PF, SG>(
+    sl: &ScanlineU8,
+    ren: &mut RendererBase<PF>,
+    alloc: &mut SpanAllocator<SG::Color>,
+    span_gen: &mut SG,
+) where
+    PF: PixelFormat<ColorType = SG::Color>,
+    SG: SpanGenerator,
+    SG::Color: Default + Clone,
+{
+    let y = sl.y();
+    let spans = sl.begin();
+    let covers = sl.covers();
+
+    for span in spans {
+        let x = span.x;
+        let len = span.len.unsigned_abs() as usize;
+
+        let colors = alloc.allocate(len);
+        span_gen.generate(colors, x, y, len as u32);
+
+        if span.len < 0 {
+            // Negative len: solid span (ScanlineP8 style) — use uniform cover
+            let cover = covers[span.cover_offset];
+            ren.blend_color_hspan(x, y, len as i32, colors, &[], cover);
+        } else {
+            // Positive len: per-pixel covers
+            let span_covers = &covers[span.cover_offset..span.cover_offset + len];
+            let first_cover = span_covers[0];
+            ren.blend_color_hspan(x, y, len as i32, colors, span_covers, first_cover);
+        }
     }
 }
 
@@ -341,5 +435,166 @@ mod tests {
         let p = ren.ren().pixel(5, 5);
         assert_eq!(p.r, 255);
         assert_eq!(p.g, 255);
+    }
+
+    // ========================================================================
+    // Integration: gradient-filled rectangle via SpanGradient
+    // ========================================================================
+
+    #[test]
+    fn test_render_gradient_rectangle() {
+        use crate::gradient_lut::GradientLinearColor;
+        use crate::span_gradient::{GradientX, SpanGradient};
+        use crate::span_interpolator_linear::SpanInterpolatorLinear;
+        use crate::trans_affine::TransAffine;
+
+        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        pf.clear(&Rgba8::new(255, 255, 255, 255));
+        let mut ren = RendererBase::new(pf);
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+
+        // Rectangle (10,10)→(90,90)
+        ras.move_to_d(10.0, 10.0);
+        ras.line_to_d(90.0, 10.0);
+        ras.line_to_d(90.0, 90.0);
+        ras.line_to_d(10.0, 90.0);
+
+        // Linear gradient: black→white along X, range 10..90
+        let trans = TransAffine::new();
+        let interp = SpanInterpolatorLinear::new(trans);
+        let gc = GradientLinearColor::new(
+            Rgba8::new(0, 0, 0, 255),
+            Rgba8::new(255, 255, 255, 255),
+            256,
+        );
+        let mut sg = SpanGradient::new(interp, GradientX, &gc, 10.0, 90.0);
+        let mut alloc = SpanAllocator::<Rgba8>::new();
+
+        render_scanlines_aa(&mut ras, &mut sl, &mut ren, &mut alloc, &mut sg);
+
+        // Left side should be dark
+        let left = ren.ren().pixel(15, 50);
+        assert!(left.r < 50, "Left r={} should be dark", left.r);
+
+        // Right side should be light
+        let right = ren.ren().pixel(85, 50);
+        assert!(right.r > 200, "Right r={} should be light", right.r);
+
+        // Middle should be between
+        let mid = ren.ren().pixel(50, 50);
+        assert!(
+            mid.r > 50 && mid.r < 200,
+            "Mid r={} should be between",
+            mid.r
+        );
+
+        // Outside should remain white
+        let outside = ren.ren().pixel(5, 5);
+        assert_eq!(outside.r, 255);
+    }
+
+    // ========================================================================
+    // Integration: Gouraud-shaded triangle via SpanGouraudRgba
+    // ========================================================================
+
+    #[test]
+    fn test_render_gouraud_triangle() {
+        use crate::span_gouraud_rgba::SpanGouraudRgba;
+
+        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        pf.clear(&Rgba8::new(0, 0, 0, 0)); // transparent black
+        let mut ren = RendererBase::new(pf);
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+
+        // Triangle with red, green, blue vertices
+        let mut gouraud = SpanGouraudRgba::new_with_triangle(
+            Rgba8::new(255, 0, 0, 255), // top-left: red
+            Rgba8::new(0, 255, 0, 255), // top-right: green
+            Rgba8::new(0, 0, 255, 255), // bottom: blue
+            10.0,
+            10.0,
+            90.0,
+            10.0,
+            50.0,
+            90.0,
+            0.0,
+        );
+
+        // Feed triangle outline to rasterizer
+        ras.add_path(&mut gouraud, 0);
+
+        // Render using span generator
+        let mut alloc = SpanAllocator::<Rgba8>::new();
+        render_scanlines_aa(&mut ras, &mut sl, &mut ren, &mut alloc, &mut gouraud);
+
+        // Center of triangle should have visible color
+        let center = ren.ren().pixel(50, 40);
+        assert!(
+            center.a > 0,
+            "Center should be visible: rgba=({},{},{},{})",
+            center.r,
+            center.g,
+            center.b,
+            center.a
+        );
+
+        // Outside should remain transparent black
+        let outside = ren.ren().pixel(0, 0);
+        assert_eq!(outside.a, 0, "Outside should be transparent");
+    }
+
+    // ========================================================================
+    // Integration: gradient with LUT (multi-stop)
+    // ========================================================================
+
+    #[test]
+    fn test_render_gradient_with_lut() {
+        use crate::gradient_lut::GradientLut;
+        use crate::span_gradient::{GradientX, SpanGradient};
+        use crate::span_interpolator_linear::SpanInterpolatorLinear;
+        use crate::trans_affine::TransAffine;
+
+        let (_buf, mut ra) = make_rgba_buffer(100, 50);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        pf.clear(&Rgba8::new(0, 0, 0, 255));
+        let mut ren = RendererBase::new(pf);
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+
+        // Full-width rectangle
+        ras.move_to_d(0.0, 0.0);
+        ras.line_to_d(100.0, 0.0);
+        ras.line_to_d(100.0, 50.0);
+        ras.line_to_d(0.0, 50.0);
+
+        // Red → Green → Blue gradient LUT
+        let mut lut = GradientLut::new_default();
+        lut.add_color(0.0, Rgba8::new(255, 0, 0, 255));
+        lut.add_color(0.5, Rgba8::new(0, 255, 0, 255));
+        lut.add_color(1.0, Rgba8::new(0, 0, 255, 255));
+        lut.build_lut();
+
+        let trans = TransAffine::new();
+        let interp = SpanInterpolatorLinear::new(trans);
+        let mut sg = SpanGradient::new(interp, GradientX, &lut, 0.0, 100.0);
+        let mut alloc = SpanAllocator::<Rgba8>::new();
+
+        render_scanlines_aa(&mut ras, &mut sl, &mut ren, &mut alloc, &mut sg);
+
+        // Left side should be red
+        let left = ren.ren().pixel(5, 25);
+        assert!(left.r > 200, "Left r={} should be red", left.r);
+
+        // Middle should be green
+        let mid = ren.ren().pixel(50, 25);
+        assert!(mid.g > 100, "Mid g={} should be green", mid.g);
+
+        // Right side should be blue
+        let right = ren.ren().pixel(95, 25);
+        assert!(right.b > 200, "Right b={} should be blue", right.b);
     }
 }

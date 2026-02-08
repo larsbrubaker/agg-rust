@@ -73,3 +73,12 @@ pub mod conv_transform;
 pub mod vcgen_contour;
 pub mod vcgen_dash;
 pub mod vcgen_stroke;
+
+// Phase 5: Span Generators & Gradients
+pub mod gradient_lut;
+pub mod span_allocator;
+pub mod span_gouraud;
+pub mod span_gouraud_rgba;
+pub mod span_gradient;
+pub mod span_interpolator_linear;
+pub mod span_solid;

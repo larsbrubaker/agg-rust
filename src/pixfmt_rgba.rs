@@ -46,6 +46,20 @@ pub trait PixelFormat {
     /// Copy (overwrite) a single pixel at (x, y) with color `c`.
     fn copy_pixel(&mut self, x: i32, y: i32, c: &Self::ColorType);
 
+    /// Blend a horizontal span with per-pixel colors and optional per-pixel coverage.
+    ///
+    /// If `covers` is non-empty, each pixel uses its corresponding coverage.
+    /// If `covers` is empty, all pixels use the uniform `cover` value.
+    fn blend_color_hspan(
+        &mut self,
+        x: i32,
+        y: i32,
+        len: u32,
+        colors: &[Self::ColorType],
+        covers: &[CoverType],
+        cover: CoverType,
+    );
+
     /// Get the pixel color at (x, y).
     fn pixel(&self, x: i32, y: i32) -> Self::ColorType;
 }
@@ -206,6 +220,64 @@ impl<'a> PixelFormat for PixfmtRgba32<'a> {
                 row[off + 3] = 255;
             } else if alpha > 0 {
                 Self::blend_pix(&mut row[off..off + BPP], c.r, c.g, c.b, alpha);
+            }
+        }
+    }
+
+    fn blend_color_hspan(
+        &mut self,
+        x: i32,
+        y: i32,
+        len: u32,
+        colors: &[Rgba8],
+        covers: &[CoverType],
+        cover: CoverType,
+    ) {
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        if !covers.is_empty() {
+            // Per-pixel coverage from covers array
+            for i in 0..len as usize {
+                let off = (x as usize + i) * BPP;
+                let c = &colors[i];
+                let alpha = Rgba8::mult_cover(c.a, covers[i]);
+                if alpha == 255 {
+                    row[off] = c.r;
+                    row[off + 1] = c.g;
+                    row[off + 2] = c.b;
+                    row[off + 3] = 255;
+                } else if alpha > 0 {
+                    Self::blend_pix(&mut row[off..off + BPP], c.r, c.g, c.b, alpha);
+                }
+            }
+        } else if cover == 255 {
+            // Full coverage, direct copy/blend
+            for (i, c) in colors.iter().enumerate().take(len as usize) {
+                let off = (x as usize + i) * BPP;
+                if c.a == 255 {
+                    row[off] = c.r;
+                    row[off + 1] = c.g;
+                    row[off + 2] = c.b;
+                    row[off + 3] = 255;
+                } else if c.a > 0 {
+                    Self::blend_pix(&mut row[off..off + BPP], c.r, c.g, c.b, c.a);
+                }
+            }
+        } else {
+            // Uniform coverage for all pixels
+            for (i, c) in colors.iter().enumerate().take(len as usize) {
+                let off = (x as usize + i) * BPP;
+                let alpha = Rgba8::mult_cover(c.a, cover);
+                if alpha == 255 {
+                    row[off] = c.r;
+                    row[off + 1] = c.g;
+                    row[off + 2] = c.b;
+                    row[off + 3] = 255;
+                } else if alpha > 0 {
+                    Self::blend_pix(&mut row[off..off + BPP], c.r, c.g, c.b, alpha);
+                }
             }
         }
     }
@@ -374,5 +446,55 @@ mod tests {
         assert_eq!(p.g, 128);
         assert_eq!(p.b, 200);
         assert_eq!(p.a, 180);
+    }
+
+    #[test]
+    fn test_blend_color_hspan_per_pixel_covers() {
+        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        let colors = [
+            Rgba8::new(255, 0, 0, 255),
+            Rgba8::new(0, 255, 0, 255),
+            Rgba8::new(0, 0, 255, 255),
+        ];
+        let covers = [255u8, 128, 0];
+        pf.blend_color_hspan(5, 3, 3, &colors, &covers, 0);
+        // Full coverage red
+        let p0 = pf.pixel(5, 3);
+        assert_eq!(p0.r, 255);
+        assert_eq!(p0.g, 0);
+        // Half coverage green on black
+        let p1 = pf.pixel(6, 3);
+        assert!(p1.g > 64);
+        // Zero coverage blue: unchanged (black)
+        let p2 = pf.pixel(7, 3);
+        assert_eq!(p2.b, 0);
+    }
+
+    #[test]
+    fn test_blend_color_hspan_uniform_cover() {
+        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        let colors = [Rgba8::new(255, 0, 0, 255), Rgba8::new(0, 255, 0, 255)];
+        // Empty covers slice → uniform cover of 255
+        pf.blend_color_hspan(3, 3, 2, &colors, &[], 255);
+        let p0 = pf.pixel(3, 3);
+        assert_eq!(p0.r, 255);
+        let p1 = pf.pixel(4, 3);
+        assert_eq!(p1.g, 255);
+    }
+
+    #[test]
+    fn test_blend_color_hspan_full_cover_opaque() {
+        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        let white = Rgba8::new(255, 255, 255, 255);
+        pf.clear(&white);
+        let colors = [Rgba8::new(100, 150, 200, 255)];
+        pf.blend_color_hspan(0, 0, 1, &colors, &[], 255);
+        let p = pf.pixel(0, 0);
+        assert_eq!(p.r, 100);
+        assert_eq!(p.g, 150);
+        assert_eq!(p.b, 200);
     }
 }

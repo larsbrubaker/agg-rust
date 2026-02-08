@@ -214,6 +214,57 @@ impl<PF: PixelFormat> RendererBase<PF> {
         self.ren
             .blend_solid_hspan(x, y, len as u32, c, &covers[covers_offset..]);
     }
+
+    /// Blend a horizontal span with per-pixel colors (clipped).
+    ///
+    /// If `covers` is non-empty, each pixel uses its corresponding coverage.
+    /// If `covers` is empty, all pixels use the uniform `cover` value.
+    pub fn blend_color_hspan(
+        &mut self,
+        mut x: i32,
+        y: i32,
+        mut len: i32,
+        colors: &[PF::ColorType],
+        covers: &[CoverType],
+        cover: CoverType,
+    ) {
+        if y > self.ymax() || y < self.ymin() {
+            return;
+        }
+
+        let mut colors_offset = 0usize;
+        let mut covers_offset = 0usize;
+        if x < self.xmin() {
+            let d = (self.xmin() - x) as usize;
+            len -= d as i32;
+            if len <= 0 {
+                return;
+            }
+            if !covers.is_empty() {
+                covers_offset += d;
+            }
+            colors_offset += d;
+            x = self.xmin();
+        }
+        if x + len > self.xmax() + 1 {
+            len = self.xmax() - x + 1;
+            if len <= 0 {
+                return;
+            }
+        }
+        self.ren.blend_color_hspan(
+            x,
+            y,
+            len as u32,
+            &colors[colors_offset..],
+            if covers.is_empty() {
+                &[]
+            } else {
+                &covers[covers_offset..]
+            },
+            cover,
+        );
+    }
 }
 
 // ============================================================================
@@ -365,5 +416,57 @@ mod tests {
 
         ren.reset_clipping(false);
         assert!(!ren.inbox(0, 0));
+    }
+
+    #[test]
+    fn test_blend_color_hspan() {
+        let (_buf, mut ra) = make_renderer(20, 10);
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut ren = RendererBase::new(pf);
+        let colors = [
+            Rgba8::new(255, 0, 0, 255),
+            Rgba8::new(0, 255, 0, 255),
+            Rgba8::new(0, 0, 255, 255),
+        ];
+        ren.blend_color_hspan(5, 3, 3, &colors, &[], 255);
+        let p0 = ren.ren().pixel(5, 3);
+        assert_eq!(p0.r, 255);
+        let p1 = ren.ren().pixel(6, 3);
+        assert_eq!(p1.g, 255);
+        let p2 = ren.ren().pixel(7, 3);
+        assert_eq!(p2.b, 255);
+    }
+
+    #[test]
+    fn test_blend_color_hspan_clipped_left() {
+        let (_buf, mut ra) = make_renderer(20, 10);
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut ren = RendererBase::new(pf);
+        let colors = [
+            Rgba8::new(255, 0, 0, 255),
+            Rgba8::new(0, 255, 0, 255),
+            Rgba8::new(0, 0, 255, 255),
+        ];
+        // Starts at x=-1, so first color is clipped
+        ren.blend_color_hspan(-1, 3, 3, &colors, &[], 255);
+        // colors[0] (red) at x=-1 → clipped
+        // colors[1] (green) at x=0
+        let p0 = ren.ren().pixel(0, 3);
+        assert_eq!(p0.g, 255);
+        // colors[2] (blue) at x=1
+        let p1 = ren.ren().pixel(1, 3);
+        assert_eq!(p1.b, 255);
+    }
+
+    #[test]
+    fn test_blend_color_hspan_clipped_y() {
+        let (_buf, mut ra) = make_renderer(20, 10);
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut ren = RendererBase::new(pf);
+        let colors = [Rgba8::new(255, 0, 0, 255)];
+        // y=-1 → fully clipped
+        ren.blend_color_hspan(5, -1, 1, &colors, &[], 255);
+        let p = ren.ren().pixel(5, 0);
+        assert_eq!(p.r, 0);
     }
 }
