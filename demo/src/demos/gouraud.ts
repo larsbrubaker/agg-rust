@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -10,7 +11,6 @@ export function init(container: HTMLElement) {
 
   const W = 512, H = 400;
 
-  // Default vertex positions matching C++ gouraud.cpp
   const vertices: Vertex[] = [
     { x: 57, y: 60 },
     { x: 369, y: 170 },
@@ -35,7 +35,7 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 10,
@@ -43,9 +43,16 @@ export function init(container: HTMLElement) {
     onDrag: draw,
   });
 
-  addSlider(sidebar, 'Dilation', 0.0, 1.0, 0.175, 0.025, v => { dilation = v; draw(); });
-  addSlider(sidebar, 'Gamma', 0.0, 3.0, 0.809, 0.01, v => { gamma = v; draw(); });
-  addSlider(sidebar, 'Alpha', 0.0, 1.0, 1.0, 0.01, v => { alpha = v; draw(); });
+  const slDilation = addSlider(sidebar, 'Dilation', 0.0, 1.0, 0.175, 0.025, v => { dilation = v; draw(); });
+  const slGamma = addSlider(sidebar, 'Gamma', 0.0, 3.0, 0.809, 0.01, v => { gamma = v; draw(); });
+  const slAlpha = addSlider(sidebar, 'Alpha', 0.0, 1.0, 1.0, 0.01, v => { alpha = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 5, y1: 5, x2: 395, y2: 11, min: 0, max: 1, sidebarEl: slDilation, onChange: v => { dilation = v; draw(); } },
+    { type: 'slider', x1: 5, y1: 20, x2: 395, y2: 26, min: 0, max: 3, sidebarEl: slGamma, onChange: v => { gamma = v; draw(); } },
+    { type: 'slider', x1: 5, y1: 35, x2: 395, y2: 41, min: 0, max: 1, sidebarEl: slAlpha, onChange: v => { alpha = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -53,5 +60,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupCC(); };
 }

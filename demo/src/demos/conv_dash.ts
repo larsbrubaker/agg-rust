@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, addRadioGroup, addCheckbox, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -36,23 +37,32 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 20,
     onDrag: draw,
   });
 
-  addRadioGroup(sidebar, 'Cap', ['Butt Cap', 'Square Cap', 'Round Cap'], 0, v => { capType = v; draw(); });
-  addSlider(sidebar, 'Width', 0.5, 10, 3, 0.5, v => { strokeWidth = v; draw(); });
-  addCheckbox(sidebar, 'Close Polygons', false, v => { closePoly = v; draw(); });
-  addCheckbox(sidebar, 'Even-Odd Fill', false, v => { evenOdd = v; draw(); });
+  const radioEls = addRadioGroup(sidebar, 'Cap', ['Butt Cap', 'Square Cap', 'Round Cap'], 0, v => { capType = v; draw(); });
+  const slWidth = addSlider(sidebar, 'Width', 0.5, 10, 3, 0.5, v => { strokeWidth = v; draw(); });
+  const cbClose = addCheckbox(sidebar, 'Close Polygons', false, v => { closePoly = v; draw(); });
+  const cbEO = addCheckbox(sidebar, 'Even-Odd Fill', false, v => { evenOdd = v; draw(); });
+
+  // Canvas control interaction — positions match WASM render
+  const canvasControls: CanvasControl[] = [
+    { type: 'radio', x1: 10, y1: 10, x2: 130, y2: 80, numItems: 3, sidebarEls: radioEls, onChange: v => { capType = v; draw(); } },
+    { type: 'slider', x1: 140, y1: 14, x2: 290, y2: 22, min: 0, max: 10, sidebarEl: slWidth, onChange: v => { strokeWidth = v; draw(); } },
+    { type: 'checkbox', x1: 140, y1: 25, x2: 290, y2: 40, sidebarEl: cbClose, onChange: v => { closePoly = v; draw(); } },
+    { type: 'checkbox', x1: 300, y1: 25, x2: 450, y2: 40, sidebarEl: cbEO, onChange: v => { evenOdd = v; draw(); } },
+  ];
+  const cleanupControls = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
-  hint.textContent = 'Drag triangle vertices.';
+  hint.textContent = 'Drag triangle vertices. Click canvas controls to interact.';
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupControls(); };
 }

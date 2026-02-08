@@ -130,7 +130,7 @@ export function addRadioGroup(
   options: string[],
   initialIndex: number,
   onChange: (index: number) => void,
-): void {
+): HTMLInputElement[] {
   const group = document.createElement('div');
   group.className = 'control-group';
   const name = 'radio_' + Math.random().toString(36).slice(2, 8);
@@ -145,11 +145,14 @@ export function addRadioGroup(
   group.innerHTML = html;
   sidebar.appendChild(group);
 
+  const inputs: HTMLInputElement[] = [];
   group.querySelectorAll('input').forEach(radio => {
+    inputs.push(radio as HTMLInputElement);
     radio.addEventListener('change', () => {
       if ((radio as HTMLInputElement).checked) {
         onChange(parseInt((radio as HTMLInputElement).value));
       }
     });
   });
+  return inputs;
 }

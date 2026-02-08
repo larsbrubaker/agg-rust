@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, addRadioGroup, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -10,15 +11,14 @@ export function init(container: HTMLElement) {
 
   const W = 600, H = 400;
 
-  // Default vertex positions matching C++ conv_stroke.cpp (offset +100 from gouraud)
   const vertices: Vertex[] = [
     { x: 157, y: 60 },
     { x: 469, y: 170 },
     { x: 243, y: 310 },
   ];
 
-  let joinType = 2;   // Round
-  let capType = 2;    // Round
+  let joinType = 2;
+  let capType = 2;
   let strokeWidth = 20.0;
   let miterLimit = 4.0;
 
@@ -36,7 +36,7 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 20,
@@ -44,12 +44,20 @@ export function init(container: HTMLElement) {
     onDrag: draw,
   });
 
-  addRadioGroup(sidebar, 'Line Join', ['Miter', 'Miter Revert', 'Round', 'Bevel'], 2,
+  const joinEls = addRadioGroup(sidebar, 'Line Join', ['Miter', 'Miter Revert', 'Round', 'Bevel'], 2,
     v => { joinType = v; draw(); });
-  addRadioGroup(sidebar, 'Line Cap', ['Butt', 'Square', 'Round'], 2,
+  const capEls = addRadioGroup(sidebar, 'Line Cap', ['Butt', 'Square', 'Round'], 2,
     v => { capType = v; draw(); });
-  addSlider(sidebar, 'Width', 3.0, 40.0, 20.0, 0.5, v => { strokeWidth = v; draw(); });
-  addSlider(sidebar, 'Miter Limit', 1.0, 10.0, 4.0, 0.1, v => { miterLimit = v; draw(); });
+  const slWidth = addSlider(sidebar, 'Width', 3.0, 40.0, 20.0, 0.5, v => { strokeWidth = v; draw(); });
+  const slMiter = addSlider(sidebar, 'Miter Limit', 1.0, 10.0, 4.0, 0.1, v => { miterLimit = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'radio', x1: 10, y1: 10, x2: 133, y2: 80, numItems: 4, sidebarEls: joinEls, onChange: v => { joinType = v; draw(); } },
+    { type: 'radio', x1: 10, y1: 90, x2: 133, y2: 160, numItems: 3, sidebarEls: capEls, onChange: v => { capType = v; draw(); } },
+    { type: 'slider', x1: 140, y1: 14, x2: 490, y2: 22, min: 3, max: 40, sidebarEl: slWidth, onChange: v => { strokeWidth = v; draw(); } },
+    { type: 'slider', x1: 140, y1: 34, x2: 490, y2: 42, min: 1, max: 10, sidebarEl: slMiter, onChange: v => { miterLimit = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -57,5 +65,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupCC(); };
 }

@@ -1,5 +1,6 @@
 import { createDemoLayout, addRadioGroup, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -10,14 +11,13 @@ export function init(container: HTMLElement) {
 
   const W = 600, H = 500;
 
-  // Default quad corners (centered lion bounding box ~0,0 to 240,380)
   const ox = (W - 240) / 2;
   const oy = (H - 380) / 2;
   const vertices: Vertex[] = [
-    { x: ox, y: oy },           // top-left
-    { x: ox + 240, y: oy },     // top-right
-    { x: ox + 240, y: oy + 380 }, // bottom-right
-    { x: ox, y: oy + 380 },     // bottom-left
+    { x: ox, y: oy },
+    { x: ox + 240, y: oy },
+    { x: ox + 240, y: oy + 380 },
+    { x: ox, y: oy + 380 },
   ];
 
   let transType = 0;
@@ -37,14 +37,19 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 20,
     onDrag: draw,
   });
 
-  addRadioGroup(sidebar, 'Transform', ['Bilinear', 'Perspective'], 0, v => { transType = v; draw(); });
+  const radioEls = addRadioGroup(sidebar, 'Transform', ['Bilinear', 'Perspective'], 0, v => { transType = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'radio', x1: 420, y1: 5, x2: 550, y2: 55, numItems: 2, sidebarEls: radioEls, onChange: v => { transType = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -52,5 +57,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupCC(); };
 }

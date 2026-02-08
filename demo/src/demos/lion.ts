@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, renderToCanvas } from '../render-canvas.ts';
 import { setupRotateScale } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -24,13 +25,18 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupRotateScale({
+  const cleanupRS = setupRotateScale({
     canvas,
     onLeftDrag: (a, s) => { angle = a; scale = s; draw(); },
     onRightDrag: (x, y) => { skewX = x; skewY = y; draw(); },
   });
 
-  addSlider(sidebar, 'Alpha', 0, 255, 255, 1, v => { alpha = v; draw(); });
+  const slAlpha = addSlider(sidebar, 'Alpha', 0, 255, 255, 1, v => { alpha = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 5, y1: 5, x2: 507, y2: 12, min: 0, max: 255, sidebarEl: slAlpha, onChange: v => { alpha = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -38,5 +44,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupRS(); cleanupCC(); };
 }

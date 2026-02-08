@@ -1,4 +1,5 @@
 import { createDemoLayout, addSlider, addRadioGroup, renderToCanvas } from '../render-canvas.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -42,7 +43,6 @@ export function init(container: HTMLElement) {
     radio.value = String(i + 4);
     radio.addEventListener('change', () => {
       filterIdx = i + 4;
-      // Uncheck first radio group
       sidebar.querySelectorAll('input[name="Filter"]').forEach((el: any) => el.checked = false);
       draw();
     });
@@ -52,7 +52,13 @@ export function init(container: HTMLElement) {
   });
   sidebar.appendChild(group2);
 
-  addSlider(sidebar, 'Radius (Sinc/Lanczos/Blackman)', 2, 8, 4, 0.5, v => { radius = v; draw(); });
+  const slRadius = addSlider(sidebar, 'Radius (Sinc/Lanczos/Blackman)', 2, 8, 4, 0.5, v => { radius = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 5, y1: 5, x2: W - 5, y2: 10, min: 2, max: 8, sidebarEl: slRadius, onChange: v => { radius = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   draw();
+  return cleanupCC;
 }

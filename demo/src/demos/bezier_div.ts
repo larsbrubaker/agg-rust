@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, addCheckbox, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -10,12 +11,11 @@ export function init(container: HTMLElement) {
 
   const W = 600, H = 500;
 
-  // Default control points from C++ bezier_div.cpp
   const vertices: Vertex[] = [
-    { x: 170, y: 424 },  // P1 (start)
-    { x: 13, y: 87 },    // P2 (control 1)
-    { x: 488, y: 423 },  // P3 (control 2)
-    { x: 26, y: 333 },   // P4 (end)
+    { x: 170, y: 424 },
+    { x: 13, y: 87 },
+    { x: 488, y: 423 },
+    { x: 26, y: 333 },
   ];
 
   let strokeWidth = 50.0;
@@ -39,16 +39,23 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 10,
     onDrag: draw,
   });
 
-  addSlider(sidebar, 'Width', -50, 100, 50.0, 1, v => { strokeWidth = v; draw(); });
-  addCheckbox(sidebar, 'Show Points', true, v => { showPoints = v; draw(); });
-  addCheckbox(sidebar, 'Show Outline', true, v => { showOutline = v; draw(); });
+  const slWidth = addSlider(sidebar, 'Width', -50, 100, 50.0, 1, v => { strokeWidth = v; draw(); });
+  const cbPts = addCheckbox(sidebar, 'Show Points', true, v => { showPoints = v; draw(); });
+  const cbOutline = addCheckbox(sidebar, 'Show Outline', true, v => { showOutline = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 245, y1: 5, x2: 495, y2: 12, min: -50, max: 100, sidebarEl: slWidth, onChange: v => { strokeWidth = v; draw(); } },
+    { type: 'checkbox', x1: 250, y1: 15, x2: 400, y2: 30, sidebarEl: cbPts, onChange: v => { showPoints = v; draw(); } },
+    { type: 'checkbox', x1: 250, y1: 30, x2: 450, y2: 45, sidebarEl: cbOutline, onChange: v => { showOutline = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -56,5 +63,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupCC(); };
 }

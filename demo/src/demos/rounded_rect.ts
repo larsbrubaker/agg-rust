@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -31,15 +32,20 @@ export function init(container: HTMLElement) {
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 15,
     onDrag: draw,
   });
 
-  addSlider(sidebar, 'Radius', 0, 80, 20, 1, v => { radius = v; draw(); });
+  const slRadius = addSlider(sidebar, 'Radius', 0, 80, 20, 1, v => { radius = v; draw(); });
   addSlider(sidebar, 'Outline Width', 0.5, 10, 2, 0.5, v => { outlineWidth = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 10, y1: 10, x2: 590, y2: 19, min: 0, max: 50, sidebarEl: slRadius, onChange: v => { radius = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -47,5 +53,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupCC(); };
 }

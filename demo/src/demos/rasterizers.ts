@@ -1,5 +1,6 @@
 import { createDemoLayout, addSlider, renderToCanvas } from '../render-canvas.ts';
 import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
+import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
@@ -16,6 +17,7 @@ export function init(container: HTMLElement) {
     { x: 250, y: 350 },
   ];
 
+  let gammaVal = 1.0;
   let alpha = 1.0;
 
   function draw() {
@@ -26,13 +28,13 @@ export function init(container: HTMLElement) {
         vertices[0].x, vertices[0].y,
         vertices[1].x, vertices[1].y,
         vertices[2].x, vertices[2].y,
-        1.0, alpha,
+        gammaVal, alpha,
       ],
       timeDisplay: timeEl,
     });
   }
 
-  const cleanup = setupVertexDrag({
+  const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 15,
@@ -40,7 +42,14 @@ export function init(container: HTMLElement) {
     onDrag: draw,
   });
 
-  addSlider(sidebar, 'Alpha', 0.0, 1.0, 1.0, 0.01, v => { alpha = v; draw(); });
+  const slGamma = addSlider(sidebar, 'Gamma', 0.0, 1.0, 1.0, 0.01, v => { gammaVal = v; draw(); });
+  const slAlpha = addSlider(sidebar, 'Alpha', 0.0, 1.0, 1.0, 0.01, v => { alpha = v; draw(); });
+
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 140, y1: 14, x2: 280, y2: 22, min: 0, max: 1, sidebarEl: slGamma, onChange: v => { gammaVal = v; draw(); } },
+    { type: 'slider', x1: 290, y1: 14, x2: 490, y2: 22, min: 0, max: 1, sidebarEl: slAlpha, onChange: v => { alpha = v; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
@@ -48,5 +57,5 @@ export function init(container: HTMLElement) {
   sidebar.appendChild(hint);
 
   draw();
-  return cleanup;
+  return () => { cleanupDrag(); cleanupCC(); };
 }
