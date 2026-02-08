@@ -521,6 +521,25 @@ fn ldexp(x: f64, exp: i32) -> f64 {
 }
 
 // ============================================================================
+// VertexSource trait
+// ============================================================================
+
+/// The fundamental vertex source interface. Every shape, path, and converter
+/// in AGG implements this trait to produce a stream of vertices.
+///
+/// Port of the C++ "vertex source concept" — the implicit interface that
+/// all AGG vertex sources implement via duck typing (template parameters).
+pub trait VertexSource {
+    /// Reset the vertex source to the beginning of the given path.
+    /// `path_id` selects which sub-path to iterate (0 for the first/only path).
+    fn rewind(&mut self, path_id: u32);
+
+    /// Return the next vertex. Writes coordinates to `x` and `y`, returns a
+    /// path command. Returns `PATH_CMD_STOP` when iteration is complete.
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32;
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
