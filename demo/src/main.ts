@@ -23,6 +23,7 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'perspective': () => import('./demos/perspective.ts'),
   'image_fltr_graph': () => import('./demos/image_fltr_graph.ts'),
   'image1': () => import('./demos/image1.ts'),
+  'image_filters': () => import('./demos/image_filters.ts'),
   'gradient_focal': () => import('./demos/gradient_focal.ts'),
   'idea': () => import('./demos/idea.ts'),
   'graph_test': () => import('./demos/graph_test.ts'),
@@ -38,7 +39,24 @@ function getRoute(): string {
 function updateNav(route: string) {
   document.querySelectorAll('.nav-link').forEach(el => {
     const r = (el as HTMLElement).dataset.route;
-    el.classList.toggle('active', r === route);
+    const isActive = r === route;
+    el.classList.toggle('active', isActive);
+    // Auto-expand the section containing the active link
+    if (isActive) {
+      const group = el.closest('.nav-group');
+      if (group) {
+        group.classList.add('open');
+        const btn = group.querySelector('.nav-section');
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+        // Persist to localStorage
+        const KEY = 'agg-sidebar-sections';
+        try {
+          const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+          saved[(group as HTMLElement).dataset.section!] = true;
+          localStorage.setItem(KEY, JSON.stringify(saved));
+        } catch(e) {}
+      }
+    }
   });
 }
 
@@ -150,6 +168,11 @@ function renderHome(container: HTMLElement) {
           <span class="card-icon">&#127912;</span>
           <h3>Image Transforms</h3>
           <p>Procedural sphere image with affine rotation/scaling through a bilinear filter.</p>
+        </a>
+        <a href="#/image_filters" class="feature-card">
+          <span class="card-icon">&#128247;</span>
+          <h3>Image Filters</h3>
+          <p>Iterative rotation showing filter quality degradation &mdash; 17 filter types.</p>
         </a>
         <a href="#/gradient_focal" class="feature-card">
           <span class="card-icon">&#9737;</span>

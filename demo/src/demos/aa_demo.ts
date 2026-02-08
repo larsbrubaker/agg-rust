@@ -12,7 +12,7 @@ export function init(container: HTMLElement) {
   const W = 600, H = 400;
 
   const vertices: Vertex[] = [
-    { x: 100, y: 48 },
+    { x: 57, y: 100 },
     { x: 369, y: 170 },
     { x: 143, y: 310 },
   ];
@@ -36,7 +36,7 @@ export function init(container: HTMLElement) {
   const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
-    threshold: 20,
+    threshold: 10,
     onDrag: draw,
   });
 

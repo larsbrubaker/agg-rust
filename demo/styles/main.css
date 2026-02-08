@@ -50,12 +50,13 @@ body {
   top: 0;
   left: 0;
   z-index: 100;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .sidebar-header {
   padding: 24px 20px 16px;
   border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
 }
 
 .logo {
@@ -76,19 +77,91 @@ body {
   letter-spacing: 0.5px;
 }
 
+.sidebar-actions {
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+
+.expand-all-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 10px;
+  transition: all var(--transition);
+  width: 100%;
+}
+
+.expand-all-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+  background: var(--surface-alt);
+}
+
 .nav-list {
   list-style: none;
   padding: 8px 8px;
   flex: 1;
+  overflow-y: auto;
+}
+
+.nav-group {
+  list-style: none;
 }
 
 .nav-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-muted);
   padding: 16px 12px 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: color var(--transition);
+}
+
+.nav-section:hover {
+  color: var(--text-secondary);
+}
+
+.nav-section::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(45deg);
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+
+.nav-section[aria-expanded="true"]::after {
+  transform: rotate(-135deg);
+}
+
+.nav-group-items {
+  list-style: none;
+  padding: 0;
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 200ms ease;
+}
+
+.nav-group.open > .nav-group-items {
+  max-height: 500px;
 }
 
 .nav-link {
@@ -123,6 +196,7 @@ body {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.8;
+  flex-shrink: 0;
 }
 
 .sidebar-footer a {

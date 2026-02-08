@@ -12,83 +12,129 @@
       <h1 class="logo">AGG<span class="logo-accent">.rs</span></h1>
       <p class="tagline">Anti-Grain Geometry for Rust</p>
     </div>
+    <div class="sidebar-actions">
+      <button id="expand-all-btn" class="expand-all-btn" title="Expand or collapse all sections">Expand All</button>
+    </div>
     <ul class="nav-list">
       <li><a href="#/" class="nav-link active" data-route="home">
         <span class="nav-icon">&#9670;</span> Home
       </a></li>
-      <li class="nav-section">Anti-Aliasing</li>
-      <li><a href="#/aa_demo" class="nav-link" data-route="aa_demo">
-        <span class="nav-icon">&#9638;</span> AA Demo
-      </a></li>
-      <li><a href="#/rasterizers" class="nav-link" data-route="rasterizers">
-        <span class="nav-icon">&#9651;</span> Rasterizers
-      </a></li>
-      <li><a href="#/gamma_correction" class="nav-link" data-route="gamma_correction">
-        <span class="nav-icon">&#947;</span> Gamma
-      </a></li>
-      <li class="nav-section">Rendering</li>
-      <li><a href="#/lion" class="nav-link" data-route="lion">
-        <span class="nav-icon">&#129409;</span> Lion
-      </a></li>
-      <li><a href="#/perspective" class="nav-link" data-route="perspective">
-        <span class="nav-icon">&#9670;</span> Perspective
-      </a></li>
-      <li><a href="#/circles" class="nav-link" data-route="circles">
-        <span class="nav-icon">&#9679;</span> Circles
-      </a></li>
-      <li><a href="#/shapes" class="nav-link" data-route="shapes">
-        <span class="nav-icon">&#9711;</span> Shapes
-      </a></li>
-      <li class="nav-section">Gradients</li>
-      <li><a href="#/gradients" class="nav-link" data-route="gradients">
-        <span class="nav-icon">&#9632;</span> Gradients
-      </a></li>
-      <li><a href="#/gouraud" class="nav-link" data-route="gouraud">
-        <span class="nav-icon">&#9650;</span> Gouraud
-      </a></li>
-      <li><a href="#/gradient_focal" class="nav-link" data-route="gradient_focal">
-        <span class="nav-icon">&#9737;</span> Focal Gradient
-      </a></li>
-      <li class="nav-section">Paths &amp; Strokes</li>
-      <li><a href="#/conv_stroke" class="nav-link" data-route="conv_stroke">
-        <span class="nav-icon">&#9135;</span> Conv Stroke
-      </a></li>
-      <li><a href="#/conv_contour" class="nav-link" data-route="conv_contour">
-        <span class="nav-icon">&#9674;</span> Conv Contour
-      </a></li>
-      <li><a href="#/conv_dash" class="nav-link" data-route="conv_dash">
-        <span class="nav-icon">&#9473;</span> Conv Dash
-      </a></li>
-      <li><a href="#/line_thickness" class="nav-link" data-route="line_thickness">
-        <span class="nav-icon">&#8212;</span> Line Thickness
-      </a></li>
-      <li class="nav-section">Curves</li>
-      <li><a href="#/bezier_div" class="nav-link" data-route="bezier_div">
-        <span class="nav-icon">&#8765;</span> Bezier Div
-      </a></li>
-      <li class="nav-section">Shapes</li>
-      <li><a href="#/rounded_rect" class="nav-link" data-route="rounded_rect">
-        <span class="nav-icon">&#9645;</span> Rounded Rect
-      </a></li>
-      <li class="nav-section">Misc</li>
-      <li><a href="#/idea" class="nav-link" data-route="idea">
-        <span class="nav-icon">&#128161;</span> Idea
-      </a></li>
-      <li class="nav-section">Advanced</li>
-      <li><a href="#/graph_test" class="nav-link" data-route="graph_test">
-        <span class="nav-icon">&#128200;</span> Graph Test
-      </a></li>
-      <li class="nav-section">Text</li>
-      <li><a href="#/gsv_text" class="nav-link" data-route="gsv_text">
-        <span class="nav-icon">A</span> GSV Text
-      </a></li>
-      <li class="nav-section">Images &amp; Filters</li>
-      <li><a href="#/image_fltr_graph" class="nav-link" data-route="image_fltr_graph">
-        <span class="nav-icon">&#8767;</span> Filter Graph
-      </a></li>
-      <li><a href="#/image1" class="nav-link" data-route="image1">
-        <span class="nav-icon">&#127912;</span> Image Transforms
-      </a></li>
+      <li class="nav-group" data-section="anti-aliasing">
+        <button class="nav-section" aria-expanded="true">Anti-Aliasing</button>
+        <ul class="nav-group-items">
+          <li><a href="#/aa_demo" class="nav-link" data-route="aa_demo">
+            <span class="nav-icon">&#9638;</span> AA Demo
+          </a></li>
+          <li><a href="#/rasterizers" class="nav-link" data-route="rasterizers">
+            <span class="nav-icon">&#9651;</span> Rasterizers
+          </a></li>
+          <li><a href="#/gamma_correction" class="nav-link" data-route="gamma_correction">
+            <span class="nav-icon">&#947;</span> Gamma
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="rendering">
+        <button class="nav-section" aria-expanded="false">Rendering</button>
+        <ul class="nav-group-items">
+          <li><a href="#/lion" class="nav-link" data-route="lion">
+            <span class="nav-icon">&#129409;</span> Lion
+          </a></li>
+          <li><a href="#/perspective" class="nav-link" data-route="perspective">
+            <span class="nav-icon">&#9670;</span> Perspective
+          </a></li>
+          <li><a href="#/circles" class="nav-link" data-route="circles">
+            <span class="nav-icon">&#9679;</span> Circles
+          </a></li>
+          <li><a href="#/shapes" class="nav-link" data-route="shapes">
+            <span class="nav-icon">&#9711;</span> Shapes
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="gradients">
+        <button class="nav-section" aria-expanded="false">Gradients</button>
+        <ul class="nav-group-items">
+          <li><a href="#/gradients" class="nav-link" data-route="gradients">
+            <span class="nav-icon">&#9632;</span> Gradients
+          </a></li>
+          <li><a href="#/gouraud" class="nav-link" data-route="gouraud">
+            <span class="nav-icon">&#9650;</span> Gouraud
+          </a></li>
+          <li><a href="#/gradient_focal" class="nav-link" data-route="gradient_focal">
+            <span class="nav-icon">&#9737;</span> Focal Gradient
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="paths-strokes">
+        <button class="nav-section" aria-expanded="false">Paths &amp; Strokes</button>
+        <ul class="nav-group-items">
+          <li><a href="#/conv_stroke" class="nav-link" data-route="conv_stroke">
+            <span class="nav-icon">&#9135;</span> Conv Stroke
+          </a></li>
+          <li><a href="#/conv_contour" class="nav-link" data-route="conv_contour">
+            <span class="nav-icon">&#9674;</span> Conv Contour
+          </a></li>
+          <li><a href="#/conv_dash" class="nav-link" data-route="conv_dash">
+            <span class="nav-icon">&#9473;</span> Conv Dash
+          </a></li>
+          <li><a href="#/line_thickness" class="nav-link" data-route="line_thickness">
+            <span class="nav-icon">&#8212;</span> Line Thickness
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="curves">
+        <button class="nav-section" aria-expanded="false">Curves</button>
+        <ul class="nav-group-items">
+          <li><a href="#/bezier_div" class="nav-link" data-route="bezier_div">
+            <span class="nav-icon">&#8765;</span> Bezier Div
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="shapes">
+        <button class="nav-section" aria-expanded="false">Shapes</button>
+        <ul class="nav-group-items">
+          <li><a href="#/rounded_rect" class="nav-link" data-route="rounded_rect">
+            <span class="nav-icon">&#9645;</span> Rounded Rect
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="misc">
+        <button class="nav-section" aria-expanded="false">Misc</button>
+        <ul class="nav-group-items">
+          <li><a href="#/idea" class="nav-link" data-route="idea">
+            <span class="nav-icon">&#128161;</span> Idea
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="advanced">
+        <button class="nav-section" aria-expanded="false">Advanced</button>
+        <ul class="nav-group-items">
+          <li><a href="#/graph_test" class="nav-link" data-route="graph_test">
+            <span class="nav-icon">&#128200;</span> Graph Test
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="text">
+        <button class="nav-section" aria-expanded="false">Text</button>
+        <ul class="nav-group-items">
+          <li><a href="#/gsv_text" class="nav-link" data-route="gsv_text">
+            <span class="nav-icon">A</span> GSV Text
+          </a></li>
+        </ul>
+      </li>
+      <li class="nav-group" data-section="images-filters">
+        <button class="nav-section" aria-expanded="false">Images &amp; Filters</button>
+        <ul class="nav-group-items">
+          <li><a href="#/image_fltr_graph" class="nav-link" data-route="image_fltr_graph">
+            <span class="nav-icon">&#8767;</span> Filter Graph
+          </a></li>
+          <li><a href="#/image1" class="nav-link" data-route="image1">
+            <span class="nav-icon">&#127912;</span> Image Transforms
+          </a></li>
+          <li><a href="#/image_filters" class="nav-link" data-route="image_filters">
+            <span class="nav-icon">&#128247;</span> Image Filters
+          </a></li>
+        </ul>
+      </li>
     </ul>
     <div class="sidebar-footer">
       <p><a href="https://github.com/larsbrubaker/agg-rust" target="_blank">Source on GitHub</a></p>
@@ -101,6 +147,81 @@
     <!-- Content dynamically injected by router -->
   </main>
 
+  <script>
+    // Sidebar accordion — restore state from localStorage, default first section open
+    (function() {
+      var KEY = 'agg-sidebar-sections';
+      var groups = document.querySelectorAll('.nav-group');
+      var saved = null;
+      try { saved = JSON.parse(localStorage.getItem(KEY)); } catch(e) {}
+
+      groups.forEach(function(group, i) {
+        var section = group.dataset.section;
+        var btn = group.querySelector('.nav-section');
+        var isOpen = saved ? !!saved[section] : i === 0;
+
+        if (isOpen) {
+          group.classList.add('open');
+          btn.setAttribute('aria-expanded', 'true');
+        } else {
+          group.classList.remove('open');
+          btn.setAttribute('aria-expanded', 'false');
+        }
+
+        btn.addEventListener('click', function() {
+          var expanded = group.classList.toggle('open');
+          btn.setAttribute('aria-expanded', String(expanded));
+          saveState();
+        });
+      });
+
+      function saveState() {
+        var state = {};
+        groups.forEach(function(g) {
+          state[g.dataset.section] = g.classList.contains('open');
+        });
+        try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {}
+      }
+
+      // Expand All / Collapse All toggle
+      var expandBtn = document.getElementById('expand-all-btn');
+      function updateExpandBtnLabel() {
+        var allOpen = true;
+        groups.forEach(function(g) {
+          if (!g.classList.contains('open')) allOpen = false;
+        });
+        expandBtn.textContent = allOpen ? 'Collapse All' : 'Expand All';
+      }
+      updateExpandBtnLabel();
+
+      expandBtn.addEventListener('click', function() {
+        var allOpen = true;
+        groups.forEach(function(g) {
+          if (!g.classList.contains('open')) allOpen = false;
+        });
+        var shouldOpen = !allOpen;
+        groups.forEach(function(g) {
+          var btn = g.querySelector('.nav-section');
+          if (shouldOpen) {
+            g.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+          } else {
+            g.classList.remove('open');
+            btn.setAttribute('aria-expanded', 'false');
+          }
+        });
+        saveState();
+        updateExpandBtnLabel();
+      });
+
+      // Update label when individual sections are toggled
+      groups.forEach(function(group) {
+        group.querySelector('.nav-section').addEventListener('click', function() {
+          setTimeout(updateExpandBtnLabel, 0);
+        });
+      });
+    })();
+  </script>
   <script type="module" src="./public/dist/main.js"></script>
 </body>
 </html>

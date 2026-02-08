@@ -21,7 +21,7 @@ use agg_rust::image_filters::{
     ImageFilterHanning, ImageFilterHamming, ImageFilterHermite, ImageFilterKaiser,
     ImageFilterQuadric, ImageFilterCatrom, ImageFilterGaussian, ImageFilterBessel,
     ImageFilterMitchell, ImageFilterSinc, ImageFilterLanczos, ImageFilterBlackman,
-    ImageFilterFunction,
+    ImageFilterFunction, ImageFilterLut, IMAGE_FILTER_SCALE,
 };
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
@@ -866,8 +866,8 @@ pub fn rounded_rect_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[0..6] = x0,y0, x1,y1, x2,y2 (triangle in screen coords)
 /// params[6] = pixel_size (default 32)
 pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(100.0);
-    let vy0 = params.get(1).copied().unwrap_or(48.0);
+    let vx0 = params.get(0).copied().unwrap_or(57.0);
+    let vy0 = params.get(1).copied().unwrap_or(100.0);
     let vx1 = params.get(2).copied().unwrap_or(369.0);
     let vy1 = params.get(3).copied().unwrap_or(170.0);
     let vx2 = params.get(4).copied().unwrap_or(143.0);
@@ -989,7 +989,7 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     stroke.set_width(2.0);
     ras.reset();
     ras.add_path(&mut stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 100, 200, 255));
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 150, 160, 200));
 
     // AGG control matching C++ aa_demo.cpp
     let mut s_pixel = SliderCtrl::new(80.0, 10.0, (width as f64) - 10.0, 19.0);
@@ -1796,8 +1796,13 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[0] = filter index (0–15, default 0)
 /// params[1] = radius for variable-radius filters (default 4.0)
 pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let filter_idx = params.get(0).copied().unwrap_or(0.0) as usize;
-    let custom_radius = params.get(1).copied().unwrap_or(4.0).clamp(2.0, 8.0);
+    // params[0] = radius (2.0-8.0, default 4.0)
+    // params[1..17] = 16 checkbox states (0 or 1)
+    let radius = params.get(0).copied().unwrap_or(4.0).clamp(2.0, 8.0);
+    let mut enabled = [false; 16];
+    for i in 0..16 {
+        enabled[i] = params.get(1 + i).copied().unwrap_or(0.0) > 0.5;
+    }
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -1809,148 +1814,183 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    let w = width as f64;
-    let h = height as f64;
+    // Graph area matching C++ exactly
+    let x_start = 125.0_f64;
+    let x_end = 780.0 - 15.0; // 765.0
+    let y_start = 10.0_f64;
+    let y_end = 300.0 - 10.0; // 290.0
+    let ys = y_start + (y_end - y_start) / 6.0;
+    let dy = y_end - ys;
 
-    // Plot area
-    let x_start = 10.0;
-    let x_end = w - 10.0;
-    let y_start = 30.0;
-    let y_end = h - 10.0;
-    let x_width = x_end - x_start;
-    let y_height = y_end - y_start;
-    let y_baseline = y_start + y_height / 6.0; // Baseline for weight = 0
-
-    // Get filter function and radius
-    let (radius, filter_name): (f64, &str) = match filter_idx {
-        0 => (ImageFilterBilinear.radius(), "Bilinear"),
-        1 => (ImageFilterBicubic.radius(), "Bicubic"),
-        2 => (ImageFilterSpline16.radius(), "Spline16"),
-        3 => (ImageFilterSpline36.radius(), "Spline36"),
-        4 => (ImageFilterHanning.radius(), "Hanning"),
-        5 => (ImageFilterHamming.radius(), "Hamming"),
-        6 => (ImageFilterHermite.radius(), "Hermite"),
-        7 => (ImageFilterKaiser::new(5.0).radius(), "Kaiser"),
-        8 => (ImageFilterQuadric.radius(), "Quadric"),
-        9 => (ImageFilterCatrom.radius(), "Catrom"),
-        10 => (ImageFilterGaussian.radius(), "Gaussian"),
-        11 => (ImageFilterBessel.radius(), "Bessel"),
-        12 => (ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0).radius(), "Mitchell"),
-        13 => (custom_radius, "Sinc"),
-        14 => (custom_radius, "Lanczos"),
-        15 => (custom_radius, "Blackman"),
-        _ => (ImageFilterBilinear.radius(), "Bilinear"),
-    };
-
-    // Grid lines
-    let n_grid = 16;
-    for i in 0..=n_grid {
-        let t = i as f64 / n_grid as f64;
-        let x = x_start + t * x_width;
+    // Grid lines — 17 vertical lines (16 divisions)
+    for i in 0..=16 {
+        let x = x_start + (x_end - x_start) * i as f64 / 16.0;
         let mut line = PathStorage::new();
         line.move_to(x, y_start);
         line.line_to(x, y_end);
         let mut stroke = ConvStroke::new(&mut line);
-        stroke.set_width(if i == n_grid / 2 { 1.0 } else { 0.3 });
+        stroke.set_width(1.0);
         ras.reset();
         ras.add_path(&mut stroke, 0);
-        let gray = if i == n_grid / 2 { 80 } else { 180 };
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(gray, gray, gray, 200));
+        let alpha = if i == 8 { 255u32 } else { 100u32 };
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, alpha));
     }
 
-    // Baseline (y = 0 weight)
+    // Horizontal baseline
     {
         let mut line = PathStorage::new();
-        line.move_to(x_start, y_baseline);
-        line.line_to(x_end, y_baseline);
+        line.move_to(x_start, ys);
+        line.line_to(x_end, ys);
         let mut stroke = ConvStroke::new(&mut line);
         stroke.set_width(1.0);
         ras.reset();
         ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 200));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
     }
 
-    // Plot filter weight curve
-    let center_x = x_start + x_width / 2.0;
-    let x_scale = x_width / (2.0 * radius);
-    let y_scale = -(y_end - y_baseline); // Negative: weight=1 goes up
+    // Filter names for checkboxes
+    let filter_names = [
+        "bilinear", "bicubic", "spline16", "spline36",
+        "hanning", "hamming", "hermite", "kaiser",
+        "quadric", "catrom", "gaussian", "bessel",
+        "mitchell", "sinc", "lanczos", "blackman",
+    ];
 
-    let n_points = (x_width as usize).max(200);
-    let mut curve_path = PathStorage::new();
+    // Helper: plot weight, cumulative, and normalized LUT curves for a filter
+    macro_rules! plot_filter_curves {
+        ($filter:expr, $filt_radius:expr) => {{
+            let r = $filt_radius;
 
-    // Macro to plot any filter function
-    macro_rules! plot_filter {
-        ($filter:expr) => {{
-            for i in 0..=n_points {
-                let t = i as f64 / n_points as f64;
-                let x_screen = x_start + t * x_width;
-                let x_filter = (x_screen - center_x) / x_scale; // Map to filter coords [-radius, radius]
-                let weight = if x_filter.abs() <= radius {
-                    $filter.calc_weight(x_filter)
-                } else {
-                    0.0
-                };
-                let y_screen = y_baseline + weight * y_scale;
-                if i == 0 {
-                    curve_path.move_to(x_screen, y_screen);
-                } else {
-                    curve_path.line_to(x_screen, y_screen);
+            // Curve 1: Weight function (dark red)
+            {
+                let n = (r * 256.0 * 2.0) as usize;
+                let xs = (x_end + x_start) / 2.0 - (r * (x_end - x_start) / 16.0);
+                let dx = (x_end - x_start) * r / 8.0;
+                let mut path = PathStorage::new();
+                let w0 = $filter.calc_weight(-r);
+                path.move_to(xs + 0.5, ys + dy * w0);
+                for j in 1..n {
+                    let xf = j as f64 / 256.0 - r;
+                    let w = $filter.calc_weight(xf);
+                    path.line_to(xs + dx * j as f64 / n as f64 + 0.5, ys + dy * w);
+                }
+                let mut stroke = ConvStroke::new(&mut path);
+                stroke.set_width(1.5);
+                ras.reset();
+                ras.add_path(&mut stroke, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(128, 0, 0, 255));
+            }
+
+            // Curve 2: Cumulative/integrated (dark green)
+            {
+                let ir = (r.ceil() + 0.1) as i32;
+                let mut path = PathStorage::new();
+                let x_center = (x_start + x_end) / 2.0;
+                for xint in 0..=255usize {
+                    let mut sum = 0.0_f64;
+                    for xfract in (-ir)..ir {
+                        let xf = xint as f64 / 256.0 + xfract as f64;
+                        if xf >= -r && xf <= r {
+                            sum += $filter.calc_weight(xf);
+                        }
+                    }
+                    let x = x_center + ((-128.0 + xint as f64) / 128.0) * r * (x_end - x_start) / 16.0;
+                    let y = ys + sum * 256.0 - 256.0;
+                    if xint == 0 {
+                        path.move_to(x, y);
+                    } else {
+                        path.line_to(x, y);
+                    }
+                }
+                let mut stroke = ConvStroke::new(&mut path);
+                stroke.set_width(1.5);
+                ras.reset();
+                ras.add_path(&mut stroke, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 128, 0, 255));
+            }
+
+            // Curve 3: Normalized LUT (dark blue)
+            {
+                let mut lut = ImageFilterLut::new();
+                lut.calculate(&$filter, true);
+                let weights = lut.weight_array();
+                let nn = lut.diameter() as usize * 256;
+                let lut_r = lut.diameter() as f64 / 2.0;
+                let xs = (x_end + x_start) / 2.0 - (lut_r * (x_end - x_start) / 16.0);
+                let dx = (x_end - x_start) * lut_r / 8.0;
+                let mut path = PathStorage::new();
+                let scale = IMAGE_FILTER_SCALE as f64;
+                if !weights.is_empty() && nn > 0 {
+                    path.move_to(xs + 0.5, ys + dy * weights[0] as f64 / scale);
+                    let actual_nn = nn.min(weights.len());
+                    for j in 1..actual_nn {
+                        let w = weights[j] as f64 / scale;
+                        path.line_to(xs + dx * j as f64 / nn as f64 + 0.5, ys + dy * w);
+                    }
+                    let mut stroke = ConvStroke::new(&mut path);
+                    stroke.set_width(1.5);
+                    ras.reset();
+                    ras.add_path(&mut stroke, 0);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 128, 255));
                 }
             }
         }};
     }
 
-    match filter_idx {
-        0 => plot_filter!(ImageFilterBilinear),
-        1 => plot_filter!(ImageFilterBicubic),
-        2 => plot_filter!(ImageFilterSpline16),
-        3 => plot_filter!(ImageFilterSpline36),
-        4 => plot_filter!(ImageFilterHanning),
-        5 => plot_filter!(ImageFilterHamming),
-        6 => plot_filter!(ImageFilterHermite),
-        7 => plot_filter!(ImageFilterKaiser::new(5.0)),
-        8 => plot_filter!(ImageFilterQuadric),
-        9 => plot_filter!(ImageFilterCatrom),
-        10 => plot_filter!(ImageFilterGaussian),
-        11 => plot_filter!(ImageFilterBessel),
-        12 => plot_filter!(ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0)),
-        13 => plot_filter!(ImageFilterSinc::new(custom_radius)),
-        14 => plot_filter!(ImageFilterLanczos::new(custom_radius)),
-        15 => plot_filter!(ImageFilterBlackman::new(custom_radius)),
-        _ => plot_filter!(ImageFilterBilinear),
+    // For each enabled filter, plot its 3 curves
+    for i in 0..16 {
+        if !enabled[i] {
+            continue;
+        }
+        match i {
+            0 => plot_filter_curves!(ImageFilterBilinear, ImageFilterBilinear.radius()),
+            1 => plot_filter_curves!(ImageFilterBicubic, ImageFilterBicubic.radius()),
+            2 => plot_filter_curves!(ImageFilterSpline16, ImageFilterSpline16.radius()),
+            3 => plot_filter_curves!(ImageFilterSpline36, ImageFilterSpline36.radius()),
+            4 => plot_filter_curves!(ImageFilterHanning, ImageFilterHanning.radius()),
+            5 => plot_filter_curves!(ImageFilterHamming, ImageFilterHamming.radius()),
+            6 => plot_filter_curves!(ImageFilterHermite, ImageFilterHermite.radius()),
+            7 => plot_filter_curves!(ImageFilterKaiser::new(5.0), ImageFilterKaiser::new(5.0).radius()),
+            8 => plot_filter_curves!(ImageFilterQuadric, ImageFilterQuadric.radius()),
+            9 => plot_filter_curves!(ImageFilterCatrom, ImageFilterCatrom.radius()),
+            10 => plot_filter_curves!(ImageFilterGaussian, ImageFilterGaussian.radius()),
+            11 => plot_filter_curves!(ImageFilterBessel, ImageFilterBessel.radius()),
+            12 => {
+                let f = ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0);
+                plot_filter_curves!(f, f.radius());
+            }
+            13 => {
+                let f = ImageFilterSinc::new(radius);
+                plot_filter_curves!(f, radius);
+            }
+            14 => {
+                let f = ImageFilterLanczos::new(radius);
+                plot_filter_curves!(f, radius);
+            }
+            15 => {
+                let f = ImageFilterBlackman::new(radius);
+                plot_filter_curves!(f, radius);
+            }
+            _ => {}
+        }
     }
 
-    // Render the curve
-    {
-        let mut stroke = ConvStroke::new(&mut curve_path);
-        stroke.set_width(2.0);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 0, 0, 255));
-    }
-
-    // Filter name label
-    {
-        let label = format!("{} (r={:.1})", filter_name, radius);
-        let mut txt = GsvText::new();
-        txt.size(16.0, 0.0);
-        txt.start_point(x_start + 5.0, y_start + 2.0);
-        txt.text(&label);
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(1.2);
-        stroke.set_line_cap(LineCap::Round);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 120, 255));
-    }
-
-    // AGG control matching C++ image_fltr_graph.cpp
-    let mut s_radius = SliderCtrl::new(5.0, 5.0, w - 5.0, 10.0);
+    // Render AGG controls matching C++ image_fltr_graph.cpp
+    // Slider at top
+    let mut s_radius = SliderCtrl::new(5.0, 5.0, 775.0, 15.0);
     s_radius.label("Radius=%.3f");
     s_radius.range(2.0, 8.0);
-    s_radius.set_value(custom_radius);
+    s_radius.set_value(radius);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
+
+    // 16 checkboxes along the left
+    for i in 0..16 {
+        let y = 30.0 + 15.0 * i as f64;
+        let mut cb = CboxCtrl::new(8.0, y, filter_names[i]);
+        cb.text_size(7.0, 0.0);
+        cb.set_status(enabled[i]);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb);
+    }
 
     buf
 }
@@ -2088,6 +2128,244 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         s_scale.range(0.1, 5.0);
         s_scale.set_value(scale);
         render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_scale);
+    }
+
+    buf
+}
+
+// ============================================================================
+// Image Filters — iterative rotation showing filter quality degradation
+// Matches C++ image_filters.cpp
+// ============================================================================
+
+/// Render image filters comparison demo.
+///
+/// params[0] = filter_idx (0-16: nn, bilinear, bicubic, spline16, spline36,
+///             hanning, hamming, hermite, kaiser, quadric, catrom, gaussian,
+///             bessel, mitchell, sinc, lanczos, blackman)
+/// params[1] = step_degrees (1.0-10.0, default 5.0)
+/// params[2] = normalize (0 or 1, default 1)
+/// params[3] = radius (2.0-8.0, for sinc/lanczos/blackman)
+/// params[4] = num_steps (how many rotations to apply iteratively)
+pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let filter_idx = params.get(0).copied().unwrap_or(1.0) as usize;
+    let step_deg = params.get(1).copied().unwrap_or(5.0).clamp(1.0, 10.0);
+    let normalize = params.get(2).copied().unwrap_or(1.0) > 0.5;
+    let radius = params.get(3).copied().unwrap_or(4.0).clamp(2.0, 8.0);
+    let num_steps = params.get(4).copied().unwrap_or(0.0).max(0.0) as usize;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+
+    // Clear to white
+    {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        rb.clear(&Rgba8::new(255, 255, 255, 255));
+    }
+
+    // Load spheres image
+    let (img_w, img_h, original) = load_spheres_image();
+    let img_stride = (img_w * 4) as i32;
+
+    // Working buffers for iterative rotation
+    let mut src_data = original.clone();
+    let mut dst_data = original.clone();
+
+    let iw = img_w as f64;
+    let ih = img_h as f64;
+    let angle_rad = step_deg * std::f64::consts::PI / 180.0;
+
+    // Clipping ellipse: circle centered at image center, matching C++
+    let clip_r = iw.min(ih) / 2.0 - 4.0;
+
+    // Apply iterative rotations
+    for _step in 0..num_steps {
+        // Transform: translate center to origin, rotate by step, translate back
+        let mut mtx = TransAffine::new();
+        mtx.multiply(&TransAffine::new_translation(-iw / 2.0, -ih / 2.0));
+        mtx.multiply(&TransAffine::new_rotation(angle_rad));
+        mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0));
+        mtx.invert();
+
+        // Clear destination
+        for chunk in dst_data.chunks_exact_mut(4) {
+            chunk[0] = 255;
+            chunk[1] = 255;
+            chunk[2] = 255;
+            chunk[3] = 255;
+        }
+
+        // Set up source and destination buffers
+        let mut src_ra = RowAccessor::new();
+        unsafe { src_ra.attach(src_data.as_mut_ptr(), img_w, img_h, img_stride) };
+
+        let mut dst_ra = RowAccessor::new();
+        unsafe { dst_ra.attach(dst_data.as_mut_ptr(), img_w, img_h, img_stride) };
+
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+        let mut alloc = SpanAllocator::<Rgba8>::new();
+
+        // Clip through ellipse
+        let mut ell = Ellipse::new(iw / 2.0, ih / 2.0, clip_r, clip_r, 200, false);
+        ras.add_path(&mut ell, 0);
+
+        // Apply the selected filter
+        let mut interpolator = SpanInterpolatorLinear::new(mtx);
+
+        macro_rules! render_with_bilinear_clip {
+            () => {{
+                let mut sg = SpanImageFilterRgbaBilinearClip::new(
+                    &src_ra,
+                    Rgba8::new(255, 255, 255, 255),
+                    &mut interpolator,
+                );
+                let pf = PixfmtRgba32::new(&mut dst_ra);
+                let mut rb = RendererBase::new(pf);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
+            }};
+        }
+
+        macro_rules! render_with_nn {
+            () => {{
+                use agg_rust::image_accessors::ImageAccessorClip;
+                use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaNn;
+                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[255, 255, 255, 255]);
+                let mut sg = SpanImageFilterRgbaNn::new(&mut accessor, &mut interpolator);
+                let pf = PixfmtRgba32::new(&mut dst_ra);
+                let mut rb = RendererBase::new(pf);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
+            }};
+        }
+
+        macro_rules! render_with_2x2 {
+            ($filter:expr) => {{
+                use agg_rust::image_accessors::ImageAccessorClip;
+                use agg_rust::span_image_filter_rgba::SpanImageFilterRgba2x2;
+                let mut lut = ImageFilterLut::new();
+                lut.calculate(&$filter, normalize);
+                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[255, 255, 255, 255]);
+                let mut sg = SpanImageFilterRgba2x2::new(&mut accessor, &mut interpolator, &lut);
+                let pf = PixfmtRgba32::new(&mut dst_ra);
+                let mut rb = RendererBase::new(pf);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
+            }};
+        }
+
+        macro_rules! render_with_general {
+            ($filter:expr) => {{
+                use agg_rust::image_accessors::ImageAccessorClip;
+                use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaGen;
+                let mut lut = ImageFilterLut::new();
+                lut.calculate(&$filter, normalize);
+                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[255, 255, 255, 255]);
+                let mut sg = SpanImageFilterRgbaGen::new(&mut accessor, &mut interpolator, &lut);
+                let pf = PixfmtRgba32::new(&mut dst_ra);
+                let mut rb = RendererBase::new(pf);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
+            }};
+        }
+
+        match filter_idx {
+            0 => render_with_nn!(),
+            1 => render_with_bilinear_clip!(),
+            2 => render_with_general!(ImageFilterBicubic),
+            3 => render_with_general!(ImageFilterSpline16),
+            4 => render_with_general!(ImageFilterSpline36),
+            5 => render_with_2x2!(ImageFilterHanning),
+            6 => render_with_2x2!(ImageFilterHamming),
+            7 => render_with_2x2!(ImageFilterHermite),
+            8 => render_with_general!(ImageFilterKaiser::new(5.0)),
+            9 => render_with_general!(ImageFilterQuadric),
+            10 => render_with_general!(ImageFilterCatrom),
+            11 => render_with_general!(ImageFilterGaussian),
+            12 => render_with_general!(ImageFilterBessel),
+            13 => render_with_general!(ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0)),
+            14 => render_with_general!(ImageFilterSinc::new(radius)),
+            15 => render_with_general!(ImageFilterLanczos::new(radius)),
+            16 => render_with_general!(ImageFilterBlackman::new(radius)),
+            _ => render_with_bilinear_clip!(),
+        }
+
+        // Swap: dst becomes new src for next step
+        std::mem::swap(&mut src_data, &mut dst_data);
+    }
+
+    // Copy final result (in src_data after last swap) to output canvas
+    // Position image at (0, 110) matching C++ layout (controls at top)
+    let y_off = 0u32; // We'll render controls overlaid
+    for y in 0..img_h.min(height) {
+        for x in 0..img_w.min(width) {
+            let si = ((y * img_w + x) * 4) as usize;
+            let di = (((y + y_off) * width + x) * 4) as usize;
+            if si + 3 < src_data.len() && di + 3 < buf.len() {
+                buf[di] = src_data[si];
+                buf[di + 1] = src_data[si + 1];
+                buf[di + 2] = src_data[si + 2];
+                buf[di + 3] = src_data[si + 3];
+            }
+        }
+    }
+
+    // Render controls
+    let stride = (width * 4) as i32;
+    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+
+    // Filter selection radio box
+    let filter_names = [
+        "simple (NN)", "bilinear", "bicubic", "spline16", "spline36",
+        "hanning", "hamming", "hermite", "kaiser", "quadric", "catrom",
+        "gaussian", "bessel", "mitchell", "sinc", "lanczos", "blackman",
+    ];
+    let mut r_filters = RboxCtrl::new(0.0, 0.0, 110.0, 210.0);
+    r_filters.border_width(0.0, 0.0);
+    r_filters.text_size(6.0, 0.0);
+    for name in &filter_names {
+        r_filters.add_item(name);
+    }
+    r_filters.set_cur_item(filter_idx.min(16) as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_filters);
+
+    // Step slider
+    let mut s_step = SliderCtrl::new(115.0, 5.0, (width as f64).min(515.0), 11.0);
+    s_step.label("Step=%3.2f");
+    s_step.range(1.0, 10.0);
+    s_step.set_value(step_deg);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_step);
+
+    // Radius slider (for sinc/lanczos/blackman)
+    let mut s_radius = SliderCtrl::new(115.0, 20.0, (width as f64).min(515.0), 31.0);
+    s_radius.label("Filter Radius=%.3f");
+    s_radius.range(2.0, 8.0);
+    s_radius.set_value(radius);
+    if filter_idx >= 14 {
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
+    }
+
+    // Normalize checkbox
+    let mut c_norm = CboxCtrl::new(8.0, 215.0, "Normalize Filter");
+    c_norm.text_size(7.5, 0.0);
+    c_norm.set_status(normalize);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_norm);
+
+    // Status text
+    {
+        let label = format!("NSteps={}", num_steps);
+        let mut txt = GsvText::new();
+        txt.size(10.0, 0.0);
+        txt.start_point(10.0, 295.0);
+        txt.text(&label);
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(1.5);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
     }
 
     buf
@@ -2234,27 +2512,80 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         PathAttr { fill: Rgba8::new(0, 0, 0, 255), stroke: Rgba8::new(0, 0, 0, 255), stroke_width: 0.0 },
     ];
 
-    // Bulb outline
+    // Exact polygon data from C++ idea.cpp
+
+    // Lightbulb outline — 20 points
     let poly_bulb: &[(f64, f64)] = &[
-        (-29.0, -26.0), (-9.0, -33.0), (0.0, -44.0), (9.0, -33.0), (29.0, -26.0),
-        (36.0, -9.0), (17.0, 0.0), (36.0, 9.0), (29.0, 26.0), (9.0, 33.0),
-        (0.0, 44.0), (-9.0, 33.0), (-29.0, 26.0), (-36.0, 9.0), (-17.0, 0.0),
-        (-36.0, -9.0), (-29.0, -26.0), (-9.0, -33.0), (0.0, -44.0), (9.0, -33.0),
+        (-6.0,-67.0), (-6.0,-71.0), (-7.0,-74.0), (-8.0,-76.0), (-10.0,-79.0),
+        (-10.0,-82.0), (-9.0,-84.0), (-6.0,-86.0), (-4.0,-87.0), (-2.0,-86.0),
+        (-1.0,-86.0), (1.0,-84.0), (2.0,-82.0), (2.0,-79.0), (0.0,-77.0),
+        (-2.0,-73.0), (-2.0,-71.0), (-2.0,-69.0), (-3.0,-67.0), (-4.0,-65.0),
     ];
 
-    // Light beams
-    let poly_beam1: &[(f64, f64)] = &[(-48.0, -6.0), (-48.0, 6.0), (-56.0, 6.0), (-56.0, -6.0)];
-    let poly_beam2: &[(f64, f64)] = &[(6.0, -48.0), (-6.0, -48.0), (-6.0, -56.0), (6.0, -56.0)];
-    let poly_beam3: &[(f64, f64)] = &[(48.0, 6.0), (48.0, -6.0), (56.0, -6.0), (56.0, 6.0)];
-    let poly_beam4: &[(f64, f64)] = &[(-6.0, 48.0), (6.0, 48.0), (6.0, 56.0), (-6.0, 56.0)];
+    // Light beams — 5 points each
+    let poly_beam1: &[(f64, f64)] = &[
+        (-14.0,-84.0), (-22.0,-85.0), (-23.0,-87.0), (-22.0,-88.0), (-21.0,-88.0),
+    ];
+    let poly_beam2: &[(f64, f64)] = &[
+        (-10.0,-92.0), (-14.0,-96.0), (-14.0,-98.0), (-12.0,-99.0), (-11.0,-97.0),
+    ];
+    let poly_beam3: &[(f64, f64)] = &[
+        (-1.0,-92.0), (-2.0,-98.0), (0.0,-100.0), (2.0,-100.0), (1.0,-98.0),
+    ];
+    let poly_beam4: &[(f64, f64)] = &[
+        (5.0,-89.0), (11.0,-94.0), (13.0,-93.0), (13.0,-92.0), (12.0,-91.0),
+    ];
 
-    // Figure parts
-    let poly_fig1: &[(f64, f64)] = &[(-6.0, -7.0), (-14.0, -10.0), (-14.0, 92.0), (-6.0, 95.0)];
-    let poly_fig2: &[(f64, f64)] = &[(6.0, -7.0), (14.0, -10.0), (14.0, 92.0), (6.0, 95.0)];
-    let poly_fig3: &[(f64, f64)] = &[(-14.0, 92.0), (-14.0, 100.0), (14.0, 100.0), (14.0, 92.0)];
-    let poly_fig4: &[(f64, f64)] = &[(-18.0, 100.0), (-18.0, 108.0), (18.0, 108.0), (18.0, 100.0)];
-    let poly_fig5: &[(f64, f64)] = &[(-21.0, 108.0), (-21.0, 113.0), (21.0, 113.0), (21.0, 108.0)];
-    let poly_fig6: &[(f64, f64)] = &[(-24.0, 113.0), (-24.0, 118.0), (24.0, 118.0), (24.0, 113.0)];
+    // Figure parts — complex polygons
+    let poly_fig1: &[(f64, f64)] = &[
+        (1.0,-48.0), (-3.0,-54.0), (-7.0,-58.0), (-12.0,-58.0), (-17.0,-55.0),
+        (-20.0,-52.0), (-21.0,-47.0), (-20.0,-40.0), (-17.0,-33.0), (-11.0,-28.0),
+        (-6.0,-26.0), (-2.0,-25.0), (2.0,-26.0), (4.0,-28.0), (5.0,-33.0),
+        (5.0,-39.0), (3.0,-44.0), (12.0,-48.0), (12.0,-50.0), (12.0,-51.0),
+        (3.0,-46.0),
+    ];
+    let poly_fig2: &[(f64, f64)] = &[
+        (11.0,-27.0), (6.0,-23.0), (4.0,-22.0), (3.0,-19.0), (5.0,-16.0),
+        (6.0,-15.0), (11.0,-17.0), (19.0,-23.0), (25.0,-30.0), (32.0,-38.0),
+        (32.0,-41.0), (32.0,-50.0), (30.0,-64.0), (32.0,-72.0), (32.0,-75.0),
+        (31.0,-77.0), (28.0,-78.0), (26.0,-80.0), (28.0,-87.0), (27.0,-89.0),
+        (25.0,-88.0), (24.0,-79.0), (24.0,-76.0), (23.0,-75.0), (20.0,-76.0),
+        (17.0,-76.0), (17.0,-74.0), (19.0,-73.0), (22.0,-73.0), (24.0,-71.0),
+        (26.0,-69.0), (27.0,-64.0), (28.0,-55.0), (28.0,-47.0), (28.0,-40.0),
+        (26.0,-38.0), (20.0,-33.0), (14.0,-30.0),
+    ];
+    let poly_fig3: &[(f64, f64)] = &[
+        (-6.0,-20.0), (-9.0,-21.0), (-15.0,-21.0), (-20.0,-17.0), (-28.0,-8.0),
+        (-32.0,-1.0), (-32.0,1.0), (-30.0,6.0), (-26.0,8.0), (-20.0,10.0),
+        (-16.0,12.0), (-14.0,14.0), (-15.0,16.0), (-18.0,20.0), (-22.0,20.0),
+        (-25.0,19.0), (-27.0,20.0), (-26.0,22.0), (-23.0,23.0), (-18.0,23.0),
+        (-14.0,22.0), (-11.0,20.0), (-10.0,17.0), (-9.0,14.0), (-11.0,11.0),
+        (-16.0,9.0), (-22.0,8.0), (-26.0,5.0), (-28.0,2.0), (-27.0,-2.0),
+        (-23.0,-8.0), (-19.0,-11.0), (-12.0,-14.0), (-6.0,-15.0), (-6.0,-18.0),
+    ];
+    let poly_fig4: &[(f64, f64)] = &[
+        (11.0,-6.0), (8.0,-16.0), (5.0,-21.0), (-1.0,-23.0), (-7.0,-22.0),
+        (-10.0,-17.0), (-9.0,-10.0), (-8.0,0.0), (-8.0,10.0), (-10.0,18.0),
+        (-11.0,22.0), (-10.0,26.0), (-7.0,28.0), (-3.0,30.0), (0.0,31.0),
+        (5.0,31.0), (10.0,27.0), (14.0,18.0), (14.0,11.0), (11.0,2.0),
+    ];
+    let poly_fig5: &[(f64, f64)] = &[
+        (0.0,22.0), (-5.0,21.0), (-8.0,22.0), (-9.0,26.0), (-8.0,49.0),
+        (-8.0,54.0), (-10.0,64.0), (-10.0,75.0), (-9.0,81.0), (-10.0,84.0),
+        (-16.0,89.0), (-18.0,95.0), (-18.0,97.0), (-13.0,100.0), (-12.0,99.0),
+        (-12.0,95.0), (-10.0,90.0), (-8.0,87.0), (-6.0,86.0), (-4.0,83.0),
+        (-3.0,82.0), (-5.0,80.0), (-6.0,79.0), (-7.0,74.0), (-6.0,63.0),
+        (-3.0,52.0), (0.0,42.0), (1.0,31.0),
+    ];
+    let poly_fig6: &[(f64, f64)] = &[
+        (12.0,31.0), (12.0,24.0), (8.0,21.0), (3.0,21.0), (2.0,24.0),
+        (3.0,30.0), (5.0,40.0), (8.0,47.0), (10.0,56.0), (11.0,64.0),
+        (11.0,71.0), (10.0,76.0), (8.0,77.0), (8.0,79.0), (10.0,81.0),
+        (13.0,82.0), (17.0,82.0), (26.0,84.0), (28.0,87.0), (32.0,86.0),
+        (33.0,81.0), (32.0,80.0), (25.0,79.0), (17.0,79.0), (14.0,79.0),
+        (13.0,76.0), (14.0,72.0), (14.0,64.0), (13.0,55.0), (12.0,44.0),
+        (12.0,34.0),
+    ];
 
     // Group paths by attribute: (polygons, attr_index)
     let groups: [(&[&[(f64, f64)]], usize); 3] = [
@@ -2263,12 +2594,17 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         (&[poly_fig1, poly_fig2, poly_fig3, poly_fig4, poly_fig5, poly_fig6], 2),
     ];
 
-    // Transform: rotate, scale to fit window, translate to center
-    let scale = (w.min(h) / 300.0).min(2.0);
+    // Transform chain matches C++ idea.cpp exactly:
+    // mtx *= trans_affine_rotation(g_angle * pi / 180.0);
+    // mtx *= trans_affine_translation(m_dx / 2, m_dy / 2 + 10);
+    // mtx *= trans_affine_scaling(width / m_dx, height / m_dy);
+    // m_dx/m_dy are initial window size (250x280), so at initial size scaling = (1,1)
+    let m_dx = 250.0_f64;
+    let m_dy = 280.0_f64;
     let mut mtx = TransAffine::new();
     mtx.multiply(&TransAffine::new_rotation(angle_deg * std::f64::consts::PI / 180.0));
-    mtx.multiply(&TransAffine::new_scaling_uniform(scale));
-    mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0 + 10.0));
+    mtx.multiply(&TransAffine::new_translation(m_dx / 2.0, m_dy / 2.0 + 10.0));
+    mtx.multiply(&TransAffine::new_scaling(w / m_dx, h / m_dy));
 
     for (polys, attr_idx) in &groups {
         let attr = &attrs[*attr_idx];
@@ -2300,17 +2636,25 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
             // Stroke (if width > 0)
             if attr.stroke_width > 0.01 {
-                let mut path2 = PathStorage::new();
-                for (i, (px, py)) in poly.iter().enumerate() {
-                    if i == 0 { path2.move_to(*px, *py); } else { path2.line_to(*px, *py); }
-                }
-                path2.close_polygon(0);
+                if roundoff {
+                    // In roundoff mode, path already has transformed+rounded coords
+                    let mut stroke = ConvStroke::new(&mut path);
+                    stroke.set_width(attr.stroke_width);
+                    ras.reset();
+                    ras.add_path(&mut stroke, 0);
+                } else {
+                    let mut path2 = PathStorage::new();
+                    for (i, (px, py)) in poly.iter().enumerate() {
+                        if i == 0 { path2.move_to(*px, *py); } else { path2.line_to(*px, *py); }
+                    }
+                    path2.close_polygon(0);
 
-                let transformed = ConvTransform::new(&mut path2, mtx);
-                let mut stroke = ConvStroke::new(transformed);
-                stroke.set_width(attr.stroke_width);
-                ras.reset();
-                ras.add_path(&mut stroke, 0);
+                    let transformed = ConvTransform::new(&mut path2, mtx);
+                    let mut stroke = ConvStroke::new(transformed);
+                    stroke.set_width(attr.stroke_width);
+                    ras.reset();
+                    ras.add_path(&mut stroke, 0);
+                }
                 render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &attr.stroke);
             }
         }
