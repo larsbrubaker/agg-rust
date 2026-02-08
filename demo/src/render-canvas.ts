@@ -95,3 +95,60 @@ export function addSlider(
 
   return slider;
 }
+
+/**
+ * Create a checkbox control.
+ */
+export function addCheckbox(
+  sidebar: HTMLElement,
+  label: string,
+  initial: boolean,
+  onChange: (v: boolean) => void,
+): HTMLInputElement {
+  const group = document.createElement('div');
+  group.className = 'control-group';
+  group.innerHTML = `
+    <label class="control-checkbox-label">
+      <input type="checkbox" ${initial ? 'checked' : ''}>
+      <span>${label}</span>
+    </label>
+  `;
+  sidebar.appendChild(group);
+
+  const cb = group.querySelector('input')!;
+  cb.addEventListener('change', () => onChange(cb.checked));
+  return cb;
+}
+
+/**
+ * Create a radio button group control.
+ */
+export function addRadioGroup(
+  sidebar: HTMLElement,
+  label: string,
+  options: string[],
+  initialIndex: number,
+  onChange: (index: number) => void,
+): void {
+  const group = document.createElement('div');
+  group.className = 'control-group';
+  const name = 'radio_' + Math.random().toString(36).slice(2, 8);
+  let html = `<label class="control-label">${label}</label><div class="control-radio-group">`;
+  for (let i = 0; i < options.length; i++) {
+    html += `<label class="control-radio-label">
+      <input type="radio" name="${name}" value="${i}" ${i === initialIndex ? 'checked' : ''}>
+      <span>${options[i]}</span>
+    </label>`;
+  }
+  html += '</div>';
+  group.innerHTML = html;
+  sidebar.appendChild(group);
+
+  group.querySelectorAll('input').forEach(radio => {
+    radio.addEventListener('change', () => {
+      if ((radio as HTMLInputElement).checked) {
+        onChange(parseInt((radio as HTMLInputElement).value));
+      }
+    });
+  });
+}

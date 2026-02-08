@@ -368,6 +368,51 @@ body {
   font-family: var(--font-mono);
 }
 
+.control-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.control-checkbox-label input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
+.control-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.control-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.control-radio-label input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+.control-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
 .render-time {
   font-size: 11px;
   color: var(--text-muted);

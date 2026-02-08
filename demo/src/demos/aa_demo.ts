@@ -4,32 +4,29 @@ import { setupVertexDrag, Vertex } from '../mouse-helpers.ts';
 export function init(container: HTMLElement) {
   const { canvas, sidebar, timeEl } = createDemoLayout(
     container,
-    'Gouraud Shading',
-    '6 sub-triangles with draggable vertices — matching C++ gouraud.cpp.',
+    'AA Demo',
+    'Anti-aliasing visualization — enlarged pixel view of a triangle.',
   );
 
-  const W = 512, H = 400;
+  const W = 600, H = 500;
 
-  // Default vertex positions matching C++ gouraud.cpp
   const vertices: Vertex[] = [
-    { x: 57, y: 60 },
+    { x: 100, y: 48 },
     { x: 369, y: 170 },
     { x: 143, y: 310 },
   ];
 
-  let dilation = 0.175;
-  let gamma = 0.809;
-  let alpha = 1.0;
+  let pixelSize = 32;
 
   function draw() {
     renderToCanvas({
-      demoName: 'gouraud',
+      demoName: 'aa_demo',
       canvas, width: W, height: H,
       params: [
         vertices[0].x, vertices[0].y,
         vertices[1].x, vertices[1].y,
         vertices[2].x, vertices[2].y,
-        dilation, gamma, alpha,
+        pixelSize,
       ],
       timeDisplay: timeEl,
     });
@@ -38,18 +35,15 @@ export function init(container: HTMLElement) {
   const cleanup = setupVertexDrag({
     canvas,
     vertices,
-    threshold: 10,
-    dragAll: true,
+    threshold: 20,
     onDrag: draw,
   });
 
-  addSlider(sidebar, 'Dilation', 0.0, 1.0, 0.175, 0.025, v => { dilation = v; draw(); });
-  addSlider(sidebar, 'Gamma', 0.0, 3.0, 0.809, 0.01, v => { gamma = v; draw(); });
-  addSlider(sidebar, 'Alpha', 0.0, 1.0, 1.0, 0.01, v => { alpha = v; draw(); });
+  addSlider(sidebar, 'Pixel Size', 8, 64, 32, 4, v => { pixelSize = v; draw(); });
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
-  hint.textContent = 'Drag vertices or click inside triangle to move all.';
+  hint.textContent = 'Drag triangle vertices. Each square shows AA coverage.';
   sidebar.appendChild(hint);
 
   draw();

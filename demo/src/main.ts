@@ -9,8 +9,14 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'shapes': () => import('./demos/shapes.ts'),
   'gradients': () => import('./demos/gradients.ts'),
   'gouraud': () => import('./demos/gouraud.ts'),
-  'strokes': () => import('./demos/strokes.ts'),
-  'curves': () => import('./demos/curves.ts'),
+  'conv_stroke': () => import('./demos/conv_stroke.ts'),
+  'bezier_div': () => import('./demos/bezier_div.ts'),
+  'circles': () => import('./demos/circles.ts'),
+  'rounded_rect': () => import('./demos/rounded_rect.ts'),
+  'aa_demo': () => import('./demos/aa_demo.ts'),
+  'gamma_correction': () => import('./demos/gamma_correction.ts'),
+  'line_thickness': () => import('./demos/line_thickness.ts'),
+  'rasterizers': () => import('./demos/rasterizers.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -66,15 +72,45 @@ function renderHome(container: HTMLElement) {
           <h3>Gouraud Shading</h3>
           <p>Smooth color interpolation across triangles using Gouraud shading.</p>
         </a>
-        <a href="#/strokes" class="feature-card">
+        <a href="#/conv_stroke" class="feature-card">
           <span class="card-icon">&#9135;</span>
-          <h3>Strokes</h3>
-          <p>Line caps (butt, square, round) and joins (miter, round, bevel) with variable width.</p>
+          <h3>Conv Stroke</h3>
+          <p>Line joins (miter, round, bevel), caps, and dashed overlay with draggable vertices.</p>
         </a>
-        <a href="#/curves" class="feature-card">
+        <a href="#/bezier_div" class="feature-card">
           <span class="card-icon">&#8765;</span>
-          <h3>Curves</h3>
-          <p>Quadratic and cubic B&eacute;zier curves with control point visualization.</p>
+          <h3>Bezier Div</h3>
+          <p>Cubic B&eacute;zier curve subdivision with draggable control points and width control.</p>
+        </a>
+        <a href="#/circles" class="feature-card">
+          <span class="card-icon">&#9679;</span>
+          <h3>Circles</h3>
+          <p>Random anti-aliased circles with configurable count, size range, and seed.</p>
+        </a>
+        <a href="#/rounded_rect" class="feature-card">
+          <span class="card-icon">&#9645;</span>
+          <h3>Rounded Rect</h3>
+          <p>Draggable rounded rectangle with adjustable corner radius.</p>
+        </a>
+        <a href="#/aa_demo" class="feature-card">
+          <span class="card-icon">&#9638;</span>
+          <h3>AA Demo</h3>
+          <p>Anti-aliasing visualization &mdash; enlarged pixel view of a triangle.</p>
+        </a>
+        <a href="#/gamma_correction" class="feature-card">
+          <span class="card-icon">&#947;</span>
+          <h3>Gamma Correction</h3>
+          <p>Gamma curve visualization with concentric colored ellipses.</p>
+        </a>
+        <a href="#/line_thickness" class="feature-card">
+          <span class="card-icon">&#8212;</span>
+          <h3>Line Thickness</h3>
+          <p>Lines at varying sub-pixel widths from 0.1 to 5.0 pixels.</p>
+        </a>
+        <a href="#/rasterizers" class="feature-card">
+          <span class="card-icon">&#9651;</span>
+          <h3>Rasterizers</h3>
+          <p>Filled and stroked triangle with alpha control.</p>
         </a>
       </div>
       <div class="about-section">
