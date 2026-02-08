@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGG for Rust — Interactive Demos</title>
+  <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body>
+  <nav id="sidebar">
+    <div class="sidebar-header">
+      <h1 class="logo">AGG<span class="logo-accent">.rs</span></h1>
+      <p class="tagline">Anti-Grain Geometry for Rust</p>
+    </div>
+    <ul class="nav-list">
+      <li><a href="#/" class="nav-link active" data-route="home">
+        <span class="nav-icon">&#9670;</span> Home
+      </a></li>
+      <li class="nav-section">Rendering</li>
+      <li><a href="#/lion" class="nav-link" data-route="lion">
+        <span class="nav-icon">&#129409;</span> Lion
+      </a></li>
+      <li><a href="#/shapes" class="nav-link" data-route="shapes">
+        <span class="nav-icon">&#9711;</span> Shapes
+      </a></li>
+      <li><a href="#/gradients" class="nav-link" data-route="gradients">
+        <span class="nav-icon">&#9632;</span> Gradients
+      </a></li>
+      <li><a href="#/gouraud" class="nav-link" data-route="gouraud">
+        <span class="nav-icon">&#9650;</span> Gouraud
+      </a></li>
+      <li class="nav-section">Paths</li>
+      <li><a href="#/strokes" class="nav-link" data-route="strokes">
+        <span class="nav-icon">&#9135;</span> Strokes
+      </a></li>
+      <li><a href="#/curves" class="nav-link" data-route="curves">
+        <span class="nav-icon">&#8765;</span> Curves
+      </a></li>
+    </ul>
+    <div class="sidebar-footer">
+      <p><a href="https://github.com/larsbrubaker/agg-rust" target="_blank">Source on GitHub</a></p>
+      <p>Rust port of <a href="http://www.antigrain.com" target="_blank">AGG 2.6</a></p>
+      <p class="license">BSD-3-Clause License</p>
+    </div>
+  </nav>
+
+  <main id="main-content">
+    <!-- Content dynamically injected by router -->
+  </main>
+
+  <script type="module" src="./public/dist/main.js"></script>
+</body>
+</html>

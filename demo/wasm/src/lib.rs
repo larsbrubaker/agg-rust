@@ -1,31 +1,33 @@
 use wasm_bindgen::prelude::*;
 
-/// Render a demo scene into an RGBA pixel buffer.
+mod lion_data;
+mod render;
+
+/// Render a named demo into an RGBA pixel buffer.
 ///
-/// Returns a Vec<u8> of RGBA pixel data (width * height * 4 bytes).
-/// The TypeScript frontend will copy this into an ImageData for display on a canvas.
+/// Returns a `Vec<u8>` of RGBA pixel data (width * height * 4 bytes).
+/// The TypeScript frontend copies this into an ImageData for canvas display.
 #[wasm_bindgen]
-pub fn render_demo(_demo_id: u32, _width: u32, _height: u32, _params: &[f64]) -> Vec<u8> {
-    // Placeholder - will be implemented as modules are ported
-    let size = (_width * _height * 4) as usize;
-    let mut buf = vec![255u8; size];
-
-    // Fill with a simple gradient to verify WASM pipeline works
-    for y in 0.._height {
-        for x in 0.._width {
-            let offset = ((y * _width + x) * 4) as usize;
-            buf[offset] = (x * 255 / _width) as u8; // R
-            buf[offset + 1] = (y * 255 / _height) as u8; // G
-            buf[offset + 2] = 128; // B
-            buf[offset + 3] = 255; // A
-        }
+pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    match name {
+        "lion" => render::lion(width, height, params),
+        "shapes" => render::shapes(width, height, params),
+        "gradients" => render::gradients(width, height, params),
+        "gouraud" => render::gouraud(width, height, params),
+        "strokes" => render::strokes(width, height, params),
+        "curves" => render::curves(width, height, params),
+        _ => render::fallback(width, height),
     }
-
-    buf
 }
 
 /// Get the library version string.
 #[wasm_bindgen]
 pub fn version() -> String {
     "agg-rust 0.1.0".to_string()
+}
+
+/// Get list of available demo names.
+#[wasm_bindgen]
+pub fn demo_names() -> String {
+    "lion,shapes,gradients,gouraud,strokes,curves".to_string()
 }
