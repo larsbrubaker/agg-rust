@@ -397,6 +397,22 @@ pub fn gouraud(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut g);
     }
 
+    // AGG controls matching C++ gouraud.cpp
+    let mut s_dilation = SliderCtrl::new(5.0, 5.0, 395.0, 11.0);
+    s_dilation.label("Dilation=%3.2f");
+    s_dilation.set_value(d);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_dilation);
+
+    let mut s_gamma = SliderCtrl::new(5.0, 20.0, 395.0, 26.0);
+    s_gamma.label("Linear gamma=%3.2f");
+    s_gamma.set_value(_gamma);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
+
+    let mut s_alpha = SliderCtrl::new(5.0, 35.0, 395.0, 41.0);
+    s_alpha.label("Opacity=%3.2f");
+    s_alpha.set_value(alpha);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_alpha);
+
     buf
 }
 
@@ -522,6 +538,34 @@ pub fn conv_stroke(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.add_path(&mut ell, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
+
+    // AGG controls matching C++ conv_stroke.cpp
+    let mut r_join = RboxCtrl::new(10.0, 10.0, 133.0, 80.0);
+    r_join.add_item("Miter Join");
+    r_join.add_item("Miter Join Revert");
+    r_join.add_item("Round Join");
+    r_join.add_item("Bevel Join");
+    r_join.set_cur_item(join_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_join);
+
+    let mut r_cap = RboxCtrl::new(10.0, 90.0, 133.0, 160.0);
+    r_cap.add_item("Butt Cap");
+    r_cap.add_item("Square Cap");
+    r_cap.add_item("Round Cap");
+    r_cap.set_cur_item(cap_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_cap);
+
+    let mut s_width = SliderCtrl::new(140.0, 14.0, 490.0, 22.0);
+    s_width.label("Width=%1.2f");
+    s_width.range(3.0, 40.0);
+    s_width.set_value(sw);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+
+    let mut s_miter = SliderCtrl::new(140.0, 34.0, 490.0, 42.0);
+    s_miter.label("Miter Limit=%1.2f");
+    s_miter.range(1.0, 10.0);
+    s_miter.set_value(miter_limit);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_miter);
 
     buf
 }
@@ -916,6 +960,14 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ras.add_path(&mut stroke, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 100, 200, 255));
 
+    // AGG control matching C++ aa_demo.cpp
+    let mut s_pixel = SliderCtrl::new(80.0, 10.0, (width as f64) - 10.0, 19.0);
+    s_pixel.label("Pixel size=%1.0f");
+    s_pixel.range(8.0, 100.0);
+    s_pixel.num_steps(23);
+    s_pixel.set_value(pixel_size);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_pixel);
+
     buf
 }
 
@@ -1093,6 +1145,13 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
 
+    // AGG control matching C++ line_thickness.cpp
+    let mut s_thick = SliderCtrl::new(10.0, 10.0, (width as f64) - 10.0, 19.0);
+    s_thick.label("Line thickness=%1.2f");
+    s_thick.range(0.0, 5.0);
+    s_thick.set_value(1.0);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_thick);
+
     buf
 }
 
@@ -1159,6 +1218,19 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.add_path(&mut ell, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
+
+    // AGG controls matching C++ rasterizers.cpp
+    let mut s_gamma = SliderCtrl::new(140.0, 14.0, 280.0, 22.0);
+    s_gamma.label("Gamma=%1.2f");
+    s_gamma.range(0.0, 1.0);
+    s_gamma.set_value(_gamma);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
+
+    let mut s_alpha = SliderCtrl::new(290.0, 14.0, 490.0, 22.0);
+    s_alpha.label("Alpha=%1.2f");
+    s_alpha.range(0.0, 1.0);
+    s_alpha.set_value(alpha);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_alpha);
 
     buf
 }
@@ -1635,6 +1707,13 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
 
+    // AGG control matching C++ perspective.cpp
+    let mut r_type = RboxCtrl::new(420.0, 5.0, 550.0, 55.0);
+    r_type.add_item("Bilinear");
+    r_type.add_item("Perspective");
+    r_type.set_cur_item(trans_type);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_type);
+
     buf
 }
 
@@ -1797,6 +1876,13 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 120, 255));
     }
 
+    // AGG control matching C++ image_fltr_graph.cpp
+    let mut s_radius = SliderCtrl::new(5.0, 5.0, w - 5.0, 10.0);
+    s_radius.label("Radius=%.3f");
+    s_radius.range(2.0, 8.0);
+    s_radius.set_value(custom_radius);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
+
     buf
 }
 
@@ -1804,10 +1890,6 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Image1 — Image Affine Transformations with Bilinear Filtering
 // ============================================================================
 
-/// Generate a procedural "spheres" test image (RGBA, 256x256).
-///
-/// Creates a grid of 3D-looking spheres with different colors, similar to
-/// the original AGG "spheres.bmp" test image used by image1.cpp.
 /// Original AGG "spheres.bmp" embedded at compile time (320x300, 24-bit BGR).
 static SPHERES_BMP: &[u8] = include_bytes!("spheres.bmp");
 
