@@ -6,3 +6,4 @@ node_modules/
 demo/dist/
 demo/public/pkg/
 bun.lock
+cpp-references/
