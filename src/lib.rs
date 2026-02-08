@@ -102,3 +102,6 @@ pub mod span_image_filter_rgba;
 pub mod span_interpolator_trans;
 pub mod span_subdiv_adaptor;
 pub mod trans_viewport;
+
+// Phase 8: Controls (interactive UI widgets rendered via AGG pipeline)
+pub mod ctrl;

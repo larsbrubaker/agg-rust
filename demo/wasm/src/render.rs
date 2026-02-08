@@ -7,6 +7,7 @@ use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLA
 use agg_rust::bounding_rect::bounding_rect;
 use agg_rust::color::Rgba8;
 use agg_rust::conv_contour::ConvContour;
+use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl};
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
@@ -131,6 +132,12 @@ pub fn lion(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         c.a = ((c.a as u32 * alpha) / 255) as u8;
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &c);
     }
+
+    // Render AGG slider control — matching C++ lion.cpp
+    let mut s_alpha = SliderCtrl::new(5.0, 5.0, 507.0, 12.0);
+    s_alpha.label("Alpha%3.3f");
+    s_alpha.set_value(alpha as f64 / 255.0);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_alpha);
 
     buf
 }
@@ -630,6 +637,21 @@ pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
     }
 
+    // Render AGG controls — matching C++ bezier_div.cpp
+    let mut s_width = SliderCtrl::new(245.0, 5.0, 495.0, 12.0);
+    s_width.label("Width=%.2f");
+    s_width.range(-50.0, 100.0);
+    s_width.set_value(sw);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+
+    let mut c_pts = CboxCtrl::new(250.0, 20.0, "Show Points");
+    c_pts.set_status(show_points);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_pts);
+
+    let mut c_outline = CboxCtrl::new(250.0, 35.0, "Show Stroke Outline");
+    c_outline.set_status(show_outline);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_outline);
+
     buf
 }
 
@@ -748,6 +770,13 @@ pub fn rounded_rect_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.add_path(&mut ell, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
+
+    // Render AGG slider controls — matching C++ rounded_rect.cpp
+    let mut s_radius = SliderCtrl::new(10.0, 10.0, 590.0, 19.0);
+    s_radius.label("radius=%4.3f");
+    s_radius.range(0.0, 50.0);
+    s_radius.set_value(radius);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
 
     buf
 }
@@ -989,6 +1018,19 @@ pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(100, 100, 100, 200));
     }
 
+    // Render AGG slider controls — matching C++ gamma_correction.cpp
+    let mut s_thick = SliderCtrl::new(5.0, 5.0, 395.0, 11.0);
+    s_thick.label("Thickness=%3.2f");
+    s_thick.range(0.0, 3.0);
+    s_thick.set_value(thickness);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_thick);
+
+    let mut s_gamma = SliderCtrl::new(5.0, 35.0, 395.0, 41.0);
+    s_gamma.label("Gamma=%3.2f");
+    s_gamma.range(0.5, 3.0);
+    s_gamma.set_value(gamma_val);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
+
     buf
 }
 
@@ -1216,6 +1258,24 @@ pub fn conv_contour_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ras.add_path(&mut contour, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
+    // Render AGG controls — matching C++ conv_contour.cpp
+    let mut r_close = RboxCtrl::new(10.0, 10.0, 130.0, 80.0);
+    r_close.add_item("Close");
+    r_close.add_item("Close CW");
+    r_close.add_item("Close CCW");
+    r_close.set_cur_item(close_mode);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_close);
+
+    let mut s_width = SliderCtrl::new(140.0, 14.0, 440.0, 22.0);
+    s_width.label("Width=%1.2f");
+    s_width.range(-100.0, 100.0);
+    s_width.set_value(contour_w);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+
+    let mut c_auto = CboxCtrl::new(140.0, 30.0, "Autodetect orientation");
+    c_auto.set_status(auto_detect);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_auto);
+
     buf
 }
 
@@ -1311,6 +1371,28 @@ pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras.add_path(&mut ell, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
     }
+
+    // Render AGG controls — matching C++ conv_dash_marker.cpp
+    let mut r_cap = RboxCtrl::new(10.0, 10.0, 130.0, 80.0);
+    r_cap.add_item("Butt Cap");
+    r_cap.add_item("Square Cap");
+    r_cap.add_item("Round Cap");
+    r_cap.set_cur_item(cap_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_cap);
+
+    let mut s_width = SliderCtrl::new(140.0, 14.0, 290.0, 22.0);
+    s_width.label("Width=%1.2f");
+    s_width.range(0.0, 10.0);
+    s_width.set_value(sw);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+
+    let mut c_close = CboxCtrl::new(140.0, 30.0, "Close Polygons");
+    c_close.set_status(close);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_close);
+
+    let mut c_eo = CboxCtrl::new(300.0, 30.0, "Even-Odd Fill");
+    c_eo.set_status(even_odd);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_eo);
 
     buf
 }
@@ -1898,6 +1980,24 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
+    }
+
+    // Render AGG slider controls on canvas — matching C++ image1.cpp layout
+    {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+
+        let mut s_angle = SliderCtrl::new(5.0, 5.0, 300.0, 12.0);
+        s_angle.label("Angle=%3.2f");
+        s_angle.range(-180.0, 180.0);
+        s_angle.set_value(angle_deg);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_angle);
+
+        let mut s_scale = SliderCtrl::new(5.0, 5.0 + 15.0, 300.0, 12.0 + 15.0);
+        s_scale.label("Scale=%3.2f");
+        s_scale.range(0.1, 5.0);
+        s_scale.set_value(scale);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_scale);
     }
 
     buf
