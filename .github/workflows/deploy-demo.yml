@@ -28,11 +28,14 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build WASM
-        run: wasm-pack build demo/wasm --target web --out-dir ../public/pkg --no-typescript
-
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Install demo dependencies
+        run: cd demo && bun install
+
+      - name: Build WASM
+        run: wasm-pack build demo/wasm --target web --out-dir ../public/pkg --no-typescript
 
       - name: Build static site
         run: cd demo && bun run build

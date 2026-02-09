@@ -1,6 +1,7 @@
 /target
 *.svg
 *.png
+!docs/screenshot.png
 *.bmp
 node_modules/
 demo/dist/
