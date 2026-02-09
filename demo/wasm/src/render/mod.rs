@@ -56,6 +56,7 @@ pub fn fallback(width: u32, height: u32) -> Vec<u8> {
 static SPHERES_BMP: &[u8] = include_bytes!("../spheres.bmp");
 
 /// Parse the embedded spheres BMP and return (width, height, rgba_data).
+/// The image is flipped to top-down order (row 0 = top of image).
 pub(super) fn load_spheres_image() -> (u32, u32, Vec<u8>) {
     let d = SPHERES_BMP;
     let off = u32::from_le_bytes([d[10], d[11], d[12], d[13]]) as usize;
@@ -75,6 +76,35 @@ pub(super) fn load_spheres_image() -> (u32, u32, Vec<u8>) {
                 rgba[di] = d[si + 2];
                 rgba[di + 1] = d[si + 1];
                 rgba[di + 2] = d[si];
+                rgba[di + 3] = if bytes_pp >= 4 { d[si + 3] } else { 255 };
+            }
+        }
+    }
+    (w, h, rgba)
+}
+
+/// Parse the embedded spheres BMP and return (width, height, rgba_data) in native
+/// BMP bottom-up order (row 0 = bottom of image). No flipping is done — this
+/// matches C++ AGG's convention when used with a negative-stride rendering buffer.
+pub(super) fn load_spheres_image_native() -> (u32, u32, Vec<u8>) {
+    let d = SPHERES_BMP;
+    let off = u32::from_le_bytes([d[10], d[11], d[12], d[13]]) as usize;
+    let w = u32::from_le_bytes([d[18], d[19], d[20], d[21]]);
+    let h = u32::from_le_bytes([d[22], d[23], d[24], d[25]]);
+    let bpp = u16::from_le_bytes([d[28], d[29]]) as usize;
+    let bytes_pp = bpp / 8;
+    let row_size = ((w as usize * bytes_pp + 3) / 4) * 4;
+    let mut rgba = vec![255u8; (w * h * 4) as usize];
+    for y in 0..h as usize {
+        // No flip: BMP row y maps directly to output row y (bottom-up order)
+        let src_off = off + y * row_size;
+        for x in 0..w as usize {
+            let si = src_off + x * bytes_pp;
+            let di = (y * w as usize + x) * 4;
+            if bytes_pp >= 3 {
+                rgba[di] = d[si + 2];     // R from BGR
+                rgba[di + 1] = d[si + 1]; // G
+                rgba[di + 2] = d[si];     // B
                 rgba[di + 3] = if bytes_pp >= 4 { d[si + 3] } else { 255 };
             }
         }

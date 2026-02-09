@@ -24,11 +24,11 @@ export function init(container: HTMLElement) {
   let runTotalPixels = 0;
   const IMG_PIXELS = 320 * 300; // spheres.bmp dimensions
 
-  function draw() {
+  function draw(incremental = false) {
     renderToCanvas({
       demoName: 'image_filters',
       canvas, width: W, height: H,
-      params: [filterIdx, stepDeg, normalize ? 1 : 0, radius, numSteps, kpixSec],
+      params: [filterIdx, stepDeg, normalize ? 1 : 0, radius, numSteps, kpixSec, incremental ? 1 : 0],
       timeDisplay: timeEl,
     });
   }
@@ -62,7 +62,7 @@ export function init(container: HTMLElement) {
 
   function doSingleStep() {
     numSteps++;
-    draw();
+    draw(true); // incremental: one transform from cached state
   }
 
   function doRun() {
@@ -87,7 +87,7 @@ export function init(container: HTMLElement) {
       }
       numSteps++;
       runTotalPixels += IMG_PIXELS;
-      draw();
+      draw(true); // incremental: one transform from cached state
       animId = requestAnimationFrame(step);
     }
     step();
