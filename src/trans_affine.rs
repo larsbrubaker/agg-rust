@@ -393,10 +393,14 @@ impl TransAffine {
     }
 
     /// Average scale factor (useful for approximation_scale on curves).
+    ///
+    /// Uses the same truncated 1/sqrt(2) constant as C++ AGG (`0.707106781`)
+    /// to match its behavior exactly. Using full-precision FRAC_1_SQRT_2 would
+    /// produce a slightly different result that causes the line profile width
+    /// computation to take a different branch, amplifying the difference.
     pub fn get_scale(&self) -> f64 {
-        let s = std::f64::consts::FRAC_1_SQRT_2;
-        let x = s * self.sx + s * self.shx;
-        let y = s * self.shy + s * self.sy;
+        let x = 0.707106781_f64 * self.sx + 0.707106781_f64 * self.shx;
+        let y = 0.707106781_f64 * self.shy + 0.707106781_f64 * self.sy;
         (x * x + y * y).sqrt()
     }
 
@@ -675,7 +679,8 @@ mod tests {
     #[test]
     fn test_get_scale() {
         let m = TransAffine::new_scaling_uniform(3.0);
-        assert!((m.get_scale() - 3.0).abs() < EPS);
+        // Uses C++-matching truncated 1/sqrt(2) constant, so tolerance is slightly wider
+        assert!((m.get_scale() - 3.0).abs() < 1e-8);
     }
 
     #[test]

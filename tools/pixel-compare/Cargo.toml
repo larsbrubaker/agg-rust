@@ -1,0 +1,12 @@
+[package]
+name = "pixel-compare"
+version = "0.1.0"
+edition = "2021"
+description = "Pixel-perfect comparison tool for AGG Rust vs C++ demos"
+
+[[bin]]
+name = "pixel-compare"
+path = "src/main.rs"
+
+[dependencies]
+agg-rust = { path = "../.." }

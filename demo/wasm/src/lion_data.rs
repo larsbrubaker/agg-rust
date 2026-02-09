@@ -5,9 +5,19 @@
 
 use agg_rust::basics::PATH_FLAGS_CW;
 use agg_rust::color::Rgba8;
+use agg_rust::gamma::linear_to_srgb;
 use agg_rust::path_storage::PathStorage;
 
 static LION_DATA: &str = include_str!("lion.txt");
+
+/// Convert a linear 8-bit value to sRGB 8-bit, matching C++ AGG's sRGB_lut<int8u>.
+/// C++ formula: m_inv_table[i] = uround(255.0 * linear_to_sRGB(i / 255.0))
+fn linear_u8_to_srgb_u8(v: u32) -> u32 {
+    if v == 0 {
+        return 0;
+    }
+    (255.0 * linear_to_srgb(v as f64 / 255.0) + 0.5) as u32
+}
 
 /// Parse the lion vector data into a path storage with colors and path indices.
 ///
@@ -27,11 +37,12 @@ pub fn parse_lion() -> (PathStorage, Vec<Rgba8>, Vec<usize>) {
             // Path command line
             parse_path_line(line, &mut path);
         } else if line.chars().all(|c| c.is_ascii_hexdigit()) && line.len() == 6 {
-            // Hex color code
+            // Hex color code — apply linear-to-sRGB conversion to match C++ AGG's
+            // implicit rgba8 → srgba8 → rgba8 roundtrip in parse_lion.cpp
             let c = u32::from_str_radix(line, 16).unwrap_or(0);
-            let r = (c >> 16) & 0xFF;
-            let g = (c >> 8) & 0xFF;
-            let b = c & 0xFF;
+            let r = linear_u8_to_srgb_u8((c >> 16) & 0xFF);
+            let g = linear_u8_to_srgb_u8((c >> 8) & 0xFF);
+            let b = linear_u8_to_srgb_u8(c & 0xFF);
 
             path.close_polygon(0);
             colors.push(Rgba8::new(r, g, b, 255));

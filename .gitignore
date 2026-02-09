@@ -8,3 +8,5 @@ demo/public/pkg/
 bun.lock
 cpp-references/
 nul
+tools/cpp-renderer/
+tools/output/

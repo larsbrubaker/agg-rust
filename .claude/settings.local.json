@@ -61,7 +61,27 @@
       "WebFetch(domain:localhost)",
       "WebFetch(domain:crates.io)",
       "WebFetch(domain:docs.rs)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(ls -la \"c:\\\\Development\\\\agg-rust\\\\cpp-references\\\\agg-src\\\\include\"\" | grep -E \"scanline)",
+      "Bash(rasterizer)",
+      "Bash(renderer)",
+      "Bash(pixfmt \")",
+      "Bash(dir:*)",
+      "Bash(cd:*)",
+      "Bash(for f in \"c:\\\\Development\\\\agg-rust\\\\cpp-references\\\\agg-src\\\\include\"agg_*.h)",
+      "Bash(done)",
+      "Bash(for f in agg_*.h)",
+      "Bash(do wc -l \"$f\")",
+      "Bash(sort:*)",
+      "Bash(bun run build.ts:*)",
+      "Bash(git rm:*)",
+      "Bash(bun add:*)",
+      "Bash(git -C c:/Development/agg-rust status)",
+      "Bash(git -C c:/Development/agg-rust diff --stat)",
+      "Bash(git -C c:/Development/agg-rust log --oneline -5)",
+      "Bash(git -C c:/Development/agg-rust commit -m \"$\\(cat <<''EOF''\nAdd 5 WASM demos: alpha_gradient, image_alpha, alpha_mask3, image_transforms, mol_view\n\nBatch 3 of demo porting plan — completes all portable demos \\(34 total\\).\n- alpha_gradient: gradient with alpha curve control over random ellipse background\n- image_alpha: brightness-to-alpha mapping with SpanConverter\n- alpha_mask3: polygon clipping with AND/SUB alpha mask operations \\(5 scenarios\\)\n- image_transforms: star polygon textured with image through 7 transform modes\n- mol_view: molecular structure viewer \\(Caffeine/Aspirin/Benzene\\) with rotate/scale/pan\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(bunx tsc:*)"
     ],
     "deny": []
   }
