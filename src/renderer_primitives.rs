@@ -237,6 +237,30 @@ where
     }
 }
 
+impl<'a, PF: PixelFormat> crate::rasterizer_outline::RendererPrimitivesLike
+    for RendererPrimitives<'a, PF>
+where
+    PF::ColorType: Default + Clone,
+{
+    type Color = PF::ColorType;
+
+    fn coord(c: f64) -> i32 {
+        Self::coord(c)
+    }
+
+    fn move_to(&mut self, x: i32, y: i32) {
+        self.move_to(x, y);
+    }
+
+    fn line_to(&mut self, x: i32, y: i32, last: bool) {
+        self.line_to(x, y, last);
+    }
+
+    fn set_line_color(&mut self, c: Self::Color) {
+        self.set_line_color(c);
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

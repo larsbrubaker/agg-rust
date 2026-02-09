@@ -1,11 +1,13 @@
 // Canvas control interaction — hit test AGG-rendered controls and sync with sidebar.
 //
 // AGG controls are rendered in WASM but have no interactivity there.
-// This module provides JS-side mouse handling that detects clicks/drags on
+// This module provides JS-side pointer handling that detects clicks/drags on
 // the canvas controls, updates the corresponding sidebar widget, and triggers re-render.
+// Uses pointer events with setPointerCapture so slider drags work even when
+// the cursor leaves the canvas.
 
-/** Get mouse position in AGG coordinates (origin bottom-left). */
-function aggPos(canvas: HTMLCanvasElement, e: MouseEvent): { x: number; y: number } {
+/** Get pointer position in AGG coordinates (origin bottom-left). */
+function aggPos(canvas: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
@@ -49,7 +51,7 @@ export interface CanvasRadio {
 export type CanvasControl = CanvasSlider | CanvasCheckbox | CanvasRadio;
 
 // ============================================================================
-// Mouse handler — attach to a canvas, process all registered controls
+// Pointer handler — attach to a canvas, process all registered controls
 // ============================================================================
 
 export function setupCanvasControls(
@@ -85,7 +87,7 @@ export function setupCanvasControls(
     slider.sidebarEl.dispatchEvent(new Event('input'));
   }
 
-  function onMouseDown(e: MouseEvent) {
+  function onPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
     const pos = aggPos(canvas, e);
     const ctrl = hitTest(pos.x, pos.y);
@@ -93,6 +95,7 @@ export function setupCanvasControls(
 
     if (ctrl.type === 'slider') {
       activeSlider = ctrl;
+      canvas.setPointerCapture(e.pointerId);
       const v = sliderValue(ctrl, pos.x);
       updateSlider(ctrl, v);
       e.stopPropagation();
@@ -117,7 +120,7 @@ export function setupCanvasControls(
     }
   }
 
-  function onMouseMove(e: MouseEvent) {
+  function onPointerMove(e: PointerEvent) {
     if (!activeSlider) return;
     const pos = aggPos(canvas, e);
     const v = sliderValue(activeSlider, pos.x);
@@ -126,20 +129,18 @@ export function setupCanvasControls(
     e.preventDefault();
   }
 
-  function onMouseUp() {
+  function onPointerUp() {
     activeSlider = null;
   }
 
   // Use capture phase so we can intercept before vertex drag handlers
-  canvas.addEventListener('mousedown', onMouseDown, true);
-  canvas.addEventListener('mousemove', onMouseMove, true);
-  canvas.addEventListener('mouseup', onMouseUp, true);
-  canvas.addEventListener('mouseleave', onMouseUp, true);
+  canvas.addEventListener('pointerdown', onPointerDown, true);
+  canvas.addEventListener('pointermove', onPointerMove, true);
+  canvas.addEventListener('pointerup', onPointerUp, true);
 
   return () => {
-    canvas.removeEventListener('mousedown', onMouseDown, true);
-    canvas.removeEventListener('mousemove', onMouseMove, true);
-    canvas.removeEventListener('mouseup', onMouseUp, true);
-    canvas.removeEventListener('mouseleave', onMouseUp, true);
+    canvas.removeEventListener('pointerdown', onPointerDown, true);
+    canvas.removeEventListener('pointermove', onPointerMove, true);
+    canvas.removeEventListener('pointerup', onPointerUp, true);
   };
 }

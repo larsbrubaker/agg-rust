@@ -39,6 +39,33 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'alpha_mask3': () => import('./demos/alpha_mask3.ts'),
   'image_transforms': () => import('./demos/image_transforms.ts'),
   'mol_view': () => import('./demos/mol_view.ts'),
+  'raster_text': () => import('./demos/raster_text.ts'),
+  'gamma_ctrl': () => import('./demos/gamma_ctrl.ts'),
+  'trans_polar': () => import('./demos/trans_polar.ts'),
+  'multi_clip': () => import('./demos/multi_clip.ts'),
+  'simple_blur': () => import('./demos/simple_blur.ts'),
+  'blur': () => import('./demos/blur.ts'),
+  'trans_curve1': () => import('./demos/trans_curve1.ts'),
+  'trans_curve2': () => import('./demos/trans_curve2.ts'),
+  'lion_lens': () => import('./demos/lion_lens.ts'),
+  'distortions': () => import('./demos/distortions.ts'),
+  'blend_color': () => import('./demos/blend_color.ts'),
+  'component_rendering': () => import('./demos/component_rendering.ts'),
+  'polymorphic_renderer': () => import('./demos/polymorphic_renderer.ts'),
+  'scanline_boolean': () => import('./demos/scanline_boolean.ts'),
+  'scanline_boolean2': () => import('./demos/scanline_boolean2.ts'),
+  'pattern_fill': () => import('./demos/pattern_fill.ts'),
+  'pattern_perspective': () => import('./demos/pattern_perspective.ts'),
+  'pattern_resample': () => import('./demos/pattern_resample.ts'),
+  'lion_outline': () => import('./demos/lion_outline.ts'),
+  'rasterizers2': () => import('./demos/rasterizers2.ts'),
+  'line_patterns': () => import('./demos/line_patterns.ts'),
+  'line_patterns_clip': () => import('./demos/line_patterns_clip.ts'),
+  'compositing': () => import('./demos/compositing.ts'),
+  'compositing2': () => import('./demos/compositing2.ts'),
+  'flash_rasterizer': () => import('./demos/flash_rasterizer.ts'),
+  'flash_rasterizer2': () => import('./demos/flash_rasterizer2.ts'),
+  'rasterizer_compound': () => import('./demos/rasterizer_compound.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;
@@ -261,6 +288,51 @@ function renderHome(container: HTMLElement) {
           <h3>Molecule Viewer</h3>
           <p>Molecular structure viewer with rotate, scale, and pan controls.</p>
         </a>
+        <a href="#/raster_text" class="feature-card">
+          <span class="card-icon">A</span>
+          <h3>Raster Text</h3>
+          <p>All 34 embedded bitmap fonts rendered with sample text strings.</p>
+        </a>
+        <a href="#/gamma_ctrl" class="feature-card">
+          <span class="card-icon">&#947;</span>
+          <h3>Gamma Control</h3>
+          <p>Interactive gamma spline widget with stroked ellipses.</p>
+        </a>
+        <a href="#/trans_polar" class="feature-card">
+          <span class="card-icon">&#9741;</span>
+          <h3>Polar Transform</h3>
+          <p>Slider control warped through polar coordinates with spiral effect.</p>
+        </a>
+        <a href="#/multi_clip" class="feature-card">
+          <span class="card-icon">&#9634;</span>
+          <h3>Multi Clip</h3>
+          <p>Lion rendered through N&times;N clip regions with random shapes.</p>
+        </a>
+        <a href="#/simple_blur" class="feature-card">
+          <span class="card-icon">&#9684;</span>
+          <h3>Simple Blur</h3>
+          <p>Lion with 3&times;3 box blur &mdash; original vs blurred comparison.</p>
+        </a>
+        <a href="#/blur" class="feature-card">
+          <span class="card-icon">&#9684;</span>
+          <h3>Blur</h3>
+          <p>Stack blur and recursive blur on colored shapes with adjustable radius.</p>
+        </a>
+        <a href="#/trans_curve1" class="feature-card">
+          <span class="card-icon">&#8765;</span>
+          <h3>Text on Curve</h3>
+          <p>Text warped along a B-spline curve with draggable control points.</p>
+        </a>
+        <a href="#/lion_lens" class="feature-card">
+          <span class="card-icon">&#128269;</span>
+          <h3>Lion Lens</h3>
+          <p>Magnifying lens distortion on the lion using trans_warp_magnifier.</p>
+        </a>
+        <a href="#/distortions" class="feature-card">
+          <span class="card-icon">&#9741;</span>
+          <h3>Distortions</h3>
+          <p>Wave and swirl distortions on a procedural image with adjustable parameters.</p>
+        </a>
       </div>
       <div class="about-section">
         <h2>About This Project</h2>
@@ -277,11 +349,11 @@ function renderHome(container: HTMLElement) {
         </p>
         <div class="stats-row">
           <div class="stat">
-            <div class="stat-value">61</div>
+            <div class="stat-value">88</div>
             <div class="stat-label">Modules Ported</div>
           </div>
           <div class="stat">
-            <div class="stat-value">742</div>
+            <div class="stat-value">903</div>
             <div class="stat-label">Tests Passing</div>
           </div>
           <div class="stat">

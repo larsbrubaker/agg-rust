@@ -5,7 +5,7 @@ Cross-reference of all 75 C++ demos from `cpp-references/agg-web/demo/` against 
 Reference screenshots: `cpp-references/agg-web/demo/<name>/<name>.gif|png|jpg`
 Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
-## Currently Implemented (34 demos)
+## Currently Implemented (61 demos)
 
 | Demo | C++ Original | Window | Status |
 |------|-------------|--------|--------|
@@ -15,13 +15,22 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | alpha_mask | alpha_mask.cpp | 512x400 | Done - lion with elliptical alpha mask (manual compositing) |
 | alpha_mask3 | alpha_mask3.cpp | 640x520 | Done - alpha mask polygon clipping (AND/SUB), 5 scenarios |
 | bezier_div | bezier_div.cpp | 600x600 | Done |
+| blend_color | blend_color.cpp | 512x400 | Done - blurred shadow under shape, blur compositing |
+| blur | blur.cpp | 512x400 | Done - stack blur with adjustable radius |
 | bspline | bspline.cpp | 600x600 | Done - 6 draggable control points, B-spline curve |
 | circles | circles.cpp | 400x400 | Done |
+| component_rendering | component_rendering.cpp | 512x400 | Done - grayscale pixfmt rendering |
+| compositing | compositing.cpp | 512x400 | Done - SVG compositing modes with overlapping circles |
+| compositing2 | compositing2.cpp | 512x400 | Done - multiple circles blended with selected comp op |
 | conv_contour | conv_contour.cpp | 600x600 | Done |
 | conv_dash | conv_dash_marker.cpp | 600x600 | Done |
-| conv_dash_marker | conv_dash_marker.cpp | 500x330 | Done - dashed strokes with cap styles (arrowheads skipped) |
+| conv_dash_marker | conv_dash_marker.cpp | 500x330 | Done - dashed strokes with cap styles |
 | conv_stroke | conv_stroke.cpp | 600x600 | Done |
+| distortions | distortions.cpp | 512x400 | Done - span interpolator adaptor with warp effects |
+| flash_rasterizer | flash_rasterizer.cpp | 512x400 | Done - compound rasterizer with multi-style shapes |
+| flash_rasterizer2 | flash_rasterizer2.cpp | 512x400 | Done - multi-style shapes with regular rasterizer |
 | gamma_correction | gamma_correction.cpp | 500x400 | Done |
+| gamma_ctrl | gamma_ctrl.cpp | 512x400 | Done - interactive gamma spline widget |
 | gamma_tuner | gamma_tuner.cpp | 500x500 | Done - gradient background + alpha pattern with gamma |
 | gouraud | gouraud.cpp | 400x320 | Done |
 | gradient_focal | gradient_focal.cpp | 600x400 | Done |
@@ -36,67 +45,39 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | image_transforms | image_transforms.cpp | 430x340 | Done - star polygon + image, 7 transform modes |
 | image_fltr_graph | image_fltr_graph.cpp | 780x300 | Done - 16 checkboxes, 3 curve types |
 | image1 | image1.cpp | 600x500 | Done |
+| line_patterns | line_patterns.cpp | 500x450 | Done - solid AA outline patterns |
+| line_patterns_clip | line_patterns_clip.cpp | 500x450 | Done - clipped AA outline patterns |
 | line_thickness | (custom) | 600x400 | Done |
 | lion | lion.cpp | 512x400 | Done |
+| lion_lens | lion_lens.cpp | 512x400 | Done - warp magnifier lens over lion |
+| lion_outline | lion_outline.cpp | 512x512 | Done - AA outline rendering of lion paths |
 | mol_view | mol_view.cpp | 400x400 | Done - molecular structure viewer (Caffeine/Aspirin/Benzene) |
+| multi_clip | multi_clip.cpp | 512x400 | Done - multiple clip rectangles |
+| pattern_fill | pattern_fill.cpp | 512x400 | Done - tiled pattern fill |
+| pattern_perspective | pattern_perspective.cpp | 512x400 | Done - pattern with perspective transform |
+| pattern_resample | pattern_resample.cpp | 512x400 | Done - resampled pattern fill |
 | perspective | perspective.cpp | 600x600 | Done |
+| polymorphic_renderer | polymorphic_renderer.cpp | 512x400 | Done - rendering with multiple pixel formats |
+| rasterizer_compound | rasterizer_compound.cpp | 512x400 | Done - compound rasterizer with layer order control |
 | rasterizers | rasterizers.cpp | 600x400 | Done |
+| rasterizers2 | rasterizers2.cpp | 500x450 | Done - spiral outlines with AA and non-AA rendering |
+| raster_text | raster_text.cpp | 512x400 | Done - all 34 embedded raster fonts |
 | rounded_rect | rounded_rect.cpp | 600x400 | Done |
+| scanline_boolean | scanline_boolean.cpp | 512x400 | Done - boolean ops on scanline shapes |
+| scanline_boolean2 | scanline_boolean2.cpp | 512x400 | Done - boolean algebra on complex shapes |
 | shapes | (custom) | 600x400 | Done |
+| simple_blur | simple_blur.cpp | 512x400 | Done - simple stack blur |
+| trans_curve1 | trans_curve1.cpp | 512x400 | Done - text along curve (single path) |
+| trans_curve2 | trans_curve2.cpp | 512x400 | Done - text along curve variant |
+| trans_polar | trans_polar.cpp | 512x400 | Done - polar coordinate transform |
 
-## Deferred (30 demos - need missing Rust modules)
+## Deferred (3 demos - need additional work)
 
-### Missing: rasterizer_outline_aa + line_profile_aa (4 demos)
-- line_patterns
-- line_patterns_clip
-- lion_outline
-- rasterizers2
-
-### Missing: rasterizer_compound_aa + comp_op (5 demos)
-- compositing
-- compositing2
-- flash_rasterizer
-- flash_rasterizer2
-- rasterizer_compound
-
-### Missing: stack_blur / recursive_blur (2 demos)
-- blur
-- simple_blur
-
-### Missing: span_pattern (3 demos)
-- pattern_fill
-- pattern_perspective
-- pattern_resample
-
-### Missing: scanline_boolean_algebra (2 demos)
-- scanline_boolean
-- scanline_boolean2
-
-### Missing: trans_single_path (2 demos)
-- trans_curve1
-- trans_curve2
-
-### Missing: renderer_mclip (2 demos)
-- alpha_mask2
-- multi_clip
-
-### Missing: span_interpolator_persp (1 demo)
-- image_resample
-
-### Missing: trans_warp_magnifier (2 demos)
-- distortions
-- lion_lens
-
-### Missing: trans_polar (1 demo)
-- trans_polar
-
-### Missing: various single modules (6 demos)
-- blend_color (pixfmt_rgb, multiple pixel formats)
-- component_rendering (pixfmt_gray)
-- gamma_ctrl (gamma_ctrl widget)
-- gouraud_mesh (mesh data structures)
-- polymorphic_renderer (pixfmt_rgb)
-- raster_text (embedded_raster_fonts)
+| Demo | Blocking Issue |
+|------|---------------|
+| alpha_mask2 | renderer_mclip + alpha mask compositing |
+| gouraud_mesh | mesh data structures for subdivision |
+| image_resample | span_interpolator_persp integration |
 
 ## Not Applicable for WASM (11)
 
@@ -118,27 +99,15 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
 | Category | Count |
 |----------|-------|
-| Implemented | 34 |
-| Can port now | 0 |
-| Deferred (missing modules) | 30 |
+| Implemented | 61 |
+| Deferred | 3 |
 | Not applicable | 11 |
 | **Total C++ demos** | **75** |
 
-## Module Porting Priority (to unblock deferred demos)
+## Module Porting Status
 
-| Module | Demos Unblocked | Complexity |
-|--------|----------------|------------|
-| rasterizer_outline_aa + line_profile_aa | 4 | HIGH |
-| rasterizer_compound_aa + comp_op | 5 | VERY HIGH |
-| stack_blur + recursive_blur | 2 | MED |
-| span_pattern | 3 | MED |
-| scanline_boolean_algebra | 2 | HIGH |
-| trans_single_path | 2 | MED |
-| renderer_mclip | 2 | MED |
-| pixfmt_rgb + pixfmt_gray | 3 | MED |
-| trans_warp_magnifier | 2 | LOW |
-| trans_polar | 1 | LOW |
-| embedded_raster_fonts | 1 | LOW |
-| gamma_ctrl widget | 1 | LOW |
-| span_interpolator_persp | 1 | MED |
-| mesh data structures | 1 | HIGH |
+All core library modules have been ported (903 tests passing). The 3 remaining deferred demos need demo-level work rather than missing library modules:
+
+- **alpha_mask2**: Needs renderer_mclip integration with alpha mask pipeline
+- **gouraud_mesh**: Needs mesh subdivision data structures (example-level code)
+- **image_resample**: Needs span_interpolator_persp wired into image resampling pipeline

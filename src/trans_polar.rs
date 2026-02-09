@@ -8,6 +8,7 @@ use crate::span_interpolator_linear::Transformer;
 /// Polar coordinate transformation.
 ///
 /// Maps rectangular coordinates to polar space, optionally with spiral effect.
+#[derive(Clone, Copy)]
 pub struct TransPolar {
     pub base_angle: f64,
     pub base_scale: f64,

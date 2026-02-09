@@ -1,12 +1,14 @@
 // Reusable mouse interaction helpers for AGG demos.
+// Uses pointer events with setPointerCapture so drags work even when
+// the cursor leaves the canvas.
 
 export interface Vertex {
   x: number;
   y: number;
 }
 
-/** Get mouse position relative to canvas in AGG coordinates (origin bottom-left). */
-function canvasPos(canvas: HTMLCanvasElement, e: MouseEvent): { x: number; y: number } {
+/** Get pointer position relative to canvas in AGG coordinates (origin bottom-left). */
+function canvasPos(canvas: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
@@ -38,7 +40,7 @@ export function setupVertexDrag(opts: VertexDragOptions): () => void {
   let dragIdx = -1;
   let dx = 0, dy = 0;
 
-  function onMouseDown(e: MouseEvent) {
+  function onPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
     const pos = canvasPos(canvas, e);
 
@@ -54,15 +56,17 @@ export function setupVertexDrag(opts: VertexDragOptions): () => void {
       dragIdx = bestIdx;
       dx = pos.x - vertices[bestIdx].x;
       dy = pos.y - vertices[bestIdx].y;
+      canvas.setPointerCapture(e.pointerId);
     } else if (opts.dragAll && vertices.length >= 3) {
       // Drag all vertices together (click inside shape)
       dragIdx = vertices.length; // special index
       dx = pos.x - vertices[0].x;
       dy = pos.y - vertices[0].y;
+      canvas.setPointerCapture(e.pointerId);
     }
   }
 
-  function onMouseMove(e: MouseEvent) {
+  function onPointerMove(e: PointerEvent) {
     if (dragIdx < 0) return;
     const pos = canvasPos(canvas, e);
 
@@ -80,20 +84,18 @@ export function setupVertexDrag(opts: VertexDragOptions): () => void {
     onDrag();
   }
 
-  function onMouseUp() {
+  function onPointerUp() {
     dragIdx = -1;
   }
 
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mousemove', onMouseMove);
-  canvas.addEventListener('mouseup', onMouseUp);
-  canvas.addEventListener('mouseleave', onMouseUp);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
 
   return () => {
-    canvas.removeEventListener('mousedown', onMouseDown);
-    canvas.removeEventListener('mousemove', onMouseMove);
-    canvas.removeEventListener('mouseup', onMouseUp);
-    canvas.removeEventListener('mouseleave', onMouseUp);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
   };
 }
 
@@ -117,16 +119,17 @@ export interface RotateScaleOptions {
 export function setupRotateScale(opts: RotateScaleOptions): () => void {
   const { canvas, onLeftDrag, onRightDrag } = opts;
 
-  function onMouseDown(e: MouseEvent) {
-    handleMouse(e);
+  function onPointerDown(e: PointerEvent) {
+    canvas.setPointerCapture(e.pointerId);
+    handlePointer(e);
   }
 
-  function onMouseMove(e: MouseEvent) {
+  function onPointerMove(e: PointerEvent) {
     if (e.buttons === 0) return;
-    handleMouse(e);
+    handlePointer(e);
   }
 
-  function handleMouse(e: MouseEvent) {
+  function handlePointer(e: PointerEvent) {
     const pos = canvasPos(canvas, e);
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
@@ -148,13 +151,13 @@ export function setupRotateScale(opts: RotateScaleOptions): () => void {
     e.preventDefault();
   }
 
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('contextmenu', onContextMenu);
 
   return () => {
-    canvas.removeEventListener('mousedown', onMouseDown);
-    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('contextmenu', onContextMenu);
   };
 }
@@ -184,7 +187,8 @@ export function setupGradientDrag(opts: GradientDragOptions): () => void {
   let pdx = 0, pdy = 0;
   let prevAngle = 0, prevScale = 1;
 
-  function onMouseDown(e: MouseEvent) {
+  function onPointerDown(e: PointerEvent) {
+    canvas.setPointerCapture(e.pointerId);
     const pos = canvasPos(canvas, e);
     pdx = cx - pos.x;
     pdy = cy - pos.y;
@@ -192,7 +196,7 @@ export function setupGradientDrag(opts: GradientDragOptions): () => void {
     prevAngle = angle + Math.PI;
   }
 
-  function onMouseMove(e: MouseEvent) {
+  function onPointerMove(e: PointerEvent) {
     if (e.buttons === 0) return;
     const pos = canvasPos(canvas, e);
 
@@ -217,13 +221,13 @@ export function setupGradientDrag(opts: GradientDragOptions): () => void {
 
   function onContextMenu(e: Event) { e.preventDefault(); }
 
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('contextmenu', onContextMenu);
 
   return () => {
-    canvas.removeEventListener('mousedown', onMouseDown);
-    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('contextmenu', onContextMenu);
   };
 }

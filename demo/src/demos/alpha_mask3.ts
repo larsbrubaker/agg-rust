@@ -26,10 +26,13 @@ export function init(container: HTMLElement) {
 
   // Mouse drag for position
   let dragging = false;
-  const onMouseDown = (e: MouseEvent) => {
-    if (e.button === 0) { dragging = true; }
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button === 0) {
+      dragging = true;
+      canvas.setPointerCapture(e.pointerId);
+    }
   };
-  const onMouseMove = (e: MouseEvent) => {
+  const onPointerMove = (e: PointerEvent) => {
     if (!dragging) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = W / rect.width;
@@ -38,10 +41,10 @@ export function init(container: HTMLElement) {
     mouseY = (e.clientY - rect.top) * scaleY;
     draw();
   };
-  const onMouseUp = () => { dragging = false; };
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
+  const onPointerUp = () => { dragging = false; };
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
 
   // Scenario radio buttons
   const scenarioDiv = document.createElement('div');
@@ -103,9 +106,9 @@ export function init(container: HTMLElement) {
 
   draw();
   return () => {
-    canvas.removeEventListener('mousedown', onMouseDown);
-    canvas.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
     cleanupCC();
   };
 }

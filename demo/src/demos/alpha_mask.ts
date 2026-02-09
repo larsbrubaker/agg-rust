@@ -28,7 +28,8 @@ export function init(container: HTMLElement) {
   }
 
   // Left-drag = rotate + scale, right-drag = skew
-  canvas.addEventListener('mousedown', e => {
+  canvas.addEventListener('pointerdown', e => {
+    canvas.setPointerCapture(e.pointerId);
     const rect = canvas.getBoundingClientRect();
     const sx = canvas.width / rect.width;
     lastX = (e.clientX - rect.left) * sx;
@@ -37,7 +38,7 @@ export function init(container: HTMLElement) {
     rightDrag = e.button === 2;
   });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
-  canvas.addEventListener('mousemove', e => {
+  canvas.addEventListener('pointermove', e => {
     if (!dragging) return;
     const rect = canvas.getBoundingClientRect();
     const sx = canvas.width / rect.width;
@@ -57,8 +58,7 @@ export function init(container: HTMLElement) {
     lastY = y;
     draw();
   });
-  canvas.addEventListener('mouseup', () => { dragging = false; });
-  canvas.addEventListener('mouseleave', () => { dragging = false; });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
 
   const canvasControls: CanvasControl[] = [];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);

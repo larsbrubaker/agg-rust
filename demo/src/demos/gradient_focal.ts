@@ -33,14 +33,15 @@ export function init(container: HTMLElement) {
       y: canvas.height - (e.clientY - rect.top) * sy,
     };
   }
-  function onDown(e: MouseEvent) {
+  function onDown(e: PointerEvent) {
     if (e.button !== 0) return;
     dragging = true;
+    canvas.setPointerCapture(e.pointerId);
     const p = aggPos(e);
     focalX = p.x; focalY = p.y;
     draw();
   }
-  function onMove(e: MouseEvent) {
+  function onMove(e: PointerEvent) {
     if (!dragging) return;
     const p = aggPos(e);
     focalX = p.x; focalY = p.y;
@@ -48,10 +49,9 @@ export function init(container: HTMLElement) {
   }
   function onUp() { dragging = false; }
 
-  canvas.addEventListener('mousedown', onDown);
-  canvas.addEventListener('mousemove', onMove);
-  canvas.addEventListener('mouseup', onUp);
-  canvas.addEventListener('mouseleave', onUp);
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
 
   const slGamma = addSlider(sidebar, 'Gamma', 0.5, 2.5, 1.0, 0.01, v => { gamma = v; draw(); });
 
@@ -67,10 +67,9 @@ export function init(container: HTMLElement) {
 
   draw();
   return () => {
-    canvas.removeEventListener('mousedown', onDown);
-    canvas.removeEventListener('mousemove', onMove);
-    canvas.removeEventListener('mouseup', onUp);
-    canvas.removeEventListener('mouseleave', onUp);
+    canvas.removeEventListener('pointerdown', onDown);
+    canvas.removeEventListener('pointermove', onMove);
+    canvas.removeEventListener('pointerup', onUp);
     cleanupCC();
   };
 }

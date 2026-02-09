@@ -44,6 +44,33 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
         "alpha_mask3" => render::alpha_mask3(width, height, params),
         "image_transforms" => render::image_transforms_demo(width, height, params),
         "mol_view" => render::mol_view(width, height, params),
+        "raster_text" => render::raster_text(width, height, params),
+        "gamma_ctrl" => render::gamma_ctrl_demo(width, height, params),
+        "trans_polar" => render::trans_polar_demo(width, height, params),
+        "multi_clip" => render::multi_clip(width, height, params),
+        "simple_blur" => render::simple_blur(width, height, params),
+        "blur" => render::blur_demo(width, height, params),
+        "trans_curve1" => render::trans_curve1(width, height, params),
+        "trans_curve2" => render::trans_curve2(width, height, params),
+        "lion_lens" => render::lion_lens(width, height, params),
+        "distortions" => render::distortions(width, height, params),
+        "blend_color" => render::blend_color(width, height, params),
+        "component_rendering" => render::component_rendering(width, height, params),
+        "polymorphic_renderer" => render::polymorphic_renderer(width, height, params),
+        "scanline_boolean" => render::scanline_boolean(width, height, params),
+        "scanline_boolean2" => render::scanline_boolean2(width, height, params),
+        "pattern_fill" => render::pattern_fill(width, height, params),
+        "pattern_perspective" => render::pattern_perspective(width, height, params),
+        "pattern_resample" => render::pattern_resample(width, height, params),
+        "lion_outline" => render::lion_outline(width, height, params),
+        "rasterizers2" => render::rasterizers2(width, height, params),
+        "line_patterns" => render::line_patterns(width, height, params),
+        "line_patterns_clip" => render::line_patterns_clip(width, height, params),
+        "compositing" => render::compositing(width, height, params),
+        "compositing2" => render::compositing2(width, height, params),
+        "flash_rasterizer" => render::flash_rasterizer(width, height, params),
+        "flash_rasterizer2" => render::flash_rasterizer2(width, height, params),
+        "rasterizer_compound" => render::rasterizer_compound(width, height, params),
         _ => render::fallback(width, height),
     }
 }
@@ -57,5 +84,5 @@ pub fn version() -> String {
 /// Get list of available demo names.
 #[wasm_bindgen]
 pub fn demo_names() -> String {
-    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask,alpha_gradient,image_alpha,alpha_mask3,image_transforms,mol_view".to_string()
+    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask,alpha_gradient,image_alpha,alpha_mask3,image_transforms,mol_view,raster_text,gamma_ctrl,trans_polar,multi_clip,simple_blur,blur,trans_curve1,trans_curve2,lion_lens,distortions,blend_color,component_rendering,polymorphic_renderer,scanline_boolean,scanline_boolean2,pattern_fill,pattern_perspective,pattern_resample,lion_outline,rasterizers2,line_patterns,line_patterns_clip,compositing,compositing2,flash_rasterizer,flash_rasterizer2,rasterizer_compound".to_string()
 }

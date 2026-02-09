@@ -30,7 +30,8 @@ export function init(container: HTMLElement) {
   // Mouse drag: left=rotate, right=pan
   let dragging = 0; // 0=none, 1=left, 2=right
   let lastX = 0, lastY = 0;
-  const onMouseDown = (e: MouseEvent) => {
+  const onPointerDown = (e: PointerEvent) => {
+    canvas.setPointerCapture(e.pointerId);
     const rect = canvas.getBoundingClientRect();
     lastX = e.clientX - rect.left;
     lastY = e.clientY - rect.top;
@@ -38,7 +39,7 @@ export function init(container: HTMLElement) {
     else if (e.button === 2) dragging = 2;
     e.preventDefault();
   };
-  const onMouseMove = (e: MouseEvent) => {
+  const onPointerMove = (e: PointerEvent) => {
     if (!dragging) return;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -58,11 +59,11 @@ export function init(container: HTMLElement) {
     lastY = my;
     draw();
   };
-  const onMouseUp = () => { dragging = 0; };
+  const onPointerUp = () => { dragging = 0; };
   const onContextMenu = (e: Event) => { e.preventDefault(); };
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('contextmenu', onContextMenu);
 
   // Molecule radio buttons
@@ -115,9 +116,9 @@ export function init(container: HTMLElement) {
 
   draw();
   return () => {
-    canvas.removeEventListener('mousedown', onMouseDown);
-    canvas.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('contextmenu', onContextMenu);
     cleanupCC();
   };
