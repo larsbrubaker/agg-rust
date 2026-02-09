@@ -38,7 +38,7 @@ pub struct GlyphRect {
 /// - Remaining bytes: glyph bitmap data (1 bit per pixel, packed 8 per byte)
 pub struct GlyphRasterBin<'a> {
     font: &'a [u8],
-    span: [CoverType; 32],
+    span: Vec<CoverType>,
     bits: &'a [u8],
     glyph_width: u32,
     glyph_byte_width: u32,
@@ -48,7 +48,7 @@ impl<'a> GlyphRasterBin<'a> {
     pub fn new(font: &'a [u8]) -> Self {
         Self {
             font,
-            span: [0; 32],
+            span: vec![0; 32],
             bits: &[],
             glyph_width: 0,
             glyph_byte_width: 0,
@@ -97,12 +97,29 @@ impl<'a> GlyphRasterBin<'a> {
         let start_char = self.font[2] as u32;
         let num_chars = self.font[3] as u32;
 
+        // Skip characters outside the font's range
+        if glyph < start_char || glyph >= start_char + num_chars {
+            r.x1 = 1;
+            r.x2 = 0; // x2 < x1 signals "no glyph" to the renderer
+            r.dx = 0.0;
+            r.dy = 0.0;
+            self.glyph_width = 0;
+            self.glyph_byte_width = 0;
+            self.bits = &[];
+            return;
+        }
+
         let offset = self.value(4 + (glyph - start_char) as usize * 2);
         let bits_start = 4 + num_chars as usize * 2 + offset as usize;
 
         self.glyph_width = self.font[bits_start] as u32;
         self.glyph_byte_width = (self.glyph_width + 7) >> 3;
         self.bits = &self.font[bits_start + 1..];
+
+        // Ensure span buffer is large enough for this glyph
+        if self.span.len() < self.glyph_width as usize {
+            self.span.resize(self.glyph_width as usize, 0);
+        }
 
         r.x1 = x as i32;
         r.x2 = r.x1 + self.glyph_width as i32 - 1;
@@ -121,9 +138,19 @@ impl<'a> GlyphRasterBin<'a> {
     ///
     /// Returns a slice of `CoverType` values (0 or 255) for each pixel.
     pub fn span(&mut self, i: u32) -> &[CoverType] {
+        if self.glyph_width == 0 || self.bits.is_empty() {
+            return &self.span[..0];
+        }
         // Font stores rows bottom-to-top, so invert
         let row = self.font[0] as u32 - i - 1;
         let row_start = (row * self.glyph_byte_width) as usize;
+        if row_start >= self.bits.len() {
+            // Glyph data is truncated — return empty coverage
+            for j in 0..self.glyph_width as usize {
+                self.span[j] = 0;
+            }
+            return &self.span[..self.glyph_width as usize];
+        }
         let bits = &self.bits[row_start..];
         let mut val = bits[0];
         let mut nb = 0u32;
