@@ -1195,6 +1195,7 @@ pub fn gouraud_mesh(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         use agg_rust::rasterizer_scanline_aa::Scanline;
         if rasc.rewind_scanlines() {
             let mut sl = ScanlineU8::new();
+            sl.reset(rasc.min_x(), rasc.max_x());
             loop {
                 let num_styles = rasc.sweep_styles();
                 if num_styles == 0 { break; }

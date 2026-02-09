@@ -1676,6 +1676,7 @@ fn render_compound(
         return;
     }
     let mut sl = ScanlineU8::new();
+    sl.reset(rasc.min_x(), rasc.max_x());
     loop {
         let num_styles = rasc.sweep_styles();
         if num_styles == 0 {
