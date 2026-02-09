@@ -1,5 +1,6 @@
 //! Alpha/blending demo render functions: bspline, image_perspective, alpha_mask,
-//! alpha_gradient, image_alpha, alpha_mask3, image_transforms, mol_view.
+//! alpha_gradient, image_alpha, alpha_mask3, image_transforms, mol_view,
+//! image_resample, alpha_mask2.
 
 use agg_rust::bounding_rect::bounding_rect;
 use agg_rust::bspline::Bspline;
@@ -24,7 +25,9 @@ use agg_rust::span_converter::{SpanConverter, SpanConverterFunction};
 use agg_rust::span_gradient::{GradientRadial, SpanGradient};
 use agg_rust::span_image_filter_rgba::{
     SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn, SpanImageFilterRgba2x2,
+    SpanImageResampleRgbaAffine,
 };
+use agg_rust::span_interpolator_persp::SpanInterpolatorPerspLerp;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::span_interpolator_trans::SpanInterpolatorTrans;
 use agg_rust::trans_affine::TransAffine;
@@ -1244,3 +1247,322 @@ pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
+
+// ============================================================================
+// Image Resample — image affine/perspective transforms with resampling
+// ============================================================================
+
+/// Image resampling with multiple transform modes.
+/// Adapted from C++ image_resample.cpp.
+///
+/// params[0] = mode (0-3): 0=affine 2x2, 1=affine resample, 2=persp lerp, 3=persp exact
+/// params[1] = blur factor (0.5-2.0, default 1.0)
+/// params[2..9] = quad corners (x0,y0,x1,y1,x2,y2,x3,y3)
+pub fn image_resample_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let mode = params.get(0).copied().unwrap_or(0.0) as u32;
+    let blur = params.get(1).copied().unwrap_or(1.0).clamp(0.5, 2.0);
+
+    let w = width as f64;
+    let h = height as f64;
+
+    let (img_w, img_h, mut img_data) = load_spheres_image();
+    let iw = img_w as f64;
+    let ih = img_h as f64;
+
+    // Source image rectangle
+    let g_x1 = 0.0;
+    let g_y1 = 0.0;
+    let g_x2 = iw;
+    let g_y2 = ih;
+
+    // Default quad corners (slightly inset and rotated)
+    let cx = w / 2.0;
+    let cy = h / 2.0;
+    let hw = iw * 0.45;
+    let hh = ih * 0.45;
+    let quad = [
+        params.get(2).copied().unwrap_or(cx - hw),     // x0 top-left
+        params.get(3).copied().unwrap_or(cy - hh),     // y0
+        params.get(4).copied().unwrap_or(cx + hw),     // x1 top-right
+        params.get(5).copied().unwrap_or(cy - hh),     // y1
+        params.get(6).copied().unwrap_or(cx + hw),     // x2 bottom-right
+        params.get(7).copied().unwrap_or(cy + hh),     // y2
+        params.get(8).copied().unwrap_or(cx - hw),     // x3 bottom-left
+        params.get(9).copied().unwrap_or(cy + hh),     // y3
+    ];
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    // Setup source image accessor
+    let img_stride = (img_w * 4) as i32;
+    let mut img_ra = RowAccessor::new();
+    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+    let mut source = ImageAccessorClone::<4>::new(&img_ra);
+
+    // Create filter
+    let filter_gen = ImageFilterBilinear {};
+    let mut filter = ImageFilterLut::new();
+    filter.calculate(&filter_gen, true);
+
+    // Rasterize the quad outline as the clipping shape
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let mut sa = SpanAllocator::new();
+
+    ras.move_to_d(quad[0], quad[1]);
+    ras.line_to_d(quad[2], quad[3]);
+    ras.line_to_d(quad[4], quad[5]);
+    ras.line_to_d(quad[6], quad[7]);
+
+    match mode {
+        0 => {
+            // Mode 0: Affine + 2x2 filter (no resample)
+            let mut tr = TransAffine::new();
+            let dst_parl = [quad[0], quad[1], quad[2], quad[3], quad[4], quad[5]];
+            let src_parl = [g_x1, g_y1, g_x2, g_y1, g_x2, g_y2];
+            tr.parl_to_parl(&dst_parl, &src_parl);
+            let mut interp = SpanInterpolatorLinear::new(tr);
+            let mut sg = SpanImageFilterRgba2x2::new(&mut source, &mut interp, &filter);
+            render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+        }
+        1 => {
+            // Mode 1: Affine + resampling
+            let mut tr = TransAffine::new();
+            let dst_parl = [quad[0], quad[1], quad[2], quad[3], quad[4], quad[5]];
+            let src_parl = [g_x1, g_y1, g_x2, g_y1, g_x2, g_y2];
+            tr.parl_to_parl(&dst_parl, &src_parl);
+            let mut interp = SpanInterpolatorLinear::new(tr);
+            let mut sg = SpanImageResampleRgbaAffine::new(&mut source, &mut interp, &filter);
+            sg.resample_base_mut().set_blur(blur);
+            render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+        }
+        2 => {
+            // Mode 2: Perspective (lerp) + 2x2 filter
+            let mut interp = SpanInterpolatorPerspLerp::new_quad_to_rect(
+                &quad, g_x1, g_y1, g_x2, g_y2);
+            if interp.is_valid() {
+                let mut sg = SpanImageFilterRgba2x2::new(&mut source, &mut interp, &filter);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+            }
+        }
+        _ => {
+            // Mode 3: Perspective (exact via SpanInterpolatorTrans) + 2x2 filter
+            let mut tr = TransPerspective::new();
+            tr.quad_to_rect(&quad, g_x1, g_y1, g_x2, g_y2);
+            if tr.is_valid() {
+                let mut interp = SpanInterpolatorTrans::new(tr);
+                let mut sg = SpanImageFilterRgba2x2::new(&mut source, &mut interp, &filter);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
+            }
+        }
+    }
+
+    // Draw quad outline
+    let mut path = PathStorage::new();
+    path.move_to(quad[0], quad[1]);
+    path.line_to(quad[2], quad[3]);
+    path.line_to(quad[4], quad[5]);
+    path.line_to(quad[6], quad[7]);
+    path.close_polygon(0);
+    let mut stroke = ConvStroke::new(&mut path);
+    stroke.set_width(2.0);
+    ras.reset();
+    ras.add_path(&mut stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 200));
+
+    // Mode label
+    let mode_label = match mode {
+        0 => "Affine (2x2 filter)",
+        1 => "Affine (resample)",
+        2 => "Perspective LERP",
+        _ => "Perspective Exact",
+    };
+    let label = format!("Mode {}: {} — blur={:.2}", mode, mode_label, blur);
+    let mut txt = GsvText::new();
+    txt.size(8.0, 0.0);
+    txt.start_point(5.0, h - 15.0);
+    txt.text(&label);
+    let mut txt_stroke = ConvStroke::new(&mut txt);
+    txt_stroke.set_width(0.8);
+    ras.reset();
+    ras.add_path(&mut txt_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    buf
+}
+
+// ============================================================================
+// Alpha Mask 2 — alpha mask with random ellipses modulating rendering
+// ============================================================================
+
+/// Alpha mask demo with random ellipses creating a mask pattern.
+/// Adapted from C++ alpha_mask2.cpp.
+///
+/// params[0] = num_mask_ellipses (5-200, default 50)
+/// params[1] = rotation angle for lion (degrees)
+/// params[2] = scale factor
+pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let num_ellipses = params.get(0).copied().unwrap_or(50.0).clamp(5.0, 200.0) as u32;
+    let angle = params.get(1).copied().unwrap_or(0.0);
+    let scale = params.get(2).copied().unwrap_or(1.0).clamp(0.3, 3.0);
+
+    let w = width as f64;
+    let h = height as f64;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    // Step 1: Generate alpha mask buffer (grayscale)
+    let mask_size = (width * height) as usize;
+    let mut mask_buf = vec![0u8; mask_size * 4]; // RGBA for rendering
+    {
+        let mut mask_ra = RowAccessor::new();
+        let mask_stride = (width * 4) as i32;
+        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, mask_stride) };
+        let mask_pf = PixfmtRgba32::new(&mut mask_ra);
+        let mut mask_rb = RendererBase::new(mask_pf);
+        mask_rb.clear(&Rgba8::new(0, 0, 0, 255));
+
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+
+        // Render random ellipses into mask
+        for i in 0..num_ellipses {
+            let hash = |seed: u32, off: u32| -> f64 {
+                let v = (seed.wrapping_mul(2654435761).wrapping_add(off.wrapping_mul(2246822519))) >> 16;
+                (v & 0xFFFF) as f64 / 65536.0
+            };
+            let cx = hash(i, 0) * w;
+            let cy = hash(i, 1) * h;
+            let rx = 10.0 + hash(i, 2) * 80.0;
+            let ry = 10.0 + hash(i, 3) * 80.0;
+            let alpha = (80 + (hash(i, 4) * 175.0) as u32).min(255);
+
+            let mut ell = Ellipse::new(cx, cy, rx, ry, 32, false);
+            ras.reset();
+            ras.add_path(&mut ell, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut mask_rb,
+                &Rgba8::new(alpha, alpha, alpha, 255));
+        }
+    }
+
+    // Extract grayscale mask from the rendered mask buffer
+    let mut mask_gray = vec![0u8; mask_size];
+    for i in 0..mask_size {
+        mask_gray[i] = mask_buf[i * 4]; // R channel = grayscale value
+    }
+
+    // Step 2: Render lion into a temporary buffer
+    let (mut path, colors, path_idx) = crate::lion_data::parse_lion();
+    let mut temp_buf = vec![0u8; (width * height * 4) as usize];
+    {
+        let mut temp_ra = RowAccessor::new();
+        let stride = (width * 4) as i32;
+        unsafe { temp_ra.attach(temp_buf.as_mut_ptr(), width, height, stride) };
+        let temp_pf = PixfmtRgba32::new(&mut temp_ra);
+        let mut temp_rb = RendererBase::new(temp_pf);
+        temp_rb.clear(&Rgba8::new(0, 0, 0, 0)); // transparent
+
+        let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
+        let npaths = path_ids.len();
+        let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
+            agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
+        );
+        let lion_cx = (bbox.x1 + bbox.x2) / 2.0;
+        let lion_cy = (bbox.y1 + bbox.y2) / 2.0;
+
+        let mut mtx = TransAffine::new();
+        mtx.translate(-lion_cx, -lion_cy);
+        mtx.scale(scale, scale);
+        mtx.rotate(angle.to_radians());
+        mtx.translate(w / 2.0, h / 2.0);
+
+        let mut conv = ConvTransform::new(&mut path, mtx);
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+
+        for i in 0..path_idx.len() {
+            ras.reset();
+            ras.add_path(&mut conv, path_idx[i] as u32);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut temp_rb, &colors[i]);
+        }
+    }
+
+    // Step 3: Composite lion onto main buffer using alpha mask
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let idx = y * width as usize + x;
+            let pi = idx * 4;
+            let mask_val = mask_gray[idx] as u32;
+            let sr = temp_buf[pi] as u32;
+            let sg = temp_buf[pi + 1] as u32;
+            let sb = temp_buf[pi + 2] as u32;
+            let sa = temp_buf[pi + 3] as u32;
+            if sa > 0 && mask_val > 0 {
+                // Modulate source alpha by mask
+                let a = (sa * mask_val) / 255;
+                let inv_a = 255 - a;
+                buf[pi]     = ((sr * a + buf[pi] as u32 * inv_a) / 255) as u8;
+                buf[pi + 1] = ((sg * a + buf[pi + 1] as u32 * inv_a) / 255) as u8;
+                buf[pi + 2] = ((sb * a + buf[pi + 2] as u32 * inv_a) / 255) as u8;
+                buf[pi + 3] = (a + (buf[pi + 3] as u32 * inv_a) / 255).min(255) as u8;
+            }
+        }
+    }
+
+    // Drop the first renderer to release borrow on ra
+    drop(rb);
+
+    // Step 4: Render gradient circles + label
+    {
+        let pf2 = PixfmtRgba32::new(&mut ra);
+        let mut rb2 = RendererBase::new(pf2);
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+
+        for i in 0..5u32 {
+            let hash_f = |seed: u32, off: u32| -> f64 {
+                let v = (seed.wrapping_mul(2654435761).wrapping_add(off.wrapping_mul(374761393))) >> 16;
+                (v & 0xFFFF) as f64 / 65536.0
+            };
+            let cx = 50.0 + hash_f(i + 100, 0) * (w - 100.0);
+            let cy = 50.0 + hash_f(i + 100, 1) * (h - 100.0);
+            let r = 30.0 + hash_f(i + 100, 2) * 60.0;
+
+            let mut ell = Ellipse::new(cx, cy, r, r, 32, false);
+            ras.reset();
+            ras.add_path(&mut ell, 0);
+            let color = Rgba8::new(
+                (hash_f(i + 100, 3) * 255.0) as u32,
+                (hash_f(i + 100, 4) * 255.0) as u32,
+                (hash_f(i + 100, 5) * 255.0) as u32,
+                180,
+            );
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &color);
+        }
+
+        // Draw label
+        let label = format!("Alpha Mask 2: {} ellipses, angle={:.0}, scale={:.2}",
+            num_ellipses, angle, scale);
+        let mut txt = GsvText::new();
+        txt.size(8.0, 0.0);
+        txt.start_point(5.0, h - 15.0);
+        txt.text(&label);
+        let mut txt_stroke = ConvStroke::new(&mut txt);
+        txt_stroke.set_width(0.8);
+        ras.reset();
+        ras.add_path(&mut txt_stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(0, 0, 0, 255));
+    }
+
+    buf
+}

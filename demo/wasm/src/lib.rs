@@ -71,6 +71,9 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
         "flash_rasterizer" => render::flash_rasterizer(width, height, params),
         "flash_rasterizer2" => render::flash_rasterizer2(width, height, params),
         "rasterizer_compound" => render::rasterizer_compound(width, height, params),
+        "gouraud_mesh" => render::gouraud_mesh(width, height, params),
+        "image_resample" => render::image_resample_demo(width, height, params),
+        "alpha_mask2" => render::alpha_mask2(width, height, params),
         _ => render::fallback(width, height),
     }
 }
@@ -84,5 +87,5 @@ pub fn version() -> String {
 /// Get list of available demo names.
 #[wasm_bindgen]
 pub fn demo_names() -> String {
-    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask,alpha_gradient,image_alpha,alpha_mask3,image_transforms,mol_view,raster_text,gamma_ctrl,trans_polar,multi_clip,simple_blur,blur,trans_curve1,trans_curve2,lion_lens,distortions,blend_color,component_rendering,polymorphic_renderer,scanline_boolean,scanline_boolean2,pattern_fill,pattern_perspective,pattern_resample,lion_outline,rasterizers2,line_patterns,line_patterns_clip,compositing,compositing2,flash_rasterizer,flash_rasterizer2,rasterizer_compound".to_string()
+    "lion,shapes,gradients,gouraud,conv_stroke,bezier_div,circles,rounded_rect,aa_demo,gamma_correction,line_thickness,rasterizers,conv_contour,conv_dash,gsv_text,perspective,image_fltr_graph,image1,image_filters,gradient_focal,idea,graph_test,gamma_tuner,image_filters2,conv_dash_marker,aa_test,bspline,image_perspective,alpha_mask,alpha_gradient,image_alpha,alpha_mask3,image_transforms,mol_view,raster_text,gamma_ctrl,trans_polar,multi_clip,simple_blur,blur,trans_curve1,trans_curve2,lion_lens,distortions,blend_color,component_rendering,polymorphic_renderer,scanline_boolean,scanline_boolean2,pattern_fill,pattern_perspective,pattern_resample,lion_outline,rasterizers2,line_patterns,line_patterns_clip,compositing,compositing2,flash_rasterizer,flash_rasterizer2,rasterizer_compound,gouraud_mesh,image_resample,alpha_mask2".to_string()
 }

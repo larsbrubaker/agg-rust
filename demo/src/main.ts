@@ -66,6 +66,9 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'flash_rasterizer': () => import('./demos/flash_rasterizer.ts'),
   'flash_rasterizer2': () => import('./demos/flash_rasterizer2.ts'),
   'rasterizer_compound': () => import('./demos/rasterizer_compound.ts'),
+  'gouraud_mesh': () => import('./demos/gouraud_mesh.ts'),
+  'image_resample': () => import('./demos/image_resample.ts'),
+  'alpha_mask2': () => import('./demos/alpha_mask2.ts'),
 };
 
 let currentCleanup: (() => void) | null = null;

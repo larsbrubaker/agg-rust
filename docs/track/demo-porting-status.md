@@ -5,7 +5,7 @@ Cross-reference of all 75 C++ demos from `cpp-references/agg-web/demo/` against 
 Reference screenshots: `cpp-references/agg-web/demo/<name>/<name>.gif|png|jpg`
 Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
-## Currently Implemented (61 demos)
+## Currently Implemented (64 demos)
 
 | Demo | C++ Original | Window | Status |
 |------|-------------|--------|--------|
@@ -70,14 +70,9 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | trans_curve1 | trans_curve1.cpp | 512x400 | Done - text along curve (single path) |
 | trans_curve2 | trans_curve2.cpp | 512x400 | Done - text along curve variant |
 | trans_polar | trans_polar.cpp | 512x400 | Done - polar coordinate transform |
-
-## Deferred (3 demos - need additional work)
-
-| Demo | Blocking Issue |
-|------|---------------|
-| alpha_mask2 | renderer_mclip + alpha mask compositing |
-| gouraud_mesh | mesh data structures for subdivision |
-| image_resample | span_interpolator_persp integration |
+| gouraud_mesh | gouraud_mesh.cpp | 512x400 | Done - Gouraud-shaded triangle mesh with compound rasterizer |
+| image_resample | image_resample.cpp | 512x400 | Done - image resampling with affine/perspective transforms |
+| alpha_mask2 | alpha_mask2.cpp | 512x400 | Done - alpha mask with random ellipses modulating lion rendering |
 
 ## Not Applicable for WASM (11)
 
@@ -99,15 +94,11 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
 | Category | Count |
 |----------|-------|
-| Implemented | 61 |
-| Deferred | 3 |
+| Implemented | 64 |
+| Deferred | 0 |
 | Not applicable | 11 |
 | **Total C++ demos** | **75** |
 
 ## Module Porting Status
 
-All core library modules have been ported (903 tests passing). The 3 remaining deferred demos need demo-level work rather than missing library modules:
-
-- **alpha_mask2**: Needs renderer_mclip integration with alpha mask pipeline
-- **gouraud_mesh**: Needs mesh subdivision data structures (example-level code)
-- **image_resample**: Needs span_interpolator_persp wired into image resampling pipeline
+All core library modules have been ported (903 tests passing). All applicable demos are implemented.

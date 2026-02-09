@@ -1,5 +1,6 @@
 //! Transform/text demo render functions: raster_text, gamma_ctrl, trans_polar,
-//! multi_clip, simple_blur, blur, trans_curve1, trans_curve2, lion_lens, distortions.
+//! multi_clip, simple_blur, blur, trans_curve1, trans_curve2, lion_lens, distortions,
+//! gouraud_mesh.
 
 use agg_rust::basics::{is_stop, is_vertex, VertexSource};
 use agg_rust::bspline::Bspline;
@@ -18,10 +19,12 @@ use agg_rust::pixfmt_rgba::PixfmtRgba32;
 use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
 use agg_rust::renderer_base::RendererBase;
 use agg_rust::renderer_raster_text::render_raster_htext_solid;
-use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid};
+use agg_rust::rasterizer_compound_aa::RasterizerCompoundAa;
+use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid, SpanGenerator};
 use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
+use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
 use agg_rust::span_interpolator_linear::{SpanInterpolatorLinear, Transformer};
 use agg_rust::trans_affine::TransAffine;
@@ -1054,6 +1057,191 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ras.reset();
     ras.add_path(&mut txt_stroke, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    buf
+}
+
+// ============================================================================
+// Gouraud Mesh — animated color-interpolated triangle mesh
+// ============================================================================
+
+/// Gouraud-shaded triangle mesh rendered with the compound rasterizer.
+/// Adapted from C++ gouraud_mesh.cpp.
+///
+/// params[0] = grid_cols (3-20, default 8)
+/// params[1] = grid_rows (3-20, default 8)
+/// params[2] = animation seed (incremented each frame for color cycling)
+pub fn gouraud_mesh(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    let cols = params.get(0).copied().unwrap_or(8.0).clamp(3.0, 20.0) as usize;
+    let rows = params.get(1).copied().unwrap_or(8.0).clamp(3.0, 20.0) as usize;
+    let seed = params.get(2).copied().unwrap_or(0.0) as u64;
+
+    let w = width as f64;
+    let h = height as f64;
+    let margin = 30.0;
+    let cell_w = (w - 2.0 * margin) / (cols - 1) as f64;
+    let cell_h = (h - 2.0 * margin) / (rows - 1) as f64;
+
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(0, 0, 0, 255));
+
+    // Generate mesh vertices with pseudo-random colors and offsets
+    let num_pts = cols * rows;
+    let mut vx = vec![0.0f64; num_pts];
+    let mut vy = vec![0.0f64; num_pts];
+    let mut vc = vec![Rgba8::new(0, 0, 0, 255); num_pts];
+
+    // Simple hash for reproducible randomness
+    let hash = |i: u64, ch: u64| -> u8 {
+        let v = ((i.wrapping_mul(2654435761).wrapping_add(ch.wrapping_mul(2246822519)))
+            .wrapping_mul(seed.wrapping_add(1).wrapping_mul(131))) >> 24;
+        (v & 0xFF) as u8
+    };
+
+    for r in 0..rows {
+        for c in 0..cols {
+            let idx = r * cols + c;
+            let base_x = margin + c as f64 * cell_w;
+            let base_y = margin + r as f64 * cell_h;
+            // Add small perturbation based on seed
+            let dx = ((hash(idx as u64, 0) as f64) - 128.0) / 128.0 * cell_w * 0.3;
+            let dy = ((hash(idx as u64, 1) as f64) - 128.0) / 128.0 * cell_h * 0.3;
+            // Don't perturb boundary vertices
+            let is_boundary = r == 0 || r == rows - 1 || c == 0 || c == cols - 1;
+            vx[idx] = if is_boundary { base_x } else { base_x + dx };
+            vy[idx] = if is_boundary { base_y } else { base_y + dy };
+            vc[idx] = Rgba8::new(
+                hash(idx as u64, 10) as u32,
+                hash(idx as u64, 20) as u32,
+                hash(idx as u64, 30) as u32,
+                255,
+            );
+        }
+    }
+
+    // Build triangles and edges
+    struct MeshTriangle { p1: usize, p2: usize, p3: usize }
+    struct MeshEdge { p1: usize, p2: usize, tl: i32, tr: i32 }
+
+    let mut triangles: Vec<MeshTriangle> = Vec::new();
+    let mut edges: Vec<MeshEdge> = Vec::new();
+
+    for r in 0..(rows - 1) {
+        for c in 0..(cols - 1) {
+            let p1 = r * cols + c;         // top-left
+            let p2 = p1 + 1;              // top-right
+            let p3 = p2 + cols;           // bottom-right
+            let p4 = p1 + cols;           // bottom-left
+
+            let t1 = triangles.len() as i32; // lower: p1,p2,p3
+            triangles.push(MeshTriangle { p1, p2, p3 });
+            let t2 = triangles.len() as i32; // upper: p3,p4,p1
+            triangles.push(MeshTriangle { p1: p3, p2: p4, p3: p1 });
+
+            // Diagonal edge (p1-p3): t2 on left, t1 on right
+            edges.push(MeshEdge { p1, p2: p3, tl: t2, tr: t1 });
+
+            // Top edge
+            let top_tr = if r > 0 {
+                ((r - 1) * (cols - 1) * 2 + c * 2 + 1) as i32
+            } else { -1 };
+            edges.push(MeshEdge { p1, p2, tl: top_tr, tr: t1 });
+
+            // Left edge
+            let left_tl = if c > 0 {
+                (r * (cols - 1) * 2 + (c - 1) * 2) as i32
+            } else { -1 };
+            edges.push(MeshEdge { p1, p2: p4, tl: t2, tr: left_tl });
+
+            // Right edge (only at last column)
+            if c == cols - 2 {
+                edges.push(MeshEdge { p1: p2, p2: p3, tl: t1, tr: -1 });
+            }
+            // Bottom edge (only at last row)
+            if r == rows - 2 {
+                edges.push(MeshEdge { p1: p3, p2: p4, tl: -1, tr: t2 });
+            }
+        }
+    }
+
+    // Prepare SpanGouraudRgba for each triangle
+    let mut gouraud_spans: Vec<SpanGouraudRgba> = Vec::with_capacity(triangles.len());
+    for tri in &triangles {
+        let mut sg = SpanGouraudRgba::new_with_triangle(
+            vc[tri.p1], vc[tri.p2], vc[tri.p3],
+            vx[tri.p1], vy[tri.p1],
+            vx[tri.p2], vy[tri.p2],
+            vx[tri.p3], vy[tri.p3],
+            0.0,
+        );
+        sg.prepare();
+        gouraud_spans.push(sg);
+    }
+
+    // Rasterize edges with compound rasterizer
+    let mut rasc = RasterizerCompoundAa::new();
+    for edge in &edges {
+        rasc.styles(edge.tl, edge.tr);
+        rasc.move_to_d(vx[edge.p1], vy[edge.p1]);
+        rasc.line_to_d(vx[edge.p2], vy[edge.p2]);
+    }
+
+    // Sweep scanlines and render with Gouraud shading
+    {
+        use agg_rust::rasterizer_scanline_aa::Scanline;
+        if rasc.rewind_scanlines() {
+            let mut sl = ScanlineU8::new();
+            loop {
+                let num_styles = rasc.sweep_styles();
+                if num_styles == 0 { break; }
+                for s in 0..num_styles {
+                    let style_id = rasc.style(s) as usize;
+                    if rasc.sweep_scanline(&mut sl, s as i32) {
+                        if style_id < gouraud_spans.len() {
+                            let y = Scanline::y(&sl);
+                            for span in sl.begin() {
+                                let x = span.x;
+                                let len = span.len;
+                                if len > 0 {
+                                    let mut colors = vec![Rgba8::new(0, 0, 0, 0); len as usize];
+                                    gouraud_spans[style_id].generate(
+                                        &mut colors, x, y, len as u32,
+                                    );
+                                    let covers = &sl.covers()
+                                        [span.cover_offset..span.cover_offset + len as usize];
+                                    for i in 0..len as usize {
+                                        let c = &colors[i];
+                                        let cover = covers[i];
+                                        if c.a > 0 && cover > 0 {
+                                            rb.blend_pixel(x + i as i32, y, c, cover);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Draw text label
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    let label = format!("Gouraud Mesh: {}x{} grid, {} triangles",
+        cols, rows, triangles.len());
+    let mut txt = GsvText::new();
+    txt.size(8.0, 0.0);
+    txt.start_point(5.0, h - 15.0);
+    txt.text(&label);
+    let mut txt_stroke = ConvStroke::new(&mut txt);
+    txt_stroke.set_width(0.8);
+    ras.add_path(&mut txt_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 200));
 
     buf
 }
