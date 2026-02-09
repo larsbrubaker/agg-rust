@@ -48,7 +48,14 @@ export interface CanvasRadio {
   onChange: (index: number) => void;
 }
 
-export type CanvasControl = CanvasSlider | CanvasCheckbox | CanvasRadio;
+export interface CanvasButton {
+  type: 'button';
+  x1: number; y1: number; x2: number; y2: number;
+  /** Called when clicked within bounds. */
+  onClick: () => void;
+}
+
+export type CanvasControl = CanvasSlider | CanvasCheckbox | CanvasRadio | CanvasButton;
 
 // ============================================================================
 // Pointer handler — attach to a canvas, process all registered controls
@@ -115,6 +122,10 @@ export function setupCanvasControls(
         ctrl.sidebarEls[clamped].checked = true;
         ctrl.sidebarEls[clamped].dispatchEvent(new Event('change'));
       }
+      e.stopPropagation();
+      e.preventDefault();
+    } else if (ctrl.type === 'button') {
+      ctrl.onClick();
       e.stopPropagation();
       e.preventDefault();
     }

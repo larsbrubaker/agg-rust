@@ -1,0 +1,9 @@
+{
+  "name": "agg-rust",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --cwd demo dev",
+    "build": "bun run --cwd demo build",
+    "build:wasm": "bun run --cwd demo build:wasm"
+  }
+}

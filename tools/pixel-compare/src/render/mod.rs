@@ -3,6 +3,7 @@
 // These functions mirror the WASM render functions but run natively.
 // They use the agg-rust core library directly.
 
+mod image_filters;
 mod lion_outline;
 
 use crate::PixelBuffer;
@@ -13,6 +14,7 @@ use crate::PixelBuffer;
 pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Option<PixelBuffer> {
     let data = match name {
         "lion_outline" => lion_outline::render(width, height, params),
+        "image_filters" => image_filters::render(width, height, params),
         "simple_line" => render_simple_line(width, height, params),
         _ => return None,
     };
@@ -21,7 +23,7 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Optio
 
 /// List all available demo names.
 pub fn available_demos() -> &'static [&'static str] {
-    &["lion_outline", "simple_line"]
+    &["lion_outline", "image_filters", "simple_line"]
 }
 
 /// Render a simple line test for comparison debugging.

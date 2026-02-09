@@ -221,8 +221,10 @@ impl SliderCtrl {
         let text = if self.label.contains('%') {
             // Format the label with the value (matching C++ sprintf behavior)
             self.label.replace("%3.2f", &format!("{:.2}", self.value()))
+                      .replace("%.3f", &format!("{:.3}", self.value()))
                       .replace("%5.3f", &format!("{:.3}", self.value()))
                       .replace("%5.4f", &format!("{:.4}", self.value()))
+                      .replace("%.2f", &format!("{:.2}", self.value()))
                       .replace("%d", &format!("{}", self.value() as i32))
         } else if self.label.is_empty() {
             return;
@@ -607,6 +609,10 @@ impl RboxCtrl {
 
     pub fn text_thickness(&mut self, t: f64) {
         self.text_thickness = t;
+    }
+
+    pub fn background_color(&mut self, c: Rgba8) {
+        self.colors[0] = c;
     }
 
     /// Build background rectangle (path 0).

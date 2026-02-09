@@ -379,43 +379,28 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let normalize = params.get(2).copied().unwrap_or(1.0) > 0.5;
     let radius = params.get(3).copied().unwrap_or(4.0).clamp(2.0, 8.0);
     let num_steps = params.get(4).copied().unwrap_or(0.0).max(0.0) as usize;
-
-    let mut buf = Vec::new();
-    let mut ra = RowAccessor::new();
-    setup_renderer(&mut buf, &mut ra, width, height);
-
-    // Clear to white
-    {
-        let pf = PixfmtRgba32::new(&mut ra);
-        let mut rb = RendererBase::new(pf);
-        rb.clear(&Rgba8::new(255, 255, 255, 255));
-    }
+    let kpix_sec = params.get(5).copied().unwrap_or(0.0);
 
     // Load spheres image
     let (img_w, img_h, original) = load_spheres_image();
     let img_stride = (img_w * 4) as i32;
 
-    // Working buffers for iterative rotation
-    let mut src_data = original.clone();
-    let mut dst_data = original.clone();
-
     let iw = img_w as f64;
     let ih = img_h as f64;
-    let angle_rad = step_deg * std::f64::consts::PI / 180.0;
 
-    // Clipping ellipse: circle centered at image center, matching C++
-    let clip_r = iw.min(ih) / 2.0 - 4.0;
+    // Working buffers: src and dst (like C++ img[1] and img[0])
+    let mut src_data = original;
+    let mut dst_data = vec![255u8; (img_w * img_h * 4) as usize];
 
-    // Apply iterative rotations
-    for _step in 0..num_steps {
-        // Transform: translate center to origin, rotate by step, translate back
-        let mut mtx = TransAffine::new();
-        mtx.multiply(&TransAffine::new_translation(-iw / 2.0, -ih / 2.0));
-        mtx.multiply(&TransAffine::new_rotation(angle_rad));
-        mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0));
-        mtx.invert();
+    // Apply initial transform_image(0.0) — C++ does this at startup
+    // Then apply num_steps of transform_image(step_deg)
+    let total_transforms = 1 + num_steps;
 
-        // Clear destination
+    for step in 0..total_transforms {
+        let angle_deg = if step == 0 { 0.0 } else { step_deg };
+        let angle_rad = angle_deg * std::f64::consts::PI / 180.0;
+
+        // Clear destination to white
         for chunk in dst_data.chunks_exact_mut(4) {
             chunk[0] = 255;
             chunk[1] = 255;
@@ -423,109 +408,116 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             chunk[3] = 255;
         }
 
-        // Set up source and destination buffers
         let mut src_ra = RowAccessor::new();
         unsafe { src_ra.attach(src_data.as_mut_ptr(), img_w, img_h, img_stride) };
 
         let mut dst_ra = RowAccessor::new();
         unsafe { dst_ra.attach(dst_data.as_mut_ptr(), img_w, img_h, img_stride) };
 
+        // Transform matrices — matching C++ transform_image()
+        let mut src_mtx = TransAffine::new();
+        src_mtx.multiply(&TransAffine::new_translation(-iw / 2.0, -ih / 2.0));
+        src_mtx.multiply(&TransAffine::new_rotation(angle_rad));
+        src_mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0));
+
+        let mut img_mtx = src_mtx;
+        img_mtx.invert();
+
+        // Clipping ellipse — transformed by src_mtx, matching C++
+        let mut r = iw;
+        if ih < r { r = ih; }
+        r *= 0.5;
+        r -= 4.0;
+        let mut ell = Ellipse::new(iw / 2.0, ih / 2.0, r, r, 200, false);
+        let mut tr = ConvTransform::new(&mut ell, src_mtx);
+
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
         let mut alloc = SpanAllocator::<Rgba8>::new();
 
-        // Clip through ellipse
-        let mut ell = Ellipse::new(iw / 2.0, ih / 2.0, clip_r, clip_r, 200, false);
-        ras.add_path(&mut ell, 0);
+        ras.add_path(&mut tr, 0);
 
-        // Apply the selected filter
-        let mut interpolator = SpanInterpolatorLinear::new(mtx);
+        let mut interpolator = SpanInterpolatorLinear::new(img_mtx);
 
-        macro_rules! render_with_bilinear_clip {
-            () => {{
+        match filter_idx {
+            0 => {
+                use agg_rust::image_accessors::ImageAccessorClip;
+                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[0, 0, 0, 0]);
+                let mut sg = SpanImageFilterRgbaNn::new(&mut accessor, &mut interpolator);
+                let pf = PixfmtRgba32::new(&mut dst_ra);
+                let mut rb = RendererBase::new(pf);
+                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
+            }
+            1 => {
                 let mut sg = SpanImageFilterRgbaBilinearClip::new(
                     &src_ra,
-                    Rgba8::new(255, 255, 255, 255),
+                    Rgba8::new(0, 0, 0, 0),
                     &mut interpolator,
                 );
                 let pf = PixfmtRgba32::new(&mut dst_ra);
                 let mut rb = RendererBase::new(pf);
                 render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
-            }};
-        }
-
-        macro_rules! render_with_nn {
-            () => {{
-                use agg_rust::image_accessors::ImageAccessorClip;
-                use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaNn;
-                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[255, 255, 255, 255]);
-                let mut sg = SpanImageFilterRgbaNn::new(&mut accessor, &mut interpolator);
-                let pf = PixfmtRgba32::new(&mut dst_ra);
-                let mut rb = RendererBase::new(pf);
-                render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
-            }};
-        }
-
-        macro_rules! render_with_2x2 {
-            ($filter:expr) => {{
+            }
+            5 | 6 | 7 => {
                 use agg_rust::image_accessors::ImageAccessorClip;
                 use agg_rust::span_image_filter_rgba::SpanImageFilterRgba2x2;
                 let mut lut = ImageFilterLut::new();
-                lut.calculate(&$filter, normalize);
-                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[255, 255, 255, 255]);
+                match filter_idx {
+                    5 => lut.calculate(&ImageFilterHanning, normalize),
+                    6 => lut.calculate(&ImageFilterHamming, normalize),
+                    7 => lut.calculate(&ImageFilterHermite, normalize),
+                    _ => unreachable!(),
+                }
+                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[0, 0, 0, 0]);
                 let mut sg = SpanImageFilterRgba2x2::new(&mut accessor, &mut interpolator, &lut);
                 let pf = PixfmtRgba32::new(&mut dst_ra);
                 let mut rb = RendererBase::new(pf);
                 render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
-            }};
-        }
-
-        macro_rules! render_with_general {
-            ($filter:expr) => {{
+            }
+            _ => {
                 use agg_rust::image_accessors::ImageAccessorClip;
-                use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaGen;
                 let mut lut = ImageFilterLut::new();
-                lut.calculate(&$filter, normalize);
-                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[255, 255, 255, 255]);
+                match filter_idx {
+                    2 => lut.calculate(&ImageFilterBicubic, normalize),
+                    3 => lut.calculate(&ImageFilterSpline16, normalize),
+                    4 => lut.calculate(&ImageFilterSpline36, normalize),
+                    8 => lut.calculate(&ImageFilterKaiser::new(6.33), normalize),
+                    9 => lut.calculate(&ImageFilterQuadric, normalize),
+                    10 => lut.calculate(&ImageFilterCatrom, normalize),
+                    11 => lut.calculate(&ImageFilterGaussian, normalize),
+                    12 => lut.calculate(&ImageFilterBessel, normalize),
+                    13 => lut.calculate(&ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0), normalize),
+                    14 => lut.calculate(&ImageFilterSinc::new(radius), normalize),
+                    15 => lut.calculate(&ImageFilterLanczos::new(radius), normalize),
+                    16 => lut.calculate(&ImageFilterBlackman::new(radius), normalize),
+                    _ => lut.calculate(&ImageFilterBicubic, normalize),
+                }
+                let mut accessor = ImageAccessorClip::<4>::new(&src_ra, &[0, 0, 0, 0]);
                 let mut sg = SpanImageFilterRgbaGen::new(&mut accessor, &mut interpolator, &lut);
                 let pf = PixfmtRgba32::new(&mut dst_ra);
                 let mut rb = RendererBase::new(pf);
                 render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
-            }};
-        }
-
-        match filter_idx {
-            0 => render_with_nn!(),
-            1 => render_with_bilinear_clip!(),
-            2 => render_with_general!(ImageFilterBicubic),
-            3 => render_with_general!(ImageFilterSpline16),
-            4 => render_with_general!(ImageFilterSpline36),
-            5 => render_with_2x2!(ImageFilterHanning),
-            6 => render_with_2x2!(ImageFilterHamming),
-            7 => render_with_2x2!(ImageFilterHermite),
-            8 => render_with_general!(ImageFilterKaiser::new(5.0)),
-            9 => render_with_general!(ImageFilterQuadric),
-            10 => render_with_general!(ImageFilterCatrom),
-            11 => render_with_general!(ImageFilterGaussian),
-            12 => render_with_general!(ImageFilterBessel),
-            13 => render_with_general!(ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0)),
-            14 => render_with_general!(ImageFilterSinc::new(radius)),
-            15 => render_with_general!(ImageFilterLanczos::new(radius)),
-            16 => render_with_general!(ImageFilterBlackman::new(radius)),
-            _ => render_with_bilinear_clip!(),
+            }
         }
 
         // Swap: dst becomes new src for next step
         std::mem::swap(&mut src_data, &mut dst_data);
     }
 
-    // Copy final result (in src_data after last swap) to output canvas
-    // Position image at (0, 110) matching C++ layout (controls at top)
-    let y_off = 0u32; // We'll render controls overlaid
-    for y in 0..img_h.min(height) {
-        for x in 0..img_w.min(width) {
+    // Set up output buffer
+    let stride = (width * 4) as i32;
+    let mut buf = vec![255u8; (width * height * 4) as usize];
+    let mut ra = RowAccessor::new();
+    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    let pf = PixfmtRgba32::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    // Copy image to output at (110, 35) — matching C++ on_draw rb.copy_from
+    for y in 0..img_h.min(height.saturating_sub(35)) {
+        for x in 0..img_w.min(width.saturating_sub(110)) {
             let si = ((y * img_w + x) * 4) as usize;
-            let di = (((y + y_off) * width + x) * 4) as usize;
+            let di = (((y + 35) * width + (x + 110)) * 4) as usize;
             if si + 3 < src_data.len() && di + 3 < buf.len() {
                 buf[di] = src_data[si];
                 buf[di + 1] = src_data[si + 1];
@@ -535,13 +527,56 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
     }
 
-    // Render controls
-    let stride = (width * 4) as i32;
+    // Render controls — matching C++ on_draw exactly
     unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
+
+    // NSteps text
+    {
+        let label = format!("NSteps={}", num_steps);
+        let mut txt = GsvText::new();
+        txt.size(10.0, 0.0);
+        txt.start_point(10.0, 295.0);
+        txt.text(&label);
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(1.5);
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    }
+
+    // Kpix/sec text — matching C++ position at (10, 310)
+    if kpix_sec > 0.0 {
+        let label = format!("{:.2} Kpix/sec", kpix_sec);
+        let mut txt = GsvText::new();
+        txt.size(10.0, 0.0);
+        txt.start_point(10.0, 310.0);
+        txt.text(&label);
+        let mut stroke = ConvStroke::new(txt);
+        stroke.set_width(1.5);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    }
+
+    // Radius slider (only for sinc/lanczos/blackman) — rendered before step slider
+    // matching C++ render order
+    if filter_idx >= 14 {
+        let mut s_radius = SliderCtrl::new(115.0, 20.0, 400.0, 26.0);
+        s_radius.label("Filter Radius=%.3f");
+        s_radius.range(2.0, 8.0);
+        s_radius.set_value(radius);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
+    }
+
+    // Step slider
+    let mut s_step = SliderCtrl::new(115.0, 5.0, 400.0, 11.0);
+    s_step.label("Step=%3.2f");
+    s_step.range(1.0, 10.0);
+    s_step.set_value(step_deg);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_step);
 
     // Filter selection radio box
     let filter_names = [
@@ -551,48 +586,32 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ];
     let mut r_filters = RboxCtrl::new(0.0, 0.0, 110.0, 210.0);
     r_filters.border_width(0.0, 0.0);
+    r_filters.background_color(Rgba8::new(0, 0, 0, 26)); // rgba(0,0,0,0.1)
     r_filters.text_size(6.0, 0.0);
+    r_filters.text_thickness(0.85);
     for name in &filter_names {
         r_filters.add_item(name);
     }
     r_filters.set_cur_item(filter_idx.min(16) as i32);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_filters);
 
-    // Step slider
-    let mut s_step = SliderCtrl::new(115.0, 5.0, (width as f64).min(515.0), 11.0);
-    s_step.label("Step=%3.2f");
-    s_step.range(1.0, 10.0);
-    s_step.set_value(step_deg);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_step);
+    // Checkboxes — matching C++ order and positions
+    let mut c_run = CboxCtrl::new(8.0, 245.0, "RUN Test!");
+    c_run.text_size(7.5, 0.0);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_run);
 
-    // Radius slider (for sinc/lanczos/blackman)
-    let mut s_radius = SliderCtrl::new(115.0, 20.0, (width as f64).min(515.0), 31.0);
-    s_radius.label("Filter Radius=%.3f");
-    s_radius.range(2.0, 8.0);
-    s_radius.set_value(radius);
-    if filter_idx >= 14 {
-        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_radius);
-    }
-
-    // Normalize checkbox
     let mut c_norm = CboxCtrl::new(8.0, 215.0, "Normalize Filter");
     c_norm.text_size(7.5, 0.0);
     c_norm.set_status(normalize);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_norm);
 
-    // Status text
-    {
-        let label = format!("NSteps={}", num_steps);
-        let mut txt = GsvText::new();
-        txt.size(10.0, 0.0);
-        txt.start_point(10.0, 295.0);
-        txt.text(&label);
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(1.5);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
-    }
+    let mut c_single = CboxCtrl::new(8.0, 230.0, "Single Step");
+    c_single.text_size(7.5, 0.0);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_single);
+
+    let mut c_refresh = CboxCtrl::new(8.0, 265.0, "Refresh");
+    c_refresh.text_size(7.5, 0.0);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_refresh);
 
     buf
 }
