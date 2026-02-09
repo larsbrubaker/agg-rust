@@ -14,6 +14,11 @@
     </div>
     <div class="sidebar-actions">
       <button id="expand-all-btn" class="expand-all-btn" title="Expand or collapse all sections">Expand All</button>
+      <div class="search-box">
+        <span class="search-icon">&#128269;</span>
+        <input id="nav-search" type="text" class="search-input" placeholder="Search demos..." autocomplete="off" spellcheck="false">
+        <button id="search-clear" class="search-clear" title="Clear search" aria-label="Clear search">&times;</button>
+      </div>
     </div>
     <ul class="nav-list">
       <li><a href="#/" class="nav-link active" data-route="home">
@@ -360,6 +365,69 @@
         group.querySelector('.nav-section').addEventListener('click', function() {
           setTimeout(updateExpandBtnLabel, 0);
         });
+      });
+
+      // Search / filter nav items
+      var searchInput = document.getElementById('nav-search');
+      var searchClear = document.getElementById('search-clear');
+      var allLinks = document.querySelectorAll('.nav-group-items .nav-link');
+
+      function updateSearch() {
+        var query = searchInput.value.trim().toLowerCase();
+        searchClear.classList.toggle('visible', query.length > 0);
+
+        if (!query) {
+          // Restore all items and reset to saved section state
+          allLinks.forEach(function(link) {
+            link.closest('li').style.display = '';
+          });
+          groups.forEach(function(g) {
+            g.style.display = '';
+          });
+          // Restore saved open/close state
+          var restored = null;
+          try { restored = JSON.parse(localStorage.getItem(KEY)); } catch(e) {}
+          groups.forEach(function(g, i) {
+            var section = g.dataset.section;
+            var btn = g.querySelector('.nav-section');
+            var isOpen = restored ? !!restored[section] : i === 0;
+            if (isOpen) {
+              g.classList.add('open');
+              btn.setAttribute('aria-expanded', 'true');
+            } else {
+              g.classList.remove('open');
+              btn.setAttribute('aria-expanded', 'false');
+            }
+          });
+          updateExpandBtnLabel();
+          return;
+        }
+
+        // Filter: show only matching links, auto-expand their groups
+        groups.forEach(function(g) {
+          var items = g.querySelectorAll('.nav-group-items .nav-link');
+          var hasMatch = false;
+          items.forEach(function(link) {
+            var text = link.textContent.toLowerCase();
+            var route = (link.dataset.route || '').toLowerCase();
+            var match = text.indexOf(query) !== -1 || route.indexOf(query) !== -1;
+            link.closest('li').style.display = match ? '' : 'none';
+            if (match) hasMatch = true;
+          });
+          g.style.display = hasMatch ? '' : 'none';
+          if (hasMatch) {
+            g.classList.add('open');
+            g.querySelector('.nav-section').setAttribute('aria-expanded', 'true');
+          }
+        });
+      }
+
+      searchInput.addEventListener('input', updateSearch);
+
+      searchClear.addEventListener('click', function() {
+        searchInput.value = '';
+        updateSearch();
+        searchInput.focus();
       });
     })();
   </script>
