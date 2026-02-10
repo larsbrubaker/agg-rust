@@ -232,8 +232,8 @@ body {
 .nav-link {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--text-secondary);
@@ -253,7 +253,16 @@ body {
   font-weight: 600;
 }
 
-.nav-icon { font-size: 14px; width: 18px; text-align: center; }
+.nav-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
+
+.nav-thumb {
+  width: 24px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: var(--surface-alt);
+}
 
 .sidebar-footer {
   padding: 16px 20px;
@@ -324,13 +333,14 @@ body {
 
 .feature-card {
   display: block;
-  padding: 20px;
+  padding: 12px 12px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   text-decoration: none;
   color: var(--text);
   transition: all var(--transition);
+  overflow: hidden;
 }
 
 .feature-card:hover {
@@ -345,16 +355,43 @@ body {
   margin-bottom: 12px;
 }
 
+.card-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-light);
+}
+
+.card-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-light);
+  font-size: 36px;
+  color: var(--text-muted);
+}
+
 .feature-card h3 {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 6px;
+  padding: 0 4px;
 }
 
 .feature-card p {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.6;
+  padding: 0 4px;
 }
 
 .about-section {

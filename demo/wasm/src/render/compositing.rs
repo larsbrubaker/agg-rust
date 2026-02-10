@@ -29,8 +29,10 @@ use agg_rust::renderer_primitives::RendererPrimitives;
 use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid};
 use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::rounded_rect::RoundedRect;
-use agg_rust::scanline_boolean_algebra::{SBoolOp, sbool_combine_shapes_aa};
+use agg_rust::basics::FillingRule;
+use agg_rust::scanline_boolean_algebra::{SBoolOp, sbool_combine_shapes_aa, sbool_combine_shapes_bin};
 use agg_rust::scanline_storage_aa::ScanlineStorageAa;
+use agg_rust::scanline_storage_bin::ScanlineStorageBin;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
@@ -530,16 +532,27 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 ///
 /// params[0] = test case (0-3)
 /// params[1] = operation (0=Or, 1=And, 2=Xor, 3=AMinusB, 4=BMinusA)
+/// Scanline Boolean 2 — matching C++ scanline_boolean2.cpp exactly.
+///
+/// params[0] = polygon type (0-4): Two Simple Paths, Closed Stroke, GB+Arrows, GB+Spiral, Spiral+Glyph
+/// params[1] = fill rule (0=Even-Odd, 1=Non-Zero)
+/// params[2] = scanline type (0=scanline_p, 1=scanline_u, 2=scanline_bin)
+/// params[3] = operation (0=None, 1=OR, 2=AND, 3=XOR Linear, 4=XOR Saddle, 5=A-B, 6=B-A)
+/// params[4] = mouse_x
+/// params[5] = mouse_y
 pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let test_case = params.first().copied().unwrap_or(0.0) as u32;
-    let op_idx = params.get(1).copied().unwrap_or(0.0) as u32;
-    let op = match op_idx {
-        1 => SBoolOp::And,
-        2 => SBoolOp::Xor,
-        3 => SBoolOp::AMinusB,
-        4 => SBoolOp::BMinusA,
-        _ => SBoolOp::Or,
-    };
+    use super::gb_poly::{make_gb_poly, make_arrows, Spiral};
+    use agg_rust::ctrl::RboxCtrl;
+
+    let polygon_idx = params.first().copied().unwrap_or(3.0) as u32;
+    let fill_rule_idx = params.get(1).copied().unwrap_or(1.0) as u32;
+    let scanline_type_idx = params.get(2).copied().unwrap_or(1.0) as u32;
+    let operation_idx = params.get(3).copied().unwrap_or(2.0) as u32;
+    let mouse_x = params.get(4).copied().unwrap_or(width as f64 / 2.0);
+    let mouse_y = params.get(5).copied().unwrap_or(height as f64 / 2.0);
+
+    let initial_width = 655.0_f64;
+    let initial_height = 520.0_f64;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -548,168 +561,400 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    let w = width as f64;
-    let h = height as f64;
+    let mut sl_u8 = ScanlineU8::new();
+    let mut ras = RasterizerScanlineAa::new();
 
-    // Create shape A based on test case
+    // Render controls
+    let mut m_polygons = RboxCtrl::new(5.0, 5.0, 5.0 + 205.0, 110.0);
+    m_polygons.add_item("Two Simple Paths");
+    m_polygons.add_item("Closed Stroke");
+    m_polygons.add_item("Great Britain and Arrows");
+    m_polygons.add_item("Great Britain and Spiral");
+    m_polygons.add_item("Spiral and Glyph");
+    m_polygons.set_cur_item(polygon_idx as i32);
+    render_ctrl(&mut ras, &mut sl_u8, &mut rb, &mut m_polygons);
+
+    let mut m_fill_rule = RboxCtrl::new(200.0, 5.0, 200.0 + 105.0, 50.0);
+    m_fill_rule.add_item("Even-Odd");
+    m_fill_rule.add_item("Non Zero");
+    m_fill_rule.set_cur_item(fill_rule_idx as i32);
+    render_ctrl(&mut ras, &mut sl_u8, &mut rb, &mut m_fill_rule);
+
+    let mut m_scanline_type = RboxCtrl::new(300.0, 5.0, 300.0 + 115.0, 70.0);
+    m_scanline_type.add_item("scanline_p");
+    m_scanline_type.add_item("scanline_u");
+    m_scanline_type.add_item("scanline_bin");
+    m_scanline_type.set_cur_item(scanline_type_idx as i32);
+    render_ctrl(&mut ras, &mut sl_u8, &mut rb, &mut m_scanline_type);
+
+    let mut m_operation = RboxCtrl::new(535.0, 5.0, 535.0 + 115.0, 145.0);
+    m_operation.add_item("None");
+    m_operation.add_item("OR");
+    m_operation.add_item("AND");
+    m_operation.add_item("XOR Linear");
+    m_operation.add_item("XOR Saddle");
+    m_operation.add_item("A-B");
+    m_operation.add_item("B-A");
+    m_operation.set_cur_item(operation_idx as i32);
+    render_ctrl(&mut ras, &mut sl_u8, &mut rb, &mut m_operation);
+
+    // Set fill rule
+    let fill_rule = if fill_rule_idx != 0 {
+        FillingRule::NonZero
+    } else {
+        FillingRule::EvenOdd
+    };
+
     let mut ras1 = RasterizerScanlineAa::new();
     let mut ras2 = RasterizerScanlineAa::new();
+    ras1.filling_rule(fill_rule);
+    ras2.filling_rule(fill_rule);
 
-    match test_case {
+    // Build shapes and render preview based on polygon type
+    match polygon_idx {
+        0 => {
+            // Two Simple Paths
+            let mut ps1 = PathStorage::new();
+            let mut ps2 = PathStorage::new();
+
+            let x = mouse_x - initial_width / 2.0 + 100.0;
+            let y = mouse_y - initial_height / 2.0 + 100.0;
+            ps1.move_to(x + 140.0, y + 145.0);
+            ps1.line_to(x + 225.0, y + 44.0);
+            ps1.line_to(x + 296.0, y + 219.0);
+            ps1.close_polygon(0);
+
+            ps1.line_to(x + 226.0, y + 289.0);
+            ps1.line_to(x + 82.0, y + 292.0);
+
+            ps1.move_to(x + 220.0, y + 222.0);
+            ps1.line_to(x + 363.0, y + 249.0);
+            ps1.line_to(x + 265.0, y + 331.0);
+
+            ps1.move_to(x + 242.0, y + 243.0);
+            ps1.line_to(x + 325.0, y + 261.0);
+            ps1.line_to(x + 268.0, y + 309.0);
+
+            ps1.move_to(x + 259.0, y + 259.0);
+            ps1.line_to(x + 273.0, y + 288.0);
+            ps1.line_to(x + 298.0, y + 266.0);
+
+            ps2.move_to(100.0 + 32.0, 100.0 + 77.0);
+            ps2.line_to(100.0 + 473.0, 100.0 + 263.0);
+            ps2.line_to(100.0 + 351.0, 100.0 + 290.0);
+            ps2.line_to(100.0 + 354.0, 100.0 + 374.0);
+
+            ras1.reset();
+            ras1.add_path(&mut ps1, 0);
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 0, 0, 26)); // rgba(0,0,0,0.1)
+
+            ras2.reset();
+            ras2.add_path(&mut ps2, 0);
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 153, 0, 26)); // rgba(0,0.6,0,0.1)
+
+            // Re-add for boolean
+            ras1.reset();
+            ras1.filling_rule(fill_rule);
+            ras1.add_path(&mut ps1, 0);
+            ras2.reset();
+            ras2.filling_rule(fill_rule);
+            ras2.add_path(&mut ps2, 0);
+        }
         1 => {
-            // Overlapping rectangles
-            let mut rect1 = PathStorage::new();
-            rect1.move_to(w * 0.1, h * 0.2);
-            rect1.line_to(w * 0.6, h * 0.2);
-            rect1.line_to(w * 0.6, h * 0.8);
-            rect1.line_to(w * 0.1, h * 0.8);
-            rect1.close_polygon(0);
-            ras1.add_path(&mut rect1, 0);
+            // Closed Stroke
+            let mut ps1 = PathStorage::new();
+            let mut ps2 = PathStorage::new();
 
-            let mut rect2 = PathStorage::new();
-            rect2.move_to(w * 0.4, h * 0.3);
-            rect2.line_to(w * 0.9, h * 0.3);
-            rect2.line_to(w * 0.9, h * 0.7);
-            rect2.line_to(w * 0.4, h * 0.7);
-            rect2.close_polygon(0);
-            ras2.add_path(&mut rect2, 0);
+            let x = mouse_x - initial_width / 2.0 + 100.0;
+            let y = mouse_y - initial_height / 2.0 + 100.0;
+            ps1.move_to(x + 140.0, y + 145.0);
+            ps1.line_to(x + 225.0, y + 44.0);
+            ps1.line_to(x + 296.0, y + 219.0);
+            ps1.close_polygon(0);
+
+            ps1.line_to(x + 226.0, y + 289.0);
+            ps1.line_to(x + 82.0, y + 292.0);
+
+            ps1.move_to(x + 220.0 - 50.0, y + 222.0);
+            ps1.line_to(x + 363.0 - 50.0, y + 249.0);
+            ps1.line_to(x + 265.0 - 50.0, y + 331.0);
+            ps1.close_polygon(0);
+
+            ps2.move_to(100.0 + 32.0, 100.0 + 77.0);
+            ps2.line_to(100.0 + 473.0, 100.0 + 263.0);
+            ps2.line_to(100.0 + 351.0, 100.0 + 290.0);
+            ps2.line_to(100.0 + 354.0, 100.0 + 374.0);
+            ps2.close_polygon(0);
+
+            let mut stroke = ConvStroke::new(&mut ps2);
+            stroke.set_width(15.0);
+
+            ras1.reset();
+            ras1.add_path(&mut ps1, 0);
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 0, 0, 26));
+
+            ras2.reset();
+            ras2.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 153, 0, 26));
+
+            // Re-add for boolean
+            ras1.reset();
+            ras1.filling_rule(fill_rule);
+            ras1.add_path(&mut ps1, 0);
+            ras2.reset();
+            ras2.filling_rule(fill_rule);
+            ras2.add_path(&mut stroke, 0);
         }
         2 => {
-            // Star and circle
-            let n = 5;
-            let cx = w * 0.4;
-            let cy = h * 0.5;
-            let r_outer = h * 0.35;
-            let r_inner = h * 0.15;
-            let mut star = PathStorage::new();
-            for i in 0..(n * 2) {
-                let angle = (i as f64) * std::f64::consts::PI / n as f64 - std::f64::consts::PI / 2.0;
-                let r = if i % 2 == 0 { r_outer } else { r_inner };
-                let px = cx + r * angle.cos();
-                let py = cy + r * angle.sin();
-                if i == 0 { star.move_to(px, py); } else { star.line_to(px, py); }
-            }
-            star.close_polygon(0);
-            ras1.add_path(&mut star, 0);
+            // Great Britain and Arrows
+            let mut gb_poly = PathStorage::new();
+            let mut arrows = PathStorage::new();
+            make_gb_poly(&mut gb_poly);
+            make_arrows(&mut arrows);
 
-            let mut ell = Ellipse::new(w * 0.6, h * 0.5, h * 0.3, h * 0.3, 100, false);
-            ras2.add_path(&mut ell, 0);
+            let mut mtx1 = TransAffine::new();
+            mtx1.multiply(&TransAffine::new_translation(-1150.0, -1150.0));
+            mtx1.multiply(&TransAffine::new_scaling_uniform(2.0));
+
+            let mut mtx2 = mtx1.clone();
+            mtx2.multiply(&TransAffine::new_translation(
+                mouse_x - initial_width / 2.0,
+                mouse_y - initial_height / 2.0,
+            ));
+
+            let mut trans_gb_poly = ConvTransform::new(&mut gb_poly, mtx1.clone());
+            let mut trans_arrows = ConvTransform::new(&mut arrows, mtx2);
+
+            ras2.add_path(&mut trans_gb_poly, 0);
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
+                &Rgba8::new(128, 128, 0, 26)); // rgba(0.5,0.5,0,0.1)
+
+            let mut stroke_gb_poly = ConvStroke::new(&mut trans_gb_poly);
+            stroke_gb_poly.set_width(0.1);
+            ras1.add_path(&mut stroke_gb_poly, 0);
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 0, 0, 255));
+
+            ras2.add_path(&mut trans_arrows, 0);
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 128, 128, 26)); // rgba(0,0.5,0.5,0.1)
+
+            ras1.reset();
+            ras1.filling_rule(fill_rule);
+            ras1.add_path(&mut trans_gb_poly, 0);
+            // ras2 already has arrows from above
         }
         3 => {
-            // Thick stroke (converted to filled shape) vs polygon
-            let mut line = PathStorage::new();
-            line.move_to(w * 0.1, h * 0.5);
-            line.line_to(w * 0.9, h * 0.5);
-            let mut thick = ConvStroke::new(&mut line);
-            thick.set_width(h * 0.3);
-            thick.set_line_cap(LineCap::Round);
-            ras1.add_path(&mut thick, 0);
+            // Great Britain and a Spiral
+            let mut sp = Spiral::new(mouse_x, mouse_y, 10.0, 150.0, 30.0, 0.0);
+            let mut stroke = ConvStroke::new(&mut sp);
+            stroke.set_width(15.0);
 
-            let mut tri = PathStorage::new();
-            tri.move_to(w * 0.3, h * 0.1);
-            tri.line_to(w * 0.7, h * 0.9);
-            tri.line_to(w * 0.1, h * 0.9);
-            tri.close_polygon(0);
-            ras2.add_path(&mut tri, 0);
-        }
-        _ => {
-            // Default: two overlapping ellipses
-            let mut ell1 = Ellipse::new(w * 0.35, h * 0.5, w * 0.25, h * 0.35, 100, false);
-            ras1.add_path(&mut ell1, 0);
+            let mut gb_poly = PathStorage::new();
+            make_gb_poly(&mut gb_poly);
 
-            let mut ell2 = Ellipse::new(w * 0.65, h * 0.5, w * 0.25, h * 0.35, 100, false);
-            ras2.add_path(&mut ell2, 0);
+            let mut mtx = TransAffine::new();
+            mtx.multiply(&TransAffine::new_translation(-1150.0, -1150.0));
+            mtx.multiply(&TransAffine::new_scaling_uniform(2.0));
+
+            let mut trans_gb_poly = ConvTransform::new(&mut gb_poly, mtx);
+
+            ras1.add_path(&mut trans_gb_poly, 0);
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
+                &Rgba8::new(128, 128, 0, 26));
+
+            let mut stroke_gb_poly = ConvStroke::new(&mut trans_gb_poly);
+            stroke_gb_poly.set_width(0.1);
+            ras1.reset();
+            ras1.add_path(&mut stroke_gb_poly, 0);
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 0, 0, 255));
+
+            ras2.reset();
+            ras2.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 128, 128, 26));
+
+            ras1.reset();
+            ras1.filling_rule(fill_rule);
+            ras1.add_path(&mut trans_gb_poly, 0);
+            // ras2 already has spiral stroke
         }
+        4 => {
+            // Spiral and glyph
+            let mut sp = Spiral::new(mouse_x, mouse_y, 10.0, 150.0, 30.0, 0.0);
+            let mut stroke = ConvStroke::new(&mut sp);
+            stroke.set_width(15.0);
+
+            let mut glyph = PathStorage::new();
+            glyph.move_to(28.47, 6.45);
+            glyph.curve3(21.58, 1.12, 19.82, 0.29);
+            glyph.curve3(17.19, -0.93, 14.21, -0.93);
+            glyph.curve3(9.57, -0.93, 6.57, 2.25);
+            glyph.curve3(3.56, 5.42, 3.56, 10.60);
+            glyph.curve3(3.56, 13.87, 5.03, 16.26);
+            glyph.curve3(7.03, 19.58, 11.99, 22.51);
+            glyph.curve3(16.94, 25.44, 28.47, 29.64);
+            glyph.line_to(28.47, 31.40);
+            glyph.curve3(28.47, 38.09, 26.34, 40.58);
+            glyph.curve3(24.22, 43.07, 20.17, 43.07);
+            glyph.curve3(17.09, 43.07, 15.28, 41.41);
+            glyph.curve3(13.43, 39.75, 13.43, 37.60);
+            glyph.line_to(13.53, 34.77);
+            glyph.curve3(13.53, 32.52, 12.38, 31.30);
+            glyph.curve3(11.23, 30.08, 9.38, 30.08);
+            glyph.curve3(7.57, 30.08, 6.42, 31.35);
+            glyph.curve3(5.27, 32.62, 5.27, 34.81);
+            glyph.curve3(5.27, 39.01, 9.57, 42.53);
+            glyph.curve3(13.87, 46.04, 21.63, 46.04);
+            glyph.curve3(27.59, 46.04, 31.40, 44.04);
+            glyph.curve3(34.28, 42.53, 35.64, 39.31);
+            glyph.curve3(36.52, 37.21, 36.52, 30.71);
+            glyph.line_to(36.52, 15.53);
+            glyph.curve3(36.52, 9.13, 36.77, 7.69);
+            glyph.curve3(37.01, 6.25, 37.57, 5.76);
+            glyph.curve3(38.13, 5.27, 38.87, 5.27);
+            glyph.curve3(39.65, 5.27, 40.23, 5.62);
+            glyph.curve3(41.26, 6.25, 44.19, 9.18);
+            glyph.line_to(44.19, 6.45);
+            glyph.curve3(38.72, -0.88, 33.74, -0.88);
+            glyph.curve3(31.35, -0.88, 29.93, 0.78);
+            glyph.curve3(28.52, 2.44, 28.47, 6.45);
+            glyph.close_polygon(0);
+
+            glyph.move_to(28.47, 9.62);
+            glyph.line_to(28.47, 26.66);
+            glyph.curve3(21.09, 23.73, 18.95, 22.51);
+            glyph.curve3(15.09, 20.36, 13.43, 18.02);
+            glyph.curve3(11.77, 15.67, 11.77, 12.89);
+            glyph.curve3(11.77, 9.38, 13.87, 7.06);
+            glyph.curve3(15.97, 4.74, 18.70, 4.74);
+            glyph.curve3(22.41, 4.74, 28.47, 9.62);
+            glyph.close_polygon(0);
+
+            let mut mtx = TransAffine::new();
+            mtx.multiply(&TransAffine::new_scaling(4.0, 4.0));
+            mtx.multiply(&TransAffine::new_translation(220.0, 200.0));
+            let mut trans = ConvTransform::new(&mut glyph, mtx);
+            let mut curve = ConvCurve::new(&mut trans);
+
+            ras1.reset();
+            ras1.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 0, 0, 26));
+
+            ras2.reset();
+            ras2.add_path(&mut curve, 0);
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
+                &Rgba8::new(0, 153, 0, 26));
+
+            // Re-add for boolean
+            ras1.reset();
+            ras1.filling_rule(fill_rule);
+            ras1.add_path(&mut stroke, 0);
+            ras2.reset();
+            ras2.filling_rule(fill_rule);
+            ras2.add_path(&mut curve, 0);
+        }
+        _ => {}
     }
 
-    // Render individual shapes semi-transparently
-    let mut sl = ScanlineU8::new();
-    // Recreate rasterizers for the transparent overlay since we consumed them
-    {
-        let mut ras_a = RasterizerScanlineAa::new();
-        let mut ras_b = RasterizerScanlineAa::new();
-        match test_case {
-            1 => {
-                let mut r1 = PathStorage::new();
-                r1.move_to(w * 0.1, h * 0.2); r1.line_to(w * 0.6, h * 0.2);
-                r1.line_to(w * 0.6, h * 0.8); r1.line_to(w * 0.1, h * 0.8);
-                r1.close_polygon(0);
-                ras_a.add_path(&mut r1, 0);
-                let mut r2 = PathStorage::new();
-                r2.move_to(w * 0.4, h * 0.3); r2.line_to(w * 0.9, h * 0.3);
-                r2.line_to(w * 0.9, h * 0.7); r2.line_to(w * 0.4, h * 0.7);
-                r2.close_polygon(0);
-                ras_b.add_path(&mut r2, 0);
-            }
+    // Perform boolean operation if operation > 0 (not "None")
+    if operation_idx > 0 {
+        let op = match operation_idx {
+            1 => SBoolOp::Or,
+            2 => SBoolOp::And,
+            3 => SBoolOp::Xor,
+            4 => SBoolOp::XorSaddle,
+            5 => SBoolOp::AMinusB,
+            6 => SBoolOp::BMinusA,
+            _ => SBoolOp::Or,
+        };
+
+        let result_color = Rgba8::new(128, 0, 0, 128); // rgba(0.5, 0, 0, 0.5)
+
+        match scanline_type_idx {
             2 => {
-                let n = 5;
-                let cx = w * 0.4; let cy = h * 0.5;
-                let r_outer = h * 0.35; let r_inner = h * 0.15;
-                let mut star = PathStorage::new();
-                for i in 0..(n * 2) {
-                    let angle = (i as f64) * std::f64::consts::PI / n as f64 - std::f64::consts::PI / 2.0;
-                    let r = if i % 2 == 0 { r_outer } else { r_inner };
-                    let px = cx + r * angle.cos(); let py = cy + r * angle.sin();
-                    if i == 0 { star.move_to(px, py); } else { star.line_to(px, py); }
-                }
-                star.close_polygon(0);
-                ras_a.add_path(&mut star, 0);
-                let mut ell = Ellipse::new(w * 0.6, h * 0.5, h * 0.3, h * 0.3, 100, false);
-                ras_b.add_path(&mut ell, 0);
-            }
-            3 => {
-                let mut line = PathStorage::new();
-                line.move_to(w * 0.1, h * 0.5); line.line_to(w * 0.9, h * 0.5);
-                let mut thick = ConvStroke::new(&mut line);
-                thick.set_width(h * 0.3); thick.set_line_cap(LineCap::Round);
-                ras_a.add_path(&mut thick, 0);
-                let mut tri = PathStorage::new();
-                tri.move_to(w * 0.3, h * 0.1); tri.line_to(w * 0.7, h * 0.9);
-                tri.line_to(w * 0.1, h * 0.9); tri.close_polygon(0);
-                ras_b.add_path(&mut tri, 0);
+                // scanline_bin — binary mode
+                let mut sl1 = ScanlineU8::new();
+                let mut sl2 = ScanlineU8::new();
+                let mut sl_result = ScanlineU8::new();
+                let mut st1 = ScanlineStorageBin::new();
+                let mut st2 = ScanlineStorageBin::new();
+                let mut st_result = ScanlineStorageBin::new();
+
+                sbool_combine_shapes_bin(
+                    op, &mut ras1, &mut ras2,
+                    &mut sl1, &mut sl2, &mut sl_result,
+                    &mut st1, &mut st2, &mut st_result,
+                );
+
+                render_storage_bin_solid(&mut st_result, &mut sl_u8, &mut rb, &result_color);
             }
             _ => {
-                let mut e1 = Ellipse::new(w * 0.35, h * 0.5, w * 0.25, h * 0.35, 100, false);
-                ras_a.add_path(&mut e1, 0);
-                let mut e2 = Ellipse::new(w * 0.65, h * 0.5, w * 0.25, h * 0.35, 100, false);
-                ras_b.add_path(&mut e2, 0);
+                // scanline_p8 (0) or scanline_u8 (1) — AA mode
+                let mut sl1 = ScanlineU8::new();
+                let mut sl2 = ScanlineU8::new();
+                let mut sl_result = ScanlineU8::new();
+                let mut st1 = ScanlineStorageAa::new();
+                let mut st2 = ScanlineStorageAa::new();
+                let mut st_result = ScanlineStorageAa::new();
+
+                sbool_combine_shapes_aa(
+                    op, &mut ras1, &mut ras2,
+                    &mut sl1, &mut sl2, &mut sl_result,
+                    &mut st1, &mut st2, &mut st_result,
+                );
+
+                render_storage_solid(&mut st_result, &mut sl_u8, &mut rb, &result_color);
             }
         }
-        render_scanlines_aa_solid(&mut ras_a, &mut sl, &mut rb, &Rgba8::new(240, 200, 200, 100));
-        render_scanlines_aa_solid(&mut ras_b, &mut sl, &mut rb, &Rgba8::new(200, 200, 240, 100));
+
+        // Render timing/spans text (use GsvText for display)
+        {
+            let label = format!("Combine=N/A\n\nRender=N/A\n\nnum_spans=N/A");
+            let mut txt = GsvText::new();
+            txt.size(8.0, 0.0);
+            txt.start_point(420.0, 40.0);
+            txt.text(&label);
+            let mut txt_stroke = ConvStroke::new(&mut txt);
+            txt_stroke.set_width(1.0);
+            txt_stroke.set_line_cap(LineCap::Round);
+            ras.reset();
+            ras.add_path(&mut txt_stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl_u8, &mut rb, &Rgba8::new(0, 0, 0, 255));
+        }
     }
 
-    // Boolean combine
-    let mut sl1 = ScanlineU8::new();
-    let mut sl2 = ScanlineU8::new();
-    let mut sl_result = ScanlineU8::new();
-    let mut st1 = ScanlineStorageAa::new();
-    let mut st2 = ScanlineStorageAa::new();
-    let mut st_result = ScanlineStorageAa::new();
-
-    sbool_combine_shapes_aa(op, &mut ras1, &mut ras2,
-        &mut sl1, &mut sl2, &mut sl_result,
-        &mut st1, &mut st2, &mut st_result);
-
-    render_storage_solid(&mut st_result, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
-
-    // Labels
-    let op_names = ["OR", "AND", "XOR", "A-B", "B-A"];
-    let case_names = ["Ellipses", "Rectangles", "Star & Circle", "Stroke & Triangle"];
-    let op_name = op_names.get(op_idx as usize).unwrap_or(&"OR");
-    let case_name = case_names.get(test_case as usize).unwrap_or(&"Ellipses");
-    let label = format!("{} — {}", case_name, op_name);
-    let mut txt = GsvText::new();
-    txt.size(12.0, 0.0);
-    txt.start_point(10.0, h - 20.0);
-    txt.text(&label);
-    let mut txt_stroke = ConvStroke::new(&mut txt);
-    txt_stroke.set_width(1.5);
-    let mut ras = RasterizerScanlineAa::new();
-    ras.add_path(&mut txt_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
-
     buf
+}
+
+/// Render binary scanline storage as a solid color (no AA blending).
+fn render_storage_bin_solid(
+    storage: &mut ScanlineStorageBin,
+    sl: &mut ScanlineU8,
+    ren: &mut RendererBase<PixfmtRgba32>,
+    color: &Rgba8,
+) {
+    use agg_rust::rasterizer_scanline_aa::Scanline;
+    if storage.rewind_scanlines() {
+        sl.reset(storage.min_x(), storage.max_x());
+        while storage.sweep_scanline(sl) {
+            let y = Scanline::y(sl);
+            for span in sl.begin() {
+                let x = span.x;
+                let len = span.len;
+                if len > 0 {
+                    // Binary: full coverage for all pixels
+                    ren.blend_hline(x, y, x + len - 1, color, 255);
+                }
+            }
+        }
+    }
 }
 
 

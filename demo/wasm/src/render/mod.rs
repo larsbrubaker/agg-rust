@@ -10,6 +10,7 @@ mod images;
 mod alpha;
 mod transforms;
 mod compositing;
+pub(crate) mod gb_poly;
 
 pub use basic::*;
 pub use images::*;

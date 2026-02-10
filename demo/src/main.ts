@@ -71,6 +71,83 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'alpha_mask2': () => import('./demos/alpha_mask2.ts'),
 };
 
+// Mapping of demo route name to thumbnail image filename
+const thumbnails: Record<string, string> = {
+  'aa_demo': 'aa_demo_s.gif',
+  'aa_test': 'aa_test_s.png',
+  'alpha_gradient': 'alpha_gradient_s.png',
+  'alpha_mask': 'alpha_mask_s.gif',
+  'alpha_mask2': 'alpha_mask2_s.jpg',
+  'alpha_mask3': 'alpha_mask3_s.gif',
+  'bezier_div': 'bezier_div_s.png',
+  'blend_color': 'compositing_s.png',
+  'blur': 'blur_s.png',
+  'bspline': 'bezier_div_s.png',
+  'circles': 'circles_s.gif',
+  'component_rendering': 'component_rendering_s.gif',
+  'compositing': 'compositing_s.png',
+  'compositing2': 'compositing2_s.png',
+  'conv_contour': 'conv_contour_s.gif',
+  'conv_dash': 'conv_dash_marker_s.gif',
+  'conv_dash_marker': 'conv_dash_marker_s.gif',
+  'conv_stroke': 'conv_stroke_s.gif',
+  'distortions': 'distortions_s.png',
+  'flash_rasterizer': 'flash_rasterizer_s.png',
+  'flash_rasterizer2': 'flash_rasterizer2_s.png',
+  'gamma_correction': 'gamma_correction_s.gif',
+  'gamma_ctrl': 'gamma_ctrl_s.gif',
+  'gamma_tuner': 'gamma_tuner_s.png',
+  'gouraud': 'gouraud_s.png',
+  'gouraud_mesh': 'gouraud_mesh_s.png',
+  'gradient_focal': 'gradient_focal_s.png',
+  'gradients': 'gradients_s.png',
+  'graph_test': 'graph_test_s.gif',
+  'gsv_text': 'raster_text_s.gif',
+  'idea': 'idea_s.gif',
+  'image_alpha': 'image_alpha_s.png',
+  'image_filters': 'image_filters_s.jpg',
+  'image_filters2': 'image_filters2_s.png',
+  'image_fltr_graph': 'image_fltr_graph_s.gif',
+  'image_perspective': 'image_perspective_s.jpg',
+  'image_resample': 'image_resample_s.jpg',
+  'image_transforms': 'image_transforms_s.jpg',
+  'image1': 'image1_s.jpg',
+  'line_patterns': 'line_patterns_s.gif',
+  'line_patterns_clip': 'line_patterns_clip_s.png',
+  'line_thickness': 'conv_stroke_s.gif',
+  'lion': 'lion_s.png',
+  'lion_lens': 'lion_lens_s.gif',
+  'lion_outline': 'lion_outline_s.gif',
+  'mol_view': 'mol_view_s.gif',
+  'multi_clip': 'multi_clip_s.gif',
+  'pattern_fill': 'pattern_fill_s.gif',
+  'pattern_perspective': 'pattern_perspective_s.jpg',
+  'pattern_resample': 'pattern_resample_s.jpg',
+  'perspective': 'perspective_s.gif',
+  'polymorphic_renderer': 'polymorphic_renderer_s.gif',
+  'raster_text': 'raster_text_s.gif',
+  'rasterizer_compound': 'rasterizer_compound_s.png',
+  'rasterizers': 'rasterizers_s.gif',
+  'rasterizers2': 'rasterizers2_s.gif',
+  'rounded_rect': 'rounded_rect_s.gif',
+  'scanline_boolean': 'scanline_boolean_s.gif',
+  'scanline_boolean2': 'scanline_boolean2_s.gif',
+  'shapes': 'circles_s.gif',
+  'simple_blur': 'simple_blur_s.gif',
+  'trans_curve1': 'trans_curve1_s.gif',
+  'trans_curve2': 'trans_curve2_s.gif',
+  'trans_polar': 'trans_polar_s.gif',
+};
+
+/** Returns an <img> tag for the demo thumbnail, or a fallback icon span */
+function thumbImg(route: string, cssClass: string): string {
+  const file = thumbnails[route];
+  if (file) {
+    return `<img class="${cssClass}" src="./public/thumbnails/${file}" alt="${route}" loading="lazy">`;
+  }
+  return `<span class="${cssClass === 'card-thumb' ? 'card-thumb-fallback' : 'nav-icon'}">&#9670;</span>`;
+}
+
 let currentCleanup: (() => void) | null = null;
 
 function getRoute(): string {
@@ -102,7 +179,82 @@ function updateNav(route: string) {
   });
 }
 
+// Demo card definitions for the home page grid
+const demoCards: Array<{ route: string; title: string; desc: string }> = [
+  { route: 'lion', title: 'Lion', desc: 'The classic AGG lion &mdash; a complex vector graphic with rotation and scaling controls.' },
+  { route: 'shapes', title: 'Shapes', desc: 'Anti-aliased circles, ellipses, and rounded rectangles at various sizes and colors.' },
+  { route: 'gradients', title: 'Gradients', desc: 'Linear and radial gradient fills with multi-stop color interpolation.' },
+  { route: 'gouraud', title: 'Gouraud Shading', desc: 'Smooth color interpolation across triangles using Gouraud shading.' },
+  { route: 'conv_stroke', title: 'Conv Stroke', desc: 'Line joins (miter, round, bevel), caps, and dashed overlay with draggable vertices.' },
+  { route: 'bezier_div', title: 'Bezier Div', desc: 'Cubic B&eacute;zier curve subdivision with draggable control points and width control.' },
+  { route: 'circles', title: 'Circles', desc: 'Random anti-aliased circles with configurable count, size range, and seed.' },
+  { route: 'rounded_rect', title: 'Rounded Rect', desc: 'Draggable rounded rectangle with adjustable corner radius.' },
+  { route: 'aa_demo', title: 'AA Demo', desc: 'Anti-aliasing visualization &mdash; enlarged pixel view of a triangle.' },
+  { route: 'gamma_correction', title: 'Gamma Correction', desc: 'Gamma curve visualization with concentric colored ellipses.' },
+  { route: 'line_thickness', title: 'Line Thickness', desc: 'Lines at varying sub-pixel widths from 0.1 to 5.0 pixels.' },
+  { route: 'rasterizers', title: 'Rasterizers', desc: 'Filled and stroked triangle with alpha control.' },
+  { route: 'conv_contour', title: 'Conv Contour', desc: 'Letter "A" with adjustable contour width and orientation control.' },
+  { route: 'conv_dash', title: 'Conv Dash', desc: 'Dashed stroke patterns with cap styles on a draggable triangle.' },
+  { route: 'gsv_text', title: 'GSV Text', desc: 'Built-in vector text engine with adjustable size and stroke width.' },
+  { route: 'perspective', title: 'Perspective', desc: 'Lion with bilinear/perspective quad transform &mdash; drag corners to warp.' },
+  { route: 'image_fltr_graph', title: 'Filter Graph', desc: 'Image filter kernel weight function visualization &mdash; 16 filters.' },
+  { route: 'image1', title: 'Image Transforms', desc: 'Procedural sphere image with affine rotation/scaling through a bilinear filter.' },
+  { route: 'image_filters', title: 'Image Filters', desc: 'Iterative rotation showing filter quality degradation &mdash; 17 filter types.' },
+  { route: 'gradient_focal', title: 'Gradient Focal', desc: 'Radial gradient with moveable focal point and reflect adaptor.' },
+  { route: 'idea', title: 'Idea', desc: 'Rotating light bulb icon with even-odd fill, draft, and roundoff options.' },
+  { route: 'graph_test', title: 'Graph Test', desc: 'Random graph with 200 nodes and 100 edges &mdash; 5 rendering modes.' },
+  { route: 'gamma_tuner', title: 'Gamma Tuner', desc: 'Gradient background with alpha pattern and gamma correction controls.' },
+  { route: 'image_filters2', title: 'Image Filters 2', desc: '4x4 test image filtered through 17 filter types with graph visualization.' },
+  { route: 'conv_dash_marker', title: 'Dash Marker', desc: 'Dashed strokes with cap styles on a draggable triangle.' },
+  { route: 'aa_test', title: 'AA Test', desc: 'Anti-aliasing quality test &mdash; radial lines, gradient lines, Gouraud triangles.' },
+  { route: 'bspline', title: 'B-Spline', desc: 'B-spline curve through 6 draggable control points with adjustable density.' },
+  { route: 'image_perspective', title: 'Image Perspective', desc: 'Image transformed through affine/bilinear/perspective quad corners.' },
+  { route: 'alpha_mask', title: 'Alpha Mask', desc: 'Lion with elliptical alpha mask &mdash; rotate, scale, and skew.' },
+  { route: 'alpha_gradient', title: 'Alpha Gradient', desc: 'Gradient with alpha curve control over random ellipse background.' },
+  { route: 'image_alpha', title: 'Image Alpha', desc: 'Image with brightness-to-alpha mapping over random ellipses.' },
+  { route: 'alpha_mask3', title: 'Alpha Mask 3', desc: 'Alpha mask polygon clipping with AND/SUB operations.' },
+  { route: 'image_transforms', title: 'Image Transforms', desc: 'Star polygon textured with image through 7 transform modes.' },
+  { route: 'mol_view', title: 'Molecule Viewer', desc: 'Molecular structure viewer with rotate, scale, and pan controls.' },
+  { route: 'raster_text', title: 'Raster Text', desc: 'All 34 embedded bitmap fonts rendered with sample text strings.' },
+  { route: 'gamma_ctrl', title: 'Gamma Control', desc: 'Interactive gamma spline widget with stroked ellipses.' },
+  { route: 'trans_polar', title: 'Polar Transform', desc: 'Slider control warped through polar coordinates with spiral effect.' },
+  { route: 'multi_clip', title: 'Multi Clip', desc: 'Lion rendered through N&times;N clip regions with random shapes.' },
+  { route: 'simple_blur', title: 'Simple Blur', desc: 'Lion with 3&times;3 box blur &mdash; original vs blurred comparison.' },
+  { route: 'blur', title: 'Blur', desc: 'Stack blur and recursive blur on colored shapes with adjustable radius.' },
+  { route: 'trans_curve1', title: 'Text on Curve', desc: 'Text warped along a B-spline curve with draggable control points.' },
+  { route: 'trans_curve2', title: 'Text on Curve 2', desc: 'Text warped along a curve with adjustable approximation scale.' },
+  { route: 'lion_lens', title: 'Lion Lens', desc: 'Magnifying lens distortion on the lion using trans_warp_magnifier.' },
+  { route: 'distortions', title: 'Distortions', desc: 'Wave and swirl distortions on a procedural image with adjustable parameters.' },
+  { route: 'blend_color', title: 'Blend Color', desc: 'Color blending modes with alpha compositing demonstration.' },
+  { route: 'component_rendering', title: 'Component Rendering', desc: 'Per-component rendering of individual color channels.' },
+  { route: 'polymorphic_renderer', title: 'Polymorphic Renderer', desc: 'Multiple renderer types dispatched through a common interface.' },
+  { route: 'scanline_boolean', title: 'Scanline Boolean', desc: 'Boolean operations (AND, OR, XOR, SUB) on scanline shapes.' },
+  { route: 'scanline_boolean2', title: 'Scanline Boolean 2', desc: 'Advanced boolean polygon operations with multiple shapes.' },
+  { route: 'pattern_fill', title: 'Pattern Fill', desc: 'Tiled pattern fill on polygon shapes.' },
+  { route: 'pattern_perspective', title: 'Pattern Perspective', desc: 'Pattern fill with perspective transformation.' },
+  { route: 'pattern_resample', title: 'Pattern Resample', desc: 'Pattern resampling with various filter types.' },
+  { route: 'lion_outline', title: 'Lion Outline', desc: 'Lion rendered as stroked outlines with adjustable width.' },
+  { route: 'rasterizers2', title: 'Rasterizers 2', desc: 'Extended rasterizer comparison with outline and gamma controls.' },
+  { route: 'line_patterns', title: 'Line Patterns', desc: 'Custom line patterns with clip regions.' },
+  { route: 'line_patterns_clip', title: 'Line Patterns Clip', desc: 'Line patterns with clipping rectangle.' },
+  { route: 'compositing', title: 'Compositing', desc: 'Porter-Duff compositing operators visualization.' },
+  { route: 'compositing2', title: 'Compositing 2', desc: 'Advanced compositing with alpha blending modes.' },
+  { route: 'flash_rasterizer', title: 'Flash Rasterizer', desc: 'Flash-style compound shape rasterization.' },
+  { route: 'flash_rasterizer2', title: 'Flash Rasterizer 2', desc: 'Extended Flash-style rasterizer with styles.' },
+  { route: 'rasterizer_compound', title: 'Compound Rasterizer', desc: 'Compound shape rasterizer with style handler.' },
+  { route: 'gouraud_mesh', title: 'Gouraud Mesh', desc: 'Triangle mesh with Gouraud shading interpolation.' },
+  { route: 'image_resample', title: 'Image Resample', desc: 'Image resampling with perspective transform and filter comparison.' },
+  { route: 'alpha_mask2', title: 'Alpha Mask 2', desc: 'Alpha mask with gray8 rendering buffer.' },
+];
+
 function renderHome(container: HTMLElement) {
+  const cardsHtml = demoCards.map(card => `
+        <a href="#/${card.route}" class="feature-card">
+          ${thumbImg(card.route, 'card-thumb')}
+          <h3>${card.title}</h3>
+          <p>${card.desc}</p>
+        </a>`).join('');
+
   container.innerHTML = `
     <div class="home-page">
       <div class="github-badge">
@@ -120,222 +272,7 @@ function renderHome(container: HTMLElement) {
           and more &mdash; all running in your browser via WebAssembly.
         </p>
       </div>
-      <div class="feature-grid">
-        <a href="#/lion" class="feature-card">
-          <span class="card-icon">&#129409;</span>
-          <h3>Lion</h3>
-          <p>The classic AGG lion &mdash; a complex vector graphic with rotation and scaling controls.</p>
-        </a>
-        <a href="#/shapes" class="feature-card">
-          <span class="card-icon">&#9711;</span>
-          <h3>Shapes</h3>
-          <p>Anti-aliased circles, ellipses, and rounded rectangles at various sizes and colors.</p>
-        </a>
-        <a href="#/gradients" class="feature-card">
-          <span class="card-icon">&#9632;</span>
-          <h3>Gradients</h3>
-          <p>Linear and radial gradient fills with multi-stop color interpolation.</p>
-        </a>
-        <a href="#/gouraud" class="feature-card">
-          <span class="card-icon">&#9650;</span>
-          <h3>Gouraud Shading</h3>
-          <p>Smooth color interpolation across triangles using Gouraud shading.</p>
-        </a>
-        <a href="#/conv_stroke" class="feature-card">
-          <span class="card-icon">&#9135;</span>
-          <h3>Conv Stroke</h3>
-          <p>Line joins (miter, round, bevel), caps, and dashed overlay with draggable vertices.</p>
-        </a>
-        <a href="#/bezier_div" class="feature-card">
-          <span class="card-icon">&#8765;</span>
-          <h3>Bezier Div</h3>
-          <p>Cubic B&eacute;zier curve subdivision with draggable control points and width control.</p>
-        </a>
-        <a href="#/circles" class="feature-card">
-          <span class="card-icon">&#9679;</span>
-          <h3>Circles</h3>
-          <p>Random anti-aliased circles with configurable count, size range, and seed.</p>
-        </a>
-        <a href="#/rounded_rect" class="feature-card">
-          <span class="card-icon">&#9645;</span>
-          <h3>Rounded Rect</h3>
-          <p>Draggable rounded rectangle with adjustable corner radius.</p>
-        </a>
-        <a href="#/aa_demo" class="feature-card">
-          <span class="card-icon">&#9638;</span>
-          <h3>AA Demo</h3>
-          <p>Anti-aliasing visualization &mdash; enlarged pixel view of a triangle.</p>
-        </a>
-        <a href="#/gamma_correction" class="feature-card">
-          <span class="card-icon">&#947;</span>
-          <h3>Gamma Correction</h3>
-          <p>Gamma curve visualization with concentric colored ellipses.</p>
-        </a>
-        <a href="#/line_thickness" class="feature-card">
-          <span class="card-icon">&#8212;</span>
-          <h3>Line Thickness</h3>
-          <p>Lines at varying sub-pixel widths from 0.1 to 5.0 pixels.</p>
-        </a>
-        <a href="#/rasterizers" class="feature-card">
-          <span class="card-icon">&#9651;</span>
-          <h3>Rasterizers</h3>
-          <p>Filled and stroked triangle with alpha control.</p>
-        </a>
-        <a href="#/conv_contour" class="feature-card">
-          <span class="card-icon">&#9674;</span>
-          <h3>Conv Contour</h3>
-          <p>Letter "A" with adjustable contour width and orientation control.</p>
-        </a>
-        <a href="#/conv_dash" class="feature-card">
-          <span class="card-icon">&#9473;</span>
-          <h3>Conv Dash</h3>
-          <p>Dashed stroke patterns with cap styles on a draggable triangle.</p>
-        </a>
-        <a href="#/gsv_text" class="feature-card">
-          <span class="card-icon">A</span>
-          <h3>GSV Text</h3>
-          <p>Built-in vector text engine with adjustable size and stroke width.</p>
-        </a>
-        <a href="#/perspective" class="feature-card">
-          <span class="card-icon">&#9670;</span>
-          <h3>Perspective</h3>
-          <p>Lion with bilinear/perspective quad transform &mdash; drag corners to warp.</p>
-        </a>
-        <a href="#/image_fltr_graph" class="feature-card">
-          <span class="card-icon">&#8767;</span>
-          <h3>Filter Graph</h3>
-          <p>Image filter kernel weight function visualization &mdash; 16 filters.</p>
-        </a>
-        <a href="#/image1" class="feature-card">
-          <span class="card-icon">&#127912;</span>
-          <h3>Image Transforms</h3>
-          <p>Procedural sphere image with affine rotation/scaling through a bilinear filter.</p>
-        </a>
-        <a href="#/image_filters" class="feature-card">
-          <span class="card-icon">&#128247;</span>
-          <h3>Image Filters</h3>
-          <p>Iterative rotation showing filter quality degradation &mdash; 17 filter types.</p>
-        </a>
-        <a href="#/gradient_focal" class="feature-card">
-          <span class="card-icon">&#9737;</span>
-          <h3>Gradient Focal</h3>
-          <p>Radial gradient with moveable focal point and reflect adaptor.</p>
-        </a>
-        <a href="#/idea" class="feature-card">
-          <span class="card-icon">&#128161;</span>
-          <h3>Idea</h3>
-          <p>Rotating light bulb icon with even-odd fill, draft, and roundoff options.</p>
-        </a>
-        <a href="#/graph_test" class="feature-card">
-          <span class="card-icon">&#128200;</span>
-          <h3>Graph Test</h3>
-          <p>Random graph with 200 nodes and 100 edges — 5 rendering modes.</p>
-        </a>
-        <a href="#/gamma_tuner" class="feature-card">
-          <span class="card-icon">&#947;</span>
-          <h3>Gamma Tuner</h3>
-          <p>Gradient background with alpha pattern and gamma correction controls.</p>
-        </a>
-        <a href="#/image_filters2" class="feature-card">
-          <span class="card-icon">&#128247;</span>
-          <h3>Image Filters 2</h3>
-          <p>4x4 test image filtered through 17 filter types with graph visualization.</p>
-        </a>
-        <a href="#/conv_dash_marker" class="feature-card">
-          <span class="card-icon">&#10230;</span>
-          <h3>Dash Marker</h3>
-          <p>Dashed strokes with cap styles on a draggable triangle.</p>
-        </a>
-        <a href="#/aa_test" class="feature-card">
-          <span class="card-icon">&#9646;</span>
-          <h3>AA Test</h3>
-          <p>Anti-aliasing quality test — radial lines, gradient lines, Gouraud triangles.</p>
-        </a>
-        <a href="#/bspline" class="feature-card">
-          <span class="card-icon">&#8765;</span>
-          <h3>B-Spline</h3>
-          <p>B-spline curve through 6 draggable control points with adjustable density.</p>
-        </a>
-        <a href="#/image_perspective" class="feature-card">
-          <span class="card-icon">&#127912;</span>
-          <h3>Image Perspective</h3>
-          <p>Image transformed through affine/bilinear/perspective quad corners.</p>
-        </a>
-        <a href="#/alpha_mask" class="feature-card">
-          <span class="card-icon">&#9673;</span>
-          <h3>Alpha Mask</h3>
-          <p>Lion with elliptical alpha mask — rotate, scale, and skew.</p>
-        </a>
-        <a href="#/alpha_gradient" class="feature-card">
-          <span class="card-icon">&#9698;</span>
-          <h3>Alpha Gradient</h3>
-          <p>Gradient with alpha curve control over random ellipse background.</p>
-        </a>
-        <a href="#/image_alpha" class="feature-card">
-          <span class="card-icon">&#127912;</span>
-          <h3>Image Alpha</h3>
-          <p>Image with brightness-to-alpha mapping over random ellipses.</p>
-        </a>
-        <a href="#/alpha_mask3" class="feature-card">
-          <span class="card-icon">&#9673;</span>
-          <h3>Alpha Mask 3</h3>
-          <p>Alpha mask polygon clipping with AND/SUB operations.</p>
-        </a>
-        <a href="#/image_transforms" class="feature-card">
-          <span class="card-icon">&#127912;</span>
-          <h3>Image Transforms</h3>
-          <p>Star polygon textured with image through 7 transform modes.</p>
-        </a>
-        <a href="#/mol_view" class="feature-card">
-          <span class="card-icon">&#9883;</span>
-          <h3>Molecule Viewer</h3>
-          <p>Molecular structure viewer with rotate, scale, and pan controls.</p>
-        </a>
-        <a href="#/raster_text" class="feature-card">
-          <span class="card-icon">A</span>
-          <h3>Raster Text</h3>
-          <p>All 34 embedded bitmap fonts rendered with sample text strings.</p>
-        </a>
-        <a href="#/gamma_ctrl" class="feature-card">
-          <span class="card-icon">&#947;</span>
-          <h3>Gamma Control</h3>
-          <p>Interactive gamma spline widget with stroked ellipses.</p>
-        </a>
-        <a href="#/trans_polar" class="feature-card">
-          <span class="card-icon">&#9741;</span>
-          <h3>Polar Transform</h3>
-          <p>Slider control warped through polar coordinates with spiral effect.</p>
-        </a>
-        <a href="#/multi_clip" class="feature-card">
-          <span class="card-icon">&#9634;</span>
-          <h3>Multi Clip</h3>
-          <p>Lion rendered through N&times;N clip regions with random shapes.</p>
-        </a>
-        <a href="#/simple_blur" class="feature-card">
-          <span class="card-icon">&#9684;</span>
-          <h3>Simple Blur</h3>
-          <p>Lion with 3&times;3 box blur &mdash; original vs blurred comparison.</p>
-        </a>
-        <a href="#/blur" class="feature-card">
-          <span class="card-icon">&#9684;</span>
-          <h3>Blur</h3>
-          <p>Stack blur and recursive blur on colored shapes with adjustable radius.</p>
-        </a>
-        <a href="#/trans_curve1" class="feature-card">
-          <span class="card-icon">&#8765;</span>
-          <h3>Text on Curve</h3>
-          <p>Text warped along a B-spline curve with draggable control points.</p>
-        </a>
-        <a href="#/lion_lens" class="feature-card">
-          <span class="card-icon">&#128269;</span>
-          <h3>Lion Lens</h3>
-          <p>Magnifying lens distortion on the lion using trans_warp_magnifier.</p>
-        </a>
-        <a href="#/distortions" class="feature-card">
-          <span class="card-icon">&#9741;</span>
-          <h3>Distortions</h3>
-          <p>Wave and swirl distortions on a procedural image with adjustable parameters.</p>
-        </a>
+      <div class="feature-grid">${cardsHtml}
       </div>
       <div class="about-section">
         <h2>About This Project</h2>

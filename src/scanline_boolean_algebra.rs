@@ -15,6 +15,8 @@ pub enum SBoolOp {
     Or,
     And,
     Xor,
+    XorSaddle,
+    XorAbsDiff,
     AMinusB,
     BMinusA,
 }
@@ -65,13 +67,37 @@ fn subtract_covers(c1: u32, c2: u32) -> u8 {
 /// Combine two AA coverage values for XOR (linear formula).
 /// C++: `cover = a + b; if (cover > full) cover = full + full - cover`
 #[inline]
-fn xor_covers(c1: u32, c2: u32) -> u8 {
+fn xor_covers_linear(c1: u32, c2: u32) -> u8 {
     let cover = c1 + c2;
     if cover > COVER_FULL {
         (COVER_FULL + COVER_FULL - cover) as u8
     } else {
         cover as u8
     }
+}
+
+/// Combine two AA coverage values for XOR (saddle formula).
+/// C++: `1-((1-a+a*b)*(1-b+a*b))` in fixed-point.
+/// a XOR b: cover_mask - ((a' * b') >> cover_shift)
+/// where a' = (mask*mask - (a << shift) + k) >> shift
+///       b' = (mask*mask - (b << shift) + k) >> shift
+///       k  = a * b
+#[inline]
+fn xor_covers_saddle(c1: u32, c2: u32) -> u8 {
+    let k = c1 * c2;
+    if k == COVER_FULL * COVER_FULL {
+        return 0;
+    }
+    let a = (COVER_FULL * COVER_FULL - (c1 << COVER_SHIFT) + k) >> COVER_SHIFT;
+    let b = (COVER_FULL * COVER_FULL - (c2 << COVER_SHIFT) + k) >> COVER_SHIFT;
+    (COVER_FULL - ((a * b) >> COVER_SHIFT)) as u8
+}
+
+/// Combine two AA coverage values for XOR (absolute difference formula).
+/// C++: `abs(a - b)`
+#[inline]
+fn xor_covers_abs_diff(c1: u32, c2: u32) -> u8 {
+    (c1 as i32 - c2 as i32).unsigned_abs() as u8
 }
 
 // ============================================================================
@@ -152,7 +178,7 @@ pub fn sbool_combine_storages_aa(
 
     // Handle cases where one storage is empty
     match op {
-        SBoolOp::Or | SBoolOp::Xor => {
+        SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff => {
             // Union/XOR: one empty → result is the other
             if n1 == 0 {
                 copy_storage_aa(storage2, sl, result, min_x, max_x);
@@ -197,7 +223,7 @@ pub fn sbool_combine_storages_aa(
         if i1 >= n1 {
             // Only storage2 remaining
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::BMinusA => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::BMinusA => {
                     emit_scanline_from_storage(storage2, i2, sl, result, min_x, max_x);
                 }
                 _ => {} // And, AMinusB: nothing
@@ -208,7 +234,7 @@ pub fn sbool_combine_storages_aa(
         if i2 >= n2 {
             // Only storage1 remaining
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::AMinusB => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::AMinusB => {
                     emit_scanline_from_storage(storage1, i1, sl, result, min_x, max_x);
                 }
                 _ => {} // And, BMinusA: nothing
@@ -223,7 +249,7 @@ pub fn sbool_combine_storages_aa(
         if y1 < y2 {
             // Scanline only in storage1
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::AMinusB => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::AMinusB => {
                     emit_scanline_from_storage(storage1, i1, sl, result, min_x, max_x);
                 }
                 _ => {}
@@ -232,7 +258,7 @@ pub fn sbool_combine_storages_aa(
         } else if y2 < y1 {
             // Scanline only in storage2
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::BMinusA => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::BMinusA => {
                     emit_scanline_from_storage(storage2, i2, sl, result, min_x, max_x);
                 }
                 _ => {}
@@ -350,7 +376,25 @@ fn combine_scanlines_aa(
             SBoolOp::And => intersect_covers(c1, c2),
             SBoolOp::Xor => {
                 if c1 > 0 && c2 > 0 {
-                    xor_covers(c1, c2)
+                    xor_covers_linear(c1, c2)
+                } else if c1 > 0 {
+                    c1 as u8
+                } else {
+                    c2 as u8
+                }
+            }
+            SBoolOp::XorSaddle => {
+                if c1 > 0 && c2 > 0 {
+                    xor_covers_saddle(c1, c2)
+                } else if c1 > 0 {
+                    c1 as u8
+                } else {
+                    c2 as u8
+                }
+            }
+            SBoolOp::XorAbsDiff => {
+                if c1 > 0 && c2 > 0 {
+                    xor_covers_abs_diff(c1, c2)
                 } else if c1 > 0 {
                     c1 as u8
                 } else {
@@ -445,7 +489,7 @@ pub fn sbool_combine_storages_bin(
     };
 
     match op {
-        SBoolOp::Or | SBoolOp::Xor => {
+        SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff => {
             if n1 == 0 {
                 copy_storage_bin(storage2, sl, result, min_x, max_x);
                 return;
@@ -486,7 +530,7 @@ pub fn sbool_combine_storages_bin(
     while i1 < n1 || i2 < n2 {
         if i1 >= n1 {
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::BMinusA => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::BMinusA => {
                     emit_scanline_from_bin_storage(storage2, i2, sl, result, min_x, max_x);
                 }
                 _ => {}
@@ -496,7 +540,7 @@ pub fn sbool_combine_storages_bin(
         }
         if i2 >= n2 {
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::AMinusB => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::AMinusB => {
                     emit_scanline_from_bin_storage(storage1, i1, sl, result, min_x, max_x);
                 }
                 _ => {}
@@ -510,7 +554,7 @@ pub fn sbool_combine_storages_bin(
 
         if y1 < y2 {
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::AMinusB => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::AMinusB => {
                     emit_scanline_from_bin_storage(storage1, i1, sl, result, min_x, max_x);
                 }
                 _ => {}
@@ -518,7 +562,7 @@ pub fn sbool_combine_storages_bin(
             i1 += 1;
         } else if y2 < y1 {
             match op {
-                SBoolOp::Or | SBoolOp::Xor | SBoolOp::BMinusA => {
+                SBoolOp::Or | SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff | SBoolOp::BMinusA => {
                     emit_scanline_from_bin_storage(storage2, i2, sl, result, min_x, max_x);
                 }
                 _ => {}
@@ -625,7 +669,7 @@ fn combine_scanlines_bin(
         let result_on = match op {
             SBoolOp::Or => in1 || in2,
             SBoolOp::And => in1 && in2,
-            SBoolOp::Xor => in1 ^ in2,
+            SBoolOp::Xor | SBoolOp::XorSaddle | SBoolOp::XorAbsDiff => in1 ^ in2,
             SBoolOp::AMinusB => in1 && !in2,
             SBoolOp::BMinusA => in2 && !in1,
         };
@@ -886,10 +930,34 @@ mod tests {
     }
 
     #[test]
-    fn test_cover_math_xor() {
-        assert_eq!(xor_covers(0, 0), 0);
-        assert_eq!(xor_covers(255, 0), 255);
-        assert_eq!(xor_covers(0, 255), 255);
-        assert_eq!(xor_covers(255, 255), 0); // 510 > 255, 255+255-510 = 0
+    fn test_cover_math_xor_linear() {
+        assert_eq!(xor_covers_linear(0, 0), 0);
+        assert_eq!(xor_covers_linear(255, 0), 255);
+        assert_eq!(xor_covers_linear(0, 255), 255);
+        assert_eq!(xor_covers_linear(255, 255), 0); // 510 > 255, 255+255-510 = 0
+    }
+
+    #[test]
+    fn test_cover_math_xor_saddle() {
+        // Note: saddle formula has small fixed-point imprecision at (0,0)
+        // returning 3 instead of 0, which is expected and doesn't affect
+        // rendering since the combine functor is only called when both covers > 0.
+        assert!(xor_covers_saddle(0, 0) <= 5); // near-zero
+        assert_eq!(xor_covers_saddle(255, 255), 0);
+        // Saddle formula: 1-((1-a+ab)(1-b+ab)) in [0,255] space
+        // With partial coverage, saddle gives different result than linear
+        let saddle = xor_covers_saddle(128, 128);
+        assert!(saddle > 0 && saddle < 255);
+        // Verify saddle is different from linear for partial coverage
+        let linear = xor_covers_linear(128, 128);
+        assert_ne!(saddle, linear);
+    }
+
+    #[test]
+    fn test_cover_math_xor_abs_diff() {
+        assert_eq!(xor_covers_abs_diff(0, 0), 0);
+        assert_eq!(xor_covers_abs_diff(255, 255), 0);
+        assert_eq!(xor_covers_abs_diff(200, 100), 100);
+        assert_eq!(xor_covers_abs_diff(100, 200), 100);
     }
 }

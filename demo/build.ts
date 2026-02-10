@@ -54,6 +54,15 @@ console.log("  Copied styles/");
 cpSync(join(DEMO_DIR, "public", "dist"), join(DIST_DIR, "public", "dist"), { recursive: true });
 console.log("  Copied public/dist/ (JS bundles)");
 
+// Copy public/thumbnails/ (demo screenshot thumbnails)
+const thumbDir = join(DEMO_DIR, "public", "thumbnails");
+if (existsSync(thumbDir)) {
+  cpSync(thumbDir, join(DIST_DIR, "public", "thumbnails"), { recursive: true });
+  console.log("  Copied public/thumbnails/");
+} else {
+  console.warn("  WARNING: public/thumbnails/ not found");
+}
+
 // Copy public/pkg/ (WASM — must already exist from build:wasm step)
 const pkgDir = join(DEMO_DIR, "public", "pkg");
 if (existsSync(pkgDir)) {
