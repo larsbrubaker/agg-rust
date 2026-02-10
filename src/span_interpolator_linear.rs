@@ -22,6 +22,14 @@ pub trait Transformer {
     fn transform(&self, x: &mut f64, y: &mut f64);
 }
 
+/// Blanket impl: any reference to a Transformer is also a Transformer.
+/// This allows `ConvTransform<VS, &TransSinglePath>` etc. without cloning.
+impl<T: Transformer> Transformer for &T {
+    fn transform(&self, x: &mut f64, y: &mut f64) {
+        (*self).transform(x, y);
+    }
+}
+
 impl Transformer for TransAffine {
     fn transform(&self, x: &mut f64, y: &mut f64) {
         self.transform(x, y);

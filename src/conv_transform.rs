@@ -1,34 +1,38 @@
-//! Affine transform converter for vertex sources.
+//! Transform converter for vertex sources.
 //!
 //! Port of `agg_conv_transform.h` — wraps a `VertexSource` and applies
-//! a `TransAffine` transformation to each vertex coordinate.
+//! any `Transformer` (affine, polar, single-path, etc.) to each vertex coordinate.
+//!
+//! Copyright (c) 2025. BSD-3-Clause License.
 
 use crate::basics::{is_vertex, VertexSource};
+use crate::span_interpolator_linear::Transformer;
 use crate::trans_affine::TransAffine;
 
 // ============================================================================
 // ConvTransform
 // ============================================================================
 
-/// Applies an affine transform to each vertex from a source.
+/// Applies a coordinate transform to each vertex from a source.
 ///
 /// Port of C++ `conv_transform<VertexSource, Transformer>`.
+/// Generic over any `Transformer` implementation (defaults to `TransAffine`).
 /// Owns the source; use `ConvTransform<&mut PathStorage>` to borrow.
-pub struct ConvTransform<VS: VertexSource> {
+pub struct ConvTransform<VS: VertexSource, T: Transformer = TransAffine> {
     source: VS,
-    trans: TransAffine,
+    trans: T,
 }
 
-impl<VS: VertexSource> ConvTransform<VS> {
-    pub fn new(source: VS, trans: TransAffine) -> Self {
+impl<VS: VertexSource, T: Transformer> ConvTransform<VS, T> {
+    pub fn new(source: VS, trans: T) -> Self {
         Self { source, trans }
     }
 
-    pub fn set_transform(&mut self, trans: TransAffine) {
+    pub fn set_transform(&mut self, trans: T) {
         self.trans = trans;
     }
 
-    pub fn transform(&self) -> &TransAffine {
+    pub fn transform(&self) -> &T {
         &self.trans
     }
 
@@ -41,7 +45,7 @@ impl<VS: VertexSource> ConvTransform<VS> {
     }
 }
 
-impl<VS: VertexSource> VertexSource for ConvTransform<VS> {
+impl<VS: VertexSource, T: Transformer> VertexSource for ConvTransform<VS, T> {
     fn rewind(&mut self, path_id: u32) {
         self.source.rewind(path_id);
     }
@@ -146,5 +150,27 @@ mod tests {
         ct.vertex(&mut x, &mut y);
         assert!((x - 15.0).abs() < 1e-10);
         assert!((y - 15.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_generic_transformer_via_reference() {
+        // Test that ConvTransform works with &T where T: Transformer
+        use crate::trans_polar::TransPolar;
+
+        let mut path = PathStorage::new();
+        path.move_to(0.0, 100.0);
+
+        let polar = TransPolar::new();
+        // Use a reference to the transformer
+        let mut ct = ConvTransform::new(path, &polar);
+        ct.rewind(0);
+
+        let (mut x, mut y) = (0.0, 0.0);
+        let cmd = ct.vertex(&mut x, &mut y);
+        assert_eq!(cmd, PATH_CMD_MOVE_TO);
+        // TransPolar with defaults: x1 = (0+0)*1 = 0, y1 = (100+0)*1 + 0 = 100
+        // x = cos(0)*100 + 0 = 100, y = sin(0)*100 + 0 = 0
+        assert!((x - 100.0).abs() < 1e-10);
+        assert!((y - 0.0).abs() < 1e-10);
     }
 }

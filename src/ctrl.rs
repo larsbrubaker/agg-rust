@@ -50,6 +50,100 @@ pub trait Ctrl: VertexSource {
 }
 
 // ============================================================================
+// C-style sprintf format helper
+// ============================================================================
+
+/// Simple C-style sprintf emulation for format strings containing one `%` specifier.
+///
+/// Supports patterns like `%f`, `%.2f`, `%1.0f`, `%5.3f`, `%d`, `%3d`, etc.
+/// Only the first `%` specifier is replaced; the rest of the string is kept as-is.
+fn sprintf_format(fmt: &str, value: f64) -> String {
+    let mut result = String::with_capacity(fmt.len() + 16);
+    let bytes = fmt.as_bytes();
+    let mut i = 0;
+    let mut formatted = false;
+
+    while i < bytes.len() {
+        if !formatted && bytes[i] == b'%' {
+            // Parse the format specifier: %[width][.precision][type]
+            let start = i;
+            i += 1; // skip '%'
+            if i < bytes.len() && bytes[i] == b'%' {
+                // Literal %%
+                result.push('%');
+                i += 1;
+                continue;
+            }
+            // Skip flags (-, +, 0, space)
+            while i < bytes.len() && matches!(bytes[i], b'-' | b'+' | b'0' | b' ') {
+                i += 1;
+            }
+            // Skip width digits
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            // Parse optional .precision
+            let mut precision: Option<usize> = None;
+            if i < bytes.len() && bytes[i] == b'.' {
+                i += 1;
+                let prec_start = i;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+                if i > prec_start {
+                    precision = fmt[prec_start..i].parse().ok();
+                } else {
+                    precision = Some(0);
+                }
+            }
+            // Parse type character
+            if i < bytes.len() {
+                match bytes[i] {
+                    b'f' | b'F' => {
+                        let p = precision.unwrap_or(6);
+                        result.push_str(&format!("{:.prec$}", value, prec = p));
+                        i += 1;
+                        formatted = true;
+                    }
+                    b'd' | b'i' => {
+                        result.push_str(&format!("{}", value as i64));
+                        i += 1;
+                        formatted = true;
+                    }
+                    b'e' | b'E' => {
+                        let p = precision.unwrap_or(6);
+                        result.push_str(&format!("{:.prec$e}", value, prec = p));
+                        i += 1;
+                        formatted = true;
+                    }
+                    b'g' | b'G' => {
+                        let p = precision.unwrap_or(6);
+                        // Simple %g: use fixed if short enough, else scientific
+                        let s = format!("{:.prec$}", value, prec = p);
+                        let e = format!("{:.prec$e}", value, prec = p);
+                        result.push_str(if s.len() <= e.len() { &s } else { &e });
+                        i += 1;
+                        formatted = true;
+                    }
+                    _ => {
+                        // Unknown specifier — output literally
+                        result.push_str(&fmt[start..=i]);
+                        i += 1;
+                    }
+                }
+            } else {
+                // Trailing '%' — output literally
+                result.push('%');
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    result
+}
+
+// ============================================================================
 // SliderCtrl — horizontal value slider
 // ============================================================================
 
@@ -219,13 +313,9 @@ impl SliderCtrl {
         self.vertices.clear();
 
         let text = if self.label.contains('%') {
-            // Format the label with the value (matching C++ sprintf behavior)
-            self.label.replace("%3.2f", &format!("{:.2}", self.value()))
-                      .replace("%.3f", &format!("{:.3}", self.value()))
-                      .replace("%5.3f", &format!("{:.3}", self.value()))
-                      .replace("%5.4f", &format!("{:.4}", self.value()))
-                      .replace("%.2f", &format!("{:.2}", self.value()))
-                      .replace("%d", &format!("{}", self.value() as i32))
+            // Format the label with the value using C-style sprintf emulation.
+            // Parses %[width][.precision]f and %d patterns.
+            sprintf_format(&self.label, self.value())
         } else if self.label.is_empty() {
             return;
         } else {
@@ -1424,6 +1514,38 @@ mod tests {
     fn test_slider_ctrl_num_paths() {
         let s = SliderCtrl::new(5.0, 5.0, 300.0, 12.0);
         assert_eq!(s.num_paths(), 6);
+    }
+
+    #[test]
+    fn test_sprintf_format_various() {
+        // %1.0f — used by trans_polar demo "Some Value=%1.0f"
+        assert_eq!(sprintf_format("Some Value=%1.0f", 40.0), "Some Value=40");
+        assert_eq!(sprintf_format("Some Value=%1.0f", 32.0), "Some Value=32");
+
+        // %.3f — "Spiral=%.3f"
+        assert_eq!(sprintf_format("Spiral=%.3f", 0.0), "Spiral=0.000");
+        assert_eq!(sprintf_format("Spiral=%.3f", 0.05), "Spiral=0.050");
+
+        // %.2f — "N=%.2f"
+        assert_eq!(sprintf_format("N=%.2f", 4.0), "N=4.00");
+
+        // %3.2f — "Angle=%3.2f"
+        assert_eq!(sprintf_format("Angle=%3.2f", 45.0), "Angle=45.00");
+
+        // %.0f — "Num Points=%.0f"
+        assert_eq!(sprintf_format("Num Points=%.0f", 200.0), "Num Points=200");
+
+        // %d — integer format
+        assert_eq!(sprintf_format("Count=%d", 42.7), "Count=42");
+
+        // %4.3f — "radius=%4.3f"
+        assert_eq!(sprintf_format("radius=%4.3f", 1.5), "radius=1.500");
+
+        // No format specifier
+        assert_eq!(sprintf_format("Hello", 42.0), "Hello");
+
+        // %f without precision (default 6 digits)
+        assert_eq!(sprintf_format("Val=%f", 3.14), "Val=3.140000");
     }
 
     #[test]

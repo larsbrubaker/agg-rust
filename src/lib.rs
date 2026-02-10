@@ -145,3 +145,9 @@ pub mod rasterizer_compound_aa;
 pub mod embedded_raster_fonts;
 pub mod glyph_raster_bin;
 pub mod renderer_raster_text;
+
+// Phase 16: TrueType Font Engine (optional, requires `font` feature)
+#[cfg(feature = "font")]
+pub mod font_engine;
+#[cfg(feature = "font")]
+pub mod font_cache;

@@ -13,8 +13,14 @@ exclude = ["demo/", "docs/", "tests/", ".github/", ".claude/", "benches/", "scri
 [workspace]
 members = [".", "demo/wasm", "tools/pixel-compare"]
 
+[features]
+default = []
+font = ["ttf-parser"]
+
 [dependencies]
-# No external dependencies for core library (matching AGG's zero-dependency philosophy)
+# Core library has no required external dependencies (matching AGG's zero-dependency philosophy).
+# Optional: ttf-parser provides TrueType font support (feature-gated).
+ttf-parser = { version = "0.25", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"

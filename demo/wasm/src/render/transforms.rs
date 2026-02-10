@@ -2,16 +2,17 @@
 //! multi_clip, simple_blur, blur, trans_curve1, trans_curve2, lion_lens, distortions,
 //! gouraud_mesh.
 
-use agg_rust::basics::{is_stop, is_vertex, VertexSource};
+use agg_rust::basics::{is_end_poly, is_move_to, is_stop, is_vertex, VertexSource};
 use agg_rust::bspline::Bspline;
 use agg_rust::color::Rgba8;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_segmentator::ConvSegmentator;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
-use agg_rust::ctrl::{render_ctrl, SliderCtrl, RboxCtrl, GammaCtrl, Ctrl};
+use agg_rust::ctrl::{render_ctrl, SliderCtrl, RboxCtrl, GammaCtrl, CboxCtrl, Ctrl};
 use agg_rust::ellipse::Ellipse;
 use agg_rust::embedded_raster_fonts;
+use agg_rust::font_cache::FontCacheManager;
 use agg_rust::glyph_raster_bin::GlyphRasterBin;
 use agg_rust::gsv_text::GsvText;
 use agg_rust::path_storage::PathStorage;
@@ -32,6 +33,10 @@ use agg_rust::trans_polar::TransPolar;
 use agg_rust::trans_single_path::TransSinglePath;
 use agg_rust::trans_warp_magnifier::TransWarpMagnifier;
 use super::setup_renderer;
+
+/// Embedded Liberation Serif Italic font (SIL OFL license).
+/// Metrically compatible with Times New Roman Italic (timesi.ttf) used by the C++ demo.
+static LIBERATION_SERIF_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSerif-Italic.ttf");
 
 // ============================================================================
 // Raster Text
@@ -271,32 +276,30 @@ pub fn trans_polar_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     trans.translation_y = h / 2.0 + 30.0;
     trans.spiral = -slider_spiral.value();
 
-    // Transform the first slider through polar coordinates
-    // Collect colors first, then render each path by extracting+transforming vertices
+    // Transform the first slider through polar coordinates.
+    // Matches C++ transformed_control + conv_segmentator + conv_transform pipeline:
+    // preserves all vertex commands (move_to, line_to, close_polygon) through transform.
     let num_paths = slider1.num_paths();
     let colors: Vec<Rgba8> = (0..num_paths).map(|i| slider1.color(i)).collect();
     for i in 0..num_paths {
-        // Extract vertices through segmentator
         let mut segm = ConvSegmentator::new(&mut slider1);
-        segm.set_approximation_scale(4.0);
         segm.rewind(i);
         let (mut x, mut y) = (0.0, 0.0);
         let mut path = PathStorage::new();
-        let mut first = true;
         loop {
             let cmd = segm.vertex(&mut x, &mut y);
             if is_stop(cmd) {
                 break;
             }
             if is_vertex(cmd) {
-                // Apply polar transform
                 trans.transform(&mut x, &mut y);
-                if first {
+                if is_move_to(cmd) {
                     path.move_to(x, y);
-                    first = false;
                 } else {
                     path.line_to(x, y);
                 }
+            } else if is_end_poly(cmd) {
+                path.close_polygon(0);
             }
         }
         ras.reset();
@@ -605,25 +608,35 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Trans Curve 1
 // ============================================================================
 
-/// Text along a curved path using trans_single_path — matching C++ trans_curve1_test.cpp.
+/// Text along a curved path using TrueType font outlines and trans_single_path.
+/// Matching C++ trans_curve1_ft.cpp.
 ///
 /// params[0] = num_points (10-400, default 200)
 /// params[1..12] = control points x,y pairs (6 points)
+/// params[13] = preserve_x_scale (0 or 1, default 1)
+/// params[14] = fixed_length (0 or 1, default 1)
+/// params[15] = close (0 or 1, default 0)
+/// params[16] = animate (0 or 1, default 0)
 pub fn trans_curve1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let num_points = params.first().copied().unwrap_or(200.0).clamp(10.0, 400.0);
 
-    // Default control points for the spline curve
+    // Default control points matching C++ on_init():
+    // (50,50), (150+20,150-20), (250-20,250+20), (350+20,350-20), (450-20,450+20), (550,550)
     let default_pts = [
-        100.0, 400.0,
-        200.0, 200.0,
-        300.0, 500.0,
-        400.0, 100.0,
-        500.0, 350.0,
-        550.0, 300.0,
+        50.0, 50.0,
+        170.0, 130.0,
+        230.0, 270.0,
+        370.0, 330.0,
+        430.0, 470.0,
+        550.0, 550.0,
     ];
     let pts: Vec<f64> = (0..12)
         .map(|i| params.get(i + 1).copied().unwrap_or(default_pts[i]))
         .collect();
+    let preserve_x_scale = params.get(13).copied().unwrap_or(1.0) > 0.5;
+    let fixed_length = params.get(14).copied().unwrap_or(1.0) > 0.5;
+    let close_path = params.get(15).copied().unwrap_or(0.0) > 0.5;
+    let animate = params.get(16).copied().unwrap_or(0.0) > 0.5;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -662,8 +675,12 @@ pub fn trans_curve1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         t += step;
     }
     tcurve.finalize_path();
+    tcurve.set_preserve_x_scale(preserve_x_scale);
+    if fixed_length {
+        tcurve.set_base_length(1120.0);
+    }
 
-    // Render the spline curve itself
+    // Render the spline curve itself (matching C++ stroke on bspline)
     let mut curve_path = PathStorage::new();
     first = true;
     t = 0.0;
@@ -684,56 +701,140 @@ pub fn trans_curve1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ras.add_path(&mut curve_stroke, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(170, 50, 20, 100));
 
-    // Render text along the curve using GsvText
-    let text_str = "AGG - Anti-Grain Geometry. A high quality rendering engine for C++ / Rust";
-    let mut text = GsvText::new();
-    text.size(20.0, 0.0);
-    text.start_point(0.0, 0.0);
-    text.text(text_str);
+    // ===== Render TrueType text along the curve =====
+    // Matching C++ trans_curve1_ft.cpp font pipeline:
+    //   font_engine → font_cache_manager → path_adaptor → conv_curve →
+    //   conv_segmentator → conv_transform(trans_single_path) → rasterizer
+    let text_str = "Anti-Grain Geometry is designed as a set of loosely coupled \
+        algorithms and class templates united with a common idea, \
+        so that all the components can be easily combined. Also, \
+        the template based design allows you to replace any part of \
+        the library without the necessity to modify a single byte in \
+        the existing code. ";
 
-    // Segmentate and transform through the single path
-    let mut segm = ConvSegmentator::new(&mut text);
-    segm.set_approximation_scale(3.0);
-    segm.rewind(0);
+    let mut fman = FontCacheManager::from_data(LIBERATION_SERIF_ITALIC.to_vec())
+        .expect("Failed to load embedded font");
+    fman.engine_mut().set_height(40.0);
+    fman.engine_mut().set_hinting(false);
 
-    let mut transformed_path = PathStorage::new();
-    let (mut x, mut y) = (0.0, 0.0);
-    loop {
-        let cmd = segm.vertex(&mut x, &mut y);
-        if is_stop(cmd) { break; }
-        if is_vertex(cmd) {
-            tcurve.transform(&mut x, &mut y);
-            if (cmd & 0x07) == 1 { // move_to
-                transformed_path.move_to(x, y);
-            } else {
-                transformed_path.line_to(x, y);
-            }
-        } else {
-            // close_polygon or end_poly
-            transformed_path.close_polygon(0);
+    // Matching C++ on_draw() text loop exactly:
+    //   while(*p) {
+    //     glyph = m_fman.glyph(*p);
+    //     if(glyph) {
+    //       if(x > tcurve.total_length()) break;
+    //       m_fman.add_kerning(&x, &y);
+    //       m_fman.init_embedded_adaptors(glyph, x, y);
+    //       if(glyph->data_type == glyph_data_outline) { rasterize }
+    //       x += glyph->advance_x; y += glyph->advance_y;
+    //     }
+    //   }
+    let mut x = 0.0_f64;
+    let mut y = 3.0_f64;
+
+    for ch in text_str.chars() {
+        let char_code = ch as u32;
+
+        // Get glyph (returns Some even for spaces — they have advance but no outline)
+        let glyph_info = match fman.glyph(char_code) {
+            Some(g) => (g.advance_x, g.advance_y, g.data_type),
+            None => continue,
+        };
+        let (adv_x, adv_y, data_type) = glyph_info;
+
+        // Check if we've gone past the end of the curve
+        if x > tcurve.total_length() {
+            break;
         }
+
+        // Apply kerning
+        fman.add_kerning(char_code, &mut x, &mut y);
+
+        // Initialize the path adaptor with the glyph at position (x, y)
+        fman.init_embedded_adaptors(char_code, x, y);
+
+        // Only rasterize glyphs that have outlines (skip spaces, tabs, etc.)
+        if data_type == agg_rust::font_engine::GlyphDataType::Outline {
+            let adaptor = fman.path_adaptor_mut();
+            let mut fcurves = ConvCurve::new(adaptor);
+            fcurves.set_approximation_scale(2.0);
+            let mut fsegm = ConvSegmentator::new(&mut fcurves);
+            fsegm.set_approximation_scale(3.0);
+            let mut ftrans = ConvTransform::new(&mut fsegm, &tcurve);
+
+            ras.reset();
+            ras.add_path(&mut ftrans, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+        }
+
+        // Always advance pen position (even for spaces)
+        x += adv_x;
+        y += adv_y;
     }
 
-    ras.reset();
-    ras.add_path(&mut transformed_path, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    // Render the interactive polygon tool: connecting lines + control point circles
+    // Matching C++ r.color(agg::rgba(0, 0.3, 0.5, 0.3))
+    let poly_color = Rgba8::new(0, 77, 128, 77);
 
-    // Render control points
+    // Draw connecting line segments between control points
+    {
+        let mut poly_path = PathStorage::new();
+        for i in 0..n_pts {
+            let px = pts[i * 2];
+            let py = pts[i * 2 + 1];
+            if i == 0 {
+                poly_path.move_to(px, py);
+            } else {
+                poly_path.line_to(px, py);
+            }
+        }
+        if close_path {
+            poly_path.close_polygon(0);
+        }
+        let mut poly_stroke = ConvStroke::new(&mut poly_path);
+        poly_stroke.set_width(1.0);
+        ras.reset();
+        ras.add_path(&mut poly_stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &poly_color);
+    }
+
+    // Draw control point circles
     for i in 0..n_pts {
         let cx = pts[i * 2];
         let cy = pts[i * 2 + 1];
         let mut ell = Ellipse::new(cx, cy, 5.0, 5.0, 16, false);
         ras.reset();
         ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 77, 128, 200));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &poly_color);
     }
 
-    // Slider
-    let mut s_pts = SliderCtrl::new(5.0, 5.0, width as f64 - 5.0, 12.0);
+    // Controls matching C++ layout:
+    //   m_num_points      (5.0, 5.0, 340.0, 12.0)
+    //   m_close           (350, 5.0,  "Close")
+    //   m_preserve_x_scale(460, 5.0,  "Preserve X scale")
+    //   m_fixed_len       (350, 25.0, "Fixed Length")
+    //   m_animate         (460, 25.0, "Animate")
+
+    let mut s_pts = SliderCtrl::new(5.0, 5.0, 340.0, 12.0);
     s_pts.range(10.0, 400.0);
-    s_pts.label("Num Points=%.0f");
+    s_pts.label("Number of intermediate Points = %.3f");
     s_pts.set_value(num_points);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_pts);
+
+    let mut cb_close = CboxCtrl::new(350.0, 5.0, "Close");
+    cb_close.set_status(close_path);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_close);
+
+    let mut cb_preserve = CboxCtrl::new(460.0, 5.0, "Preserve X scale");
+    cb_preserve.set_status(preserve_x_scale);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_preserve);
+
+    let mut cb_fixed = CboxCtrl::new(350.0, 25.0, "Fixed Length");
+    cb_fixed.set_status(fixed_length);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_fixed);
+
+    let mut cb_animate = CboxCtrl::new(460.0, 25.0, "Animate");
+    cb_animate.set_status(animate);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_animate);
 
     buf
 }
