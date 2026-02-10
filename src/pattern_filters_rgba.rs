@@ -3,6 +3,8 @@
 //! Port of `agg_pattern_filters_rgba.h`.
 //! Provides nearest-neighbor and bilinear pattern filter implementations
 //! for use with line pattern rendering.
+//!
+//! Copyright 2025.
 
 use crate::color::Rgba8;
 
@@ -12,15 +14,19 @@ pub const LINE_SUBPIXEL_SCALE: i32 = 1 << LINE_SUBPIXEL_SHIFT;
 pub const LINE_SUBPIXEL_MASK: i32 = LINE_SUBPIXEL_SCALE - 1;
 
 /// Trait for pattern pixel access.
+///
+/// The buffer is a 2D grid stored as `&[Vec<Rgba8>]` where each inner Vec
+/// is one row of pixels. This maps to the C++ `row_ptr_cache` pattern.
 pub trait PatternFilter {
     /// Number of extra pixels needed on each side of the pattern.
     fn dilation() -> u32;
 
     /// Get pixel at integer coordinates.
-    fn pixel_low_res(buf: &[&[Rgba8]], x: i32, y: i32) -> Rgba8;
+    fn pixel_low_res(buf: &[Vec<Rgba8>], x: i32, y: i32) -> Rgba8;
 
     /// Get pixel at subpixel coordinates (shifted by LINE_SUBPIXEL_SHIFT).
-    fn pixel_high_res(buf: &[&[Rgba8]], x: i32, y: i32) -> Rgba8;
+    /// Writes the result into `p`.
+    fn pixel_high_res(buf: &[Vec<Rgba8>], p: &mut Rgba8, x: i32, y: i32);
 }
 
 /// Nearest-neighbor pattern filter.
@@ -35,17 +41,13 @@ impl PatternFilter for PatternFilterNn {
     }
 
     #[inline]
-    fn pixel_low_res(buf: &[&[Rgba8]], x: i32, y: i32) -> Rgba8 {
+    fn pixel_low_res(buf: &[Vec<Rgba8>], x: i32, y: i32) -> Rgba8 {
         buf[y as usize][x as usize]
     }
 
     #[inline]
-    fn pixel_high_res(buf: &[&[Rgba8]], x: i32, y: i32) -> Rgba8 {
-        Self::pixel_low_res(
-            buf,
-            x >> LINE_SUBPIXEL_SHIFT,
-            y >> LINE_SUBPIXEL_SHIFT,
-        )
+    fn pixel_high_res(buf: &[Vec<Rgba8>], p: &mut Rgba8, x: i32, y: i32) {
+        *p = buf[(y >> LINE_SUBPIXEL_SHIFT) as usize][(x >> LINE_SUBPIXEL_SHIFT) as usize];
     }
 }
 
@@ -61,12 +63,12 @@ impl PatternFilter for PatternFilterBilinearRgba {
     }
 
     #[inline]
-    fn pixel_low_res(buf: &[&[Rgba8]], x: i32, y: i32) -> Rgba8 {
+    fn pixel_low_res(buf: &[Vec<Rgba8>], x: i32, y: i32) -> Rgba8 {
         buf[y as usize][x as usize]
     }
 
     #[inline]
-    fn pixel_high_res(buf: &[&[Rgba8]], x: i32, y: i32) -> Rgba8 {
+    fn pixel_high_res(buf: &[Vec<Rgba8>], p: &mut Rgba8, x: i32, y: i32) {
         let x_lr = x >> LINE_SUBPIXEL_SHIFT;
         let y_lr = y >> LINE_SUBPIXEL_SHIFT;
 
@@ -107,7 +109,7 @@ impl PatternFilter for PatternFilterBilinearRgba {
             + p11.a as i32 * x_hr * y_hr)
             >> (LINE_SUBPIXEL_SHIFT * 2);
 
-        Rgba8::new(r as u32, g as u32, b as u32, a as u32)
+        *p = Rgba8::new(r as u32, g as u32, b as u32, a as u32);
     }
 }
 
@@ -123,7 +125,7 @@ mod tests {
     fn test_nn_low_res() {
         let row0 = make_row(&[Rgba8::new(255, 0, 0, 255), Rgba8::new(0, 255, 0, 255)]);
         let row1 = make_row(&[Rgba8::new(0, 0, 255, 255), Rgba8::new(255, 255, 0, 255)]);
-        let buf: Vec<&[Rgba8]> = vec![&row0, &row1];
+        let buf: Vec<Vec<Rgba8>> = vec![row0, row1];
 
         let p = PatternFilterNn::pixel_low_res(&buf, 0, 0);
         assert_eq!(p.r, 255);
@@ -141,14 +143,15 @@ mod tests {
     fn test_nn_high_res() {
         let row0 = make_row(&[Rgba8::new(255, 0, 0, 255), Rgba8::new(0, 255, 0, 255)]);
         let row1 = make_row(&[Rgba8::new(0, 0, 255, 255), Rgba8::new(255, 255, 0, 255)]);
-        let buf: Vec<&[Rgba8]> = vec![&row0, &row1];
+        let buf: Vec<Vec<Rgba8>> = vec![row0, row1];
 
         // High-res coord (128, 0) → low-res (0, 0) since 128 >> 8 = 0
-        let p = PatternFilterNn::pixel_high_res(&buf, 128, 0);
+        let mut p = Rgba8::new(0, 0, 0, 0);
+        PatternFilterNn::pixel_high_res(&buf, &mut p, 128, 0);
         assert_eq!(p.r, 255);
 
         // High-res coord (256, 0) → low-res (1, 0)
-        let p = PatternFilterNn::pixel_high_res(&buf, 256, 0);
+        PatternFilterNn::pixel_high_res(&buf, &mut p, 256, 0);
         assert_eq!(p.r, 0);
         assert_eq!(p.g, 255);
     }
@@ -170,10 +173,11 @@ mod tests {
             Rgba8::new(0, 0, 0, 255),
             Rgba8::new(0, 0, 0, 255),
         ]);
-        let buf: Vec<&[Rgba8]> = vec![&row0, &row1, &row2];
+        let buf: Vec<Vec<Rgba8>> = vec![row0, row1, row2];
 
         // At exact integer coord (0,0)*256 → should return (255,0,0,255)
-        let p = PatternFilterBilinearRgba::pixel_high_res(&buf, 0, 0);
+        let mut p = Rgba8::new(0, 0, 0, 0);
+        PatternFilterBilinearRgba::pixel_high_res(&buf, &mut p, 0, 0);
         assert_eq!(p.r, 255);
         assert_eq!(p.g, 0);
         assert_eq!(p.b, 0);
@@ -186,10 +190,11 @@ mod tests {
         let black = Rgba8::new(0, 0, 0, 255);
         let row0 = make_row(&[white, black]);
         let row1 = make_row(&[black, black]);
-        let buf: Vec<&[Rgba8]> = vec![&row0, &row1];
+        let buf: Vec<Vec<Rgba8>> = vec![row0, row1];
 
         // At midpoint (128, 128) → should blend all 4 corners
-        let p = PatternFilterBilinearRgba::pixel_high_res(&buf, 128, 128);
+        let mut p = Rgba8::new(0, 0, 0, 0);
+        PatternFilterBilinearRgba::pixel_high_res(&buf, &mut p, 128, 128);
         // weight=(256-128)*(256-128)*255 / 65536 ≈ 64 for top-left only
         assert!(p.r > 50 && p.r < 80, "r={}", p.r);
     }

@@ -4,6 +4,7 @@
 //! instead of FreeType. Provides glyph outline extraction and metrics.
 //!
 //! Copyright (c) 2025. BSD-3-Clause License.
+//! Updated 2025 for LCD subpixel rendering support (scale_x).
 
 use crate::basics::{
     PATH_CMD_CURVE3, PATH_CMD_CURVE4, PATH_CMD_END_POLY, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO,
@@ -50,6 +51,12 @@ pub struct FontEngine {
     face_index: u32,
     /// Desired em-height in pixels.
     height: f64,
+    /// Horizontal scale factor applied to glyph outlines and advance values.
+    ///
+    /// Used for LCD subpixel rendering: set to `subpixel_scale` (3 for LCD, 1 for
+    /// grayscale) to stretch glyph outlines horizontally. Matches C++
+    /// `font_engine_win32_tt_base::scale_x()`.
+    scale_x: f64,
     /// Whether to flip Y coordinates (for screen coordinate systems where y=0 is top).
     flip_y: bool,
     /// Whether hinting is enabled (informational; ttf-parser doesn't apply hinting).
@@ -70,6 +77,7 @@ impl FontEngine {
             face_data: data,
             face_index,
             height: 12.0,
+            scale_x: 1.0,
             flip_y: false,
             hinting: false,
         })
@@ -109,6 +117,20 @@ impl FontEngine {
         self.hinting
     }
 
+    /// Set horizontal scale factor for glyph outlines.
+    ///
+    /// This scales X coordinates and advance_x of all glyphs. Used for LCD
+    /// subpixel rendering where glyphs are stretched 3x horizontally.
+    /// Matches C++ `font_engine_win32_tt_base::scale_x()`.
+    pub fn set_scale_x(&mut self, s: f64) {
+        self.scale_x = s;
+    }
+
+    /// Get the current horizontal scale factor.
+    pub fn scale_x(&self) -> f64 {
+        self.scale_x
+    }
+
     /// Get the ascender in scaled coordinates.
     pub fn ascender(&self) -> f64 {
         let face = self.face();
@@ -143,13 +165,14 @@ impl FontEngine {
         let scale = self.scale(&face);
 
         // Get horizontal advance (always available even for space characters)
+        // Apply scale_x for LCD subpixel rendering
         let advance_x = face
             .glyph_hor_advance(glyph_id)
-            .map(|a| a as f64 * scale)
+            .map(|a| a as f64 * scale * self.scale_x)
             .unwrap_or(0.0);
 
         // Try to extract outline — may be None for space, tab, etc.
-        let mut builder = OutlineCollector::new(scale, self.flip_y);
+        let mut builder = OutlineCollector::new(scale, self.flip_y, self.scale_x);
         let bbox_opt = face.outline_glyph(glyph_id, &mut builder);
 
         let (data_type, bounds) = if let Some(bbox) = bbox_opt {
@@ -157,9 +180,9 @@ impl FontEngine {
             (
                 GlyphDataType::Outline,
                 (
-                    (bbox.x_min as f64 * scale) as i32,
+                    (bbox.x_min as f64 * scale * self.scale_x) as i32,
                     (bbox.y_min as f64 * scale * y_sign) as i32,
-                    (bbox.x_max as f64 * scale) as i32,
+                    (bbox.x_max as f64 * scale * self.scale_x) as i32,
                     (bbox.y_max as f64 * scale * y_sign) as i32,
                 ),
             )
@@ -223,21 +246,23 @@ impl FontEngine {
 struct OutlineCollector {
     vertices: Vec<(f64, f64, u32)>,
     scale: f64,
+    scale_x: f64,
     flip_y: bool,
 }
 
 impl OutlineCollector {
-    fn new(scale: f64, flip_y: bool) -> Self {
+    fn new(scale: f64, flip_y: bool, scale_x: f64) -> Self {
         Self {
             vertices: Vec::with_capacity(64),
             scale,
+            scale_x,
             flip_y,
         }
     }
 
     #[inline]
     fn sx(&self, v: f32) -> f64 {
-        v as f64 * self.scale
+        v as f64 * self.scale * self.scale_x
     }
 
     #[inline]
@@ -293,23 +318,30 @@ mod tests {
 
     #[test]
     fn test_outline_collector_scale() {
-        let c = OutlineCollector::new(2.0, false);
+        let c = OutlineCollector::new(2.0, false, 1.0);
         assert!((c.sx(10.0) - 20.0).abs() < 1e-10);
         assert!((c.sy(10.0) - 20.0).abs() < 1e-10);
     }
 
     #[test]
+    fn test_outline_collector_scale_x() {
+        let c = OutlineCollector::new(2.0, false, 3.0);
+        assert!((c.sx(10.0) - 60.0).abs() < 1e-10); // 10 * 2.0 * 3.0
+        assert!((c.sy(10.0) - 20.0).abs() < 1e-10); // scale_x doesn't affect Y
+    }
+
+    #[test]
     fn test_outline_collector_flip_y() {
-        let c = OutlineCollector::new(1.0, true);
+        let c = OutlineCollector::new(1.0, true, 1.0);
         assert!((c.sy(10.0) - (-10.0)).abs() < 1e-10);
 
-        let c2 = OutlineCollector::new(1.0, false);
+        let c2 = OutlineCollector::new(1.0, false, 1.0);
         assert!((c2.sy(10.0) - 10.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_outline_collector_commands() {
-        let mut c = OutlineCollector::new(1.0, false);
+        let mut c = OutlineCollector::new(1.0, false, 1.0);
         ttf_parser::OutlineBuilder::move_to(&mut c, 10.0, 20.0);
         ttf_parser::OutlineBuilder::line_to(&mut c, 30.0, 40.0);
         ttf_parser::OutlineBuilder::quad_to(&mut c, 50.0, 60.0, 70.0, 80.0);

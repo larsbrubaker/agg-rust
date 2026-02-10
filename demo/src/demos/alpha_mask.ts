@@ -59,6 +59,7 @@ export function init(container: HTMLElement) {
     draw();
   });
   canvas.addEventListener('pointerup', () => { dragging = false; });
+  canvas.addEventListener('pointercancel', () => { dragging = false; });
 
   const canvasControls: CanvasControl[] = [];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);

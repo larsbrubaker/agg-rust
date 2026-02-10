@@ -343,6 +343,52 @@ impl<PF: PixelFormat> RendererBase<PF> {
             cover,
         );
     }
+
+    /// Blend a vertical span with per-pixel colors (clipped).
+    ///
+    /// If `covers` is non-empty, each pixel uses its corresponding coverage.
+    /// If `covers` is empty, all pixels use the uniform `cover` value.
+    ///
+    /// Port of C++ `renderer_base::blend_color_vspan`.
+    pub fn blend_color_vspan(
+        &mut self,
+        x: i32,
+        mut y: i32,
+        mut len: i32,
+        colors: &[PF::ColorType],
+        covers: &[CoverType],
+        cover: CoverType,
+    ) {
+        if x > self.xmax() || x < self.xmin() {
+            return;
+        }
+
+        let mut colors_offset = 0usize;
+        let mut covers_offset = 0usize;
+        if y < self.ymin() {
+            let d = (self.ymin() - y) as usize;
+            len -= d as i32;
+            if len <= 0 {
+                return;
+            }
+            if !covers.is_empty() {
+                covers_offset += d;
+            }
+            colors_offset += d;
+            y = self.ymin();
+        }
+        if y + len > self.ymax() + 1 {
+            len = self.ymax() - y + 1;
+            if len <= 0 {
+                return;
+            }
+        }
+        // Iterate vertically, blending one pixel per row.
+        for i in 0..len as usize {
+            let c = if covers.is_empty() { cover } else { covers[covers_offset + i] };
+            self.ren.blend_pixel(x, y + i as i32, &colors[colors_offset + i], c);
+        }
+    }
 }
 
 // ============================================================================

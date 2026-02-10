@@ -49,15 +49,19 @@ export function init(container: HTMLElement) {
 
   // Mouse drag for rotation/scale
   let dragging = false;
-  canvas.addEventListener('pointerdown', (e) => {
+  const onDown = (e: PointerEvent) => {
     dragging = true;
     canvas.setPointerCapture(e.pointerId);
     updateTransform(e);
-  });
-  canvas.addEventListener('pointermove', (e) => {
+  };
+  const onMove = (e: PointerEvent) => {
     if (dragging) updateTransform(e);
-  });
-  canvas.addEventListener('pointerup', () => { dragging = false; });
+  };
+  const onUp = () => { dragging = false; };
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
 
   function updateTransform(e: MouseEvent) {
     const rect = canvas.getBoundingClientRect();

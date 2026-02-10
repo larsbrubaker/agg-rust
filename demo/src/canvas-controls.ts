@@ -148,10 +148,12 @@ export function setupCanvasControls(
   canvas.addEventListener('pointerdown', onPointerDown, true);
   canvas.addEventListener('pointermove', onPointerMove, true);
   canvas.addEventListener('pointerup', onPointerUp, true);
+  canvas.addEventListener('pointercancel', onPointerUp, true);
 
   return () => {
     canvas.removeEventListener('pointerdown', onPointerDown, true);
     canvas.removeEventListener('pointermove', onPointerMove, true);
     canvas.removeEventListener('pointerup', onPointerUp, true);
+    canvas.removeEventListener('pointercancel', onPointerUp, true);
   };
 }

@@ -45,6 +45,7 @@ export function init(container: HTMLElement) {
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
 
   // Scenario radio buttons
   const scenarioDiv = document.createElement('div');
@@ -109,6 +110,7 @@ export function init(container: HTMLElement) {
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointercancel', onPointerUp);
     cleanupCC();
   };
 }

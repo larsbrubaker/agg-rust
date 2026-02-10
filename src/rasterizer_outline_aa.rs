@@ -8,8 +8,7 @@
 
 use crate::basics::{is_close, is_end_poly, is_move_to, is_stop, VertexSource};
 use crate::line_aa_basics::*;
-use crate::pixfmt_rgba::PixelFormat;
-use crate::renderer_outline_aa::RendererOutlineAa;
+use crate::renderer_outline_aa::OutlineAaRenderer;
 
 /// Join type for outline AA lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,15 +216,13 @@ impl RasterizerOutlineAa {
     }
 
     /// Process a single vertex command. Port of C++ `add_vertex`.
-    fn add_vertex<PF: PixelFormat>(
+    fn add_vertex<R: OutlineAaRenderer>(
         &mut self,
         x: f64,
         y: f64,
         cmd: u32,
-        ren: &mut RendererOutlineAa<PF>,
-    ) where
-        PF::ColorType: Default + Clone,
-    {
+        ren: &mut R,
+    ) {
         if is_move_to(cmd) {
             self.render(ren, false);
             self.move_to_d(x, y);
@@ -240,14 +237,12 @@ impl RasterizerOutlineAa {
     }
 
     /// Add a path from a vertex source and render it.
-    pub fn add_path<VS: VertexSource, PF: PixelFormat>(
+    pub fn add_path<VS: VertexSource, R: OutlineAaRenderer>(
         &mut self,
         vs: &mut VS,
         path_id: u32,
-        ren: &mut RendererOutlineAa<PF>,
-    ) where
-        PF::ColorType: Default + Clone,
-    {
+        ren: &mut R,
+    ) {
         vs.rewind(path_id);
         let (mut x, mut y) = (0.0, 0.0);
         loop {
@@ -265,15 +260,13 @@ impl RasterizerOutlineAa {
     // draw() — Port of C++ draw(draw_vars&, unsigned start, unsigned end)
     // ========================================================================
 
-    fn draw<PF: PixelFormat>(
+    fn draw<R: OutlineAaRenderer>(
         &self,
         dv: &mut DrawVars,
         start: usize,
         end: usize,
-        ren: &mut RendererOutlineAa<PF>,
-    ) where
-        PF::ColorType: Default + Clone,
-    {
+        ren: &mut R,
+    ) {
         for _i in start..end {
             if self.line_join == OutlineAaJoin::Round {
                 dv.xb1 = dv.curr.x1 + (dv.curr.y2 - dv.curr.y1);
@@ -354,14 +347,21 @@ impl RasterizerOutlineAa {
     // render() — Port of C++ render(bool close_polygon)
     // ========================================================================
 
-    pub fn render<PF: PixelFormat>(
+    pub fn render<R: OutlineAaRenderer>(
         &mut self,
-        ren: &mut RendererOutlineAa<PF>,
+        ren: &mut R,
         close_polygon: bool,
-    ) where
-        PF::ColorType: Default + Clone,
-    {
+    ) {
         self.src_vertices.close(close_polygon);
+
+        // Match C++ behavior: when the renderer only supports accurate joins
+        // (e.g. image pattern renderer), override the join type to MiterAccurate.
+        // In C++, this is done in the constructor; here we do it per-call since
+        // the Rust rasterizer is not parameterized by renderer type.
+        let saved_join = self.line_join;
+        if ren.accurate_join_only() {
+            self.line_join = OutlineAaJoin::MiterAccurate;
+        }
 
         if close_polygon {
             // ------- Closed polygon -------
@@ -653,6 +653,7 @@ impl RasterizerOutlineAa {
             }
         }
         self.src_vertices.remove_all();
+        self.line_join = saved_join;
     }
 }
 
@@ -681,7 +682,7 @@ mod tests {
     use crate::color::Rgba8;
     use crate::pixfmt_rgba::PixfmtRgba32;
     use crate::renderer_base::RendererBase;
-    use crate::renderer_outline_aa::LineProfileAa;
+    use crate::renderer_outline_aa::{LineProfileAa, RendererOutlineAa};
     use crate::rendering_buffer::RowAccessor;
 
     fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {

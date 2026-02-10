@@ -60,6 +60,7 @@ pub mod scanline_u;
 
 // Phase 3C: Pixel Formats & Renderers
 pub mod pixfmt_gray;
+pub mod pixfmt_lcd;
 pub mod pixfmt_rgb;
 pub mod pixfmt_rgba;
 pub mod renderer_base;
@@ -136,6 +137,7 @@ pub mod scanline_storage_bin;
 pub mod line_aa_basics;
 pub mod rasterizer_outline_aa;
 pub mod renderer_outline_aa;
+pub mod renderer_outline_image;
 
 // Phase 14: Compositing & Compound Rasterizer
 pub mod comp_op;

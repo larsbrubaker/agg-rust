@@ -653,10 +653,45 @@ impl DistanceInterpolator3 {
 }
 
 // ============================================================================
-// Renderer Outline AA
+// Outline AA Renderer Trait
 // ============================================================================
 
 pub const MAX_HALF_WIDTH: usize = 64;
+
+/// Trait for renderers used with `RasterizerOutlineAa`.
+///
+/// Both `RendererOutlineAa` (solid color) and `RendererOutlineImage`
+/// (image pattern) implement this trait, allowing the rasterizer to
+/// work with either renderer type.
+///
+/// Port of the C++ template interface used by `rasterizer_outline_aa`.
+pub trait OutlineAaRenderer {
+    /// Returns true if this renderer only supports accurate (miter) joins.
+    /// Image pattern renderers return true; solid AA renderers return false.
+    fn accurate_join_only(&self) -> bool;
+
+    /// Render a simple line segment (no join information).
+    fn line0(&mut self, lp: &LineParameters);
+
+    /// Render a line segment with start join bisectrix.
+    fn line1(&mut self, lp: &LineParameters, sx: i32, sy: i32);
+
+    /// Render a line segment with end join bisectrix.
+    fn line2(&mut self, lp: &LineParameters, ex: i32, ey: i32);
+
+    /// Render a line segment with both start and end join bisectrices.
+    fn line3(&mut self, lp: &LineParameters, sx: i32, sy: i32, ex: i32, ey: i32);
+
+    /// Render a semi-circular dot (for round caps).
+    fn semidot(&mut self, cmp: fn(i32) -> bool, xc1: i32, yc1: i32, xc2: i32, yc2: i32);
+
+    /// Render a pie slice (for round joins).
+    fn pie(&mut self, xc: i32, yc: i32, x1: i32, y1: i32, x2: i32, y2: i32);
+}
+
+// ============================================================================
+// Renderer Outline AA
+// ============================================================================
 
 /// Anti-aliased outline renderer.
 ///
@@ -1179,6 +1214,40 @@ where
         self.ren.blend_solid_hspan(
             xh0, yh1, (p1 - p0) as i32, &self.color, &covers[p0..p1],
         );
+    }
+}
+
+// Implementation of OutlineAaRenderer for RendererOutlineAa.
+impl<'a, PF: PixelFormat> OutlineAaRenderer for RendererOutlineAa<'a, PF>
+where
+    PF::ColorType: Default + Clone,
+{
+    fn accurate_join_only(&self) -> bool {
+        false
+    }
+
+    fn line0(&mut self, lp: &LineParameters) {
+        self.line0(lp);
+    }
+
+    fn line1(&mut self, lp: &LineParameters, sx: i32, sy: i32) {
+        self.line1(lp, sx, sy);
+    }
+
+    fn line2(&mut self, lp: &LineParameters, ex: i32, ey: i32) {
+        self.line2(lp, ex, ey);
+    }
+
+    fn line3(&mut self, lp: &LineParameters, sx: i32, sy: i32, ex: i32, ey: i32) {
+        self.line3(lp, sx, sy, ex, ey);
+    }
+
+    fn semidot(&mut self, cmp: fn(i32) -> bool, xc1: i32, yc1: i32, xc2: i32, yc2: i32) {
+        self.semidot(cmp, xc1, yc1, xc2, yc2);
+    }
+
+    fn pie(&mut self, xc: i32, yc: i32, x1: i32, y1: i32, x2: i32, y2: i32) {
+        self.pie(xc, yc, x1, y1, x2, y2);
     }
 }
 

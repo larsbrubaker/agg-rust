@@ -1471,16 +1471,70 @@ impl VertexSource for Spiral {
     }
 }
 
-/// Render spiral comparison: aliased, AA outline, and scanline (matching C++ rasterizers2.cpp).
+/// ARGB32 pixmap chain-link pattern for the "Arbitrary Image Pattern" spiral.
+///
+/// Exact copy of the C++ `pixmap_chain` data from rasterizers2.cpp.
+/// Format: [width, height, pixel0, pixel1, ...] where each pixel is 0xAARRGGBB.
+static PIXMAP_CHAIN: [u32; 114] = [
+    16, 7,
+    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0xb4c29999, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+    0x00ffffff, 0x00ffffff, 0x0cfbf9f9, 0xff9a5757, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+    0x00ffffff, 0x5ae0cccc, 0xffa46767, 0xff660000, 0xff975252, 0x7ed4b8b8, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0xa8c6a0a0, 0xff7f2929, 0xff670202, 0x9ecaa6a6, 0x5ae0cccc, 0x00ffffff,
+    0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xa4c7a2a2, 0x3affff00, 0x3affff00, 0xff975151, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000,
+    0x00ffffff, 0x5ae0cccc, 0xffa46767, 0xff660000, 0xff954f4f, 0x7ed4b8b8, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0xa8c6a0a0, 0xff7f2929, 0xff670202, 0x9ecaa6a6, 0x5ae0cccc, 0x00ffffff,
+    0x00ffffff, 0x00ffffff, 0x0cfbf9f9, 0xff9a5757, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0xb4c29999, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+];
+
+/// Pattern source reading from an ARGB32 pixmap — port of C++ `pattern_pixmap_argb32`.
+///
+/// Extracts ARGB components from 32-bit values and returns straight-alpha Rgba8.
+/// Note: The C++ version premultiplies because it uses `pixfmt_pre`; our `PixfmtRgba32`
+/// uses standard alpha blending, so we return straight (non-premultiplied) colors and
+/// let `blend_color_hspan` handle the compositing correctly.
+struct PatternPixmapArgb32 {
+    pixmap: &'static [u32],
+}
+
+impl PatternPixmapArgb32 {
+    fn new(pixmap: &'static [u32]) -> Self {
+        Self { pixmap }
+    }
+    fn pw(&self) -> u32 { self.pixmap[0] }
+    fn ph(&self) -> u32 { self.pixmap[1] }
+}
+
+impl agg_rust::renderer_outline_image::ImagePatternSource for PatternPixmapArgb32 {
+    fn width(&self) -> f64 { self.pw() as f64 }
+    fn height(&self) -> f64 { self.ph() as f64 }
+    fn pixel(&self, x: i32, y: i32) -> Rgba8 {
+        let p = self.pixmap[(y as u32 * self.pw() + x as u32 + 2) as usize];
+        let r = (p >> 16) & 0xFF;
+        let g = (p >> 8) & 0xFF;
+        let b = p & 0xFF;
+        let a = p >> 24;
+        Rgba8::new(r, g, b, a)
+    }
+}
+
+/// Render spiral comparison: aliased, AA outline, scanline, and image pattern
+/// (matching C++ rasterizers2.cpp).
 ///
 /// params[0] = step (rotation speed, unused in static render)
 /// params[1] = line width
 /// params[2] = accurate_joins (0 or 1)
 /// params[3] = start_angle (degrees)
+/// params[4] = scale_pattern (0 or 1, default 1)
 pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    use agg_rust::pattern_filters_rgba::PatternFilterBilinearRgba;
+    use agg_rust::renderer_outline_image::{
+        LineImagePatternPow2, LineImageScale, RendererOutlineImage,
+    };
+
     let line_width = params.get(1).copied().unwrap_or(3.0).max(0.1);
     let accurate_joins = params.get(2).copied().unwrap_or(0.0) > 0.5;
     let start_angle = params.get(3).copied().unwrap_or(0.0).to_radians();
+    let scale_pattern = params.get(4).copied().unwrap_or(1.0) > 0.5;
 
     let w = width as f64;
     let h = height as f64;
@@ -1545,7 +1599,7 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ras_oaa.add_path(&mut s3, 0, &mut ren_oaa);
     }
 
-    // 4. Scanline rasterizer (bottom-right)
+    // 4. Scanline rasterizer (bottom-center)
     {
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
@@ -1557,15 +1611,39 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
     }
 
+    // 5. Anti-aliased outline with image pattern (bottom-right)
+    {
+        let src = PatternPixmapArgb32::new(&PIXMAP_CHAIN);
+        let src_scaled = LineImageScale::new(&src, line_width);
+
+        let pattern = if scale_pattern {
+            LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src_scaled)
+        } else {
+            LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src)
+        };
+
+        let mut ren_img = RendererOutlineImage::new(&mut rb, &pattern);
+        if scale_pattern {
+            ren_img.set_scale_x(line_width / src.ph() as f64);
+        }
+
+        let mut ras_img = RasterizerOutlineAa::new();
+        let mut s5 = Spiral::new(
+            w - w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 16.0, start_angle,
+        );
+        ras_img.add_path(&mut s5, 0, &mut ren_img);
+    }
+
     // Labels
     {
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
         let labels = [
-            (50.0, 80.0, "Bresenham lines,\nregular accuracy"),
-            (w / 2.0 - 50.0, 80.0, "Bresenham lines,\nsubpixel accuracy"),
+            (50.0, 80.0, "Bresenham lines,\n\nregular accuracy"),
+            (w / 2.0 - 50.0, 80.0, "Bresenham lines,\n\nsubpixel accuracy"),
             (50.0, h / 2.0 + 50.0, "Anti-aliased lines"),
             (w / 2.0 - 50.0, h / 2.0 + 50.0, "Scanline rasterizer"),
+            (w - w / 5.0 - 50.0, h / 2.0 + 50.0, "Arbitrary Image Pattern"),
         ];
         for (lx, ly, txt) in labels {
             let mut t = GsvText::new();
@@ -1580,19 +1658,40 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
     }
 
-    // Controls
+    // Controls — match C++ layout
     {
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
-        let mut s_width = SliderCtrl::new(150.0 + 10.0, 14.0, w - 10.0, 22.0);
+
+        let mut s_step = SliderCtrl::new(10.0, 14.0, 150.0, 22.0);
+        s_step.range(0.0, 2.0);
+        s_step.set_value(params.get(0).copied().unwrap_or(0.1));
+        s_step.label("Step=%1.2f");
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_step);
+
+        let mut s_width = SliderCtrl::new(150.0 + 10.0, 14.0, 400.0 - 10.0, 22.0);
         s_width.range(0.0, 14.0);
         s_width.set_value(line_width);
         s_width.label("Width=%1.2f");
         render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
 
-        let mut cbox = CboxCtrl::new(200.0 + 10.0, 30.0, "Accurate Joins");
-        cbox.set_status(accurate_joins);
-        render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox);
+        let mut cbox_test = CboxCtrl::new(10.0, 30.0, "Test Performance");
+        cbox_test.text_size(9.0, 7.0);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox_test);
+
+        let mut cbox_rotate = CboxCtrl::new(130.0 + 10.0, 30.0, "Rotate");
+        cbox_rotate.text_size(9.0, 7.0);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox_rotate);
+
+        let mut cbox_aj = CboxCtrl::new(200.0 + 10.0, 30.0, "Accurate Joins");
+        cbox_aj.text_size(9.0, 7.0);
+        cbox_aj.set_status(accurate_joins);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox_aj);
+
+        let mut cbox_sp = CboxCtrl::new(310.0 + 10.0, 30.0, "Scale Pattern");
+        cbox_sp.text_size(9.0, 7.0);
+        cbox_sp.set_status(scale_pattern);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox_sp);
     }
 
     buf
@@ -1602,67 +1701,270 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Line Patterns
 // ============================================================================
 
-/// Render AA outline patterns on spirals (simplified from C++ line_patterns.cpp).
-///
-/// Since renderer_outline_image is not ported, we show solid AA outlines
-/// with configurable width and join modes on spirals at different positions.
-///
-/// params[0] = line width
-/// params[1] = accurate_joins (0 or 1)
-/// params[2] = start_angle (degrees)
-pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let line_width = params.get(0).copied().unwrap_or(3.0).max(0.1);
-    let accurate_joins = params.get(1).copied().unwrap_or(0.0) > 0.5;
-    let start_angle = params.get(2).copied().unwrap_or(0.0).to_radians();
+/// Brightness-to-alpha lookup table — exact match of C++ `brightness_to_alpha`.
+/// Maps brightness index (0..768) → alpha value.
+static BRIGHTNESS_TO_ALPHA: [u8; 768] = [
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 254, 254, 254, 254, 254, 254,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 253, 253,
+    253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 252,
+    252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 251, 251, 251, 251, 251,
+    251, 251, 251, 251, 250, 250, 250, 250, 250, 250, 250, 250, 249, 249, 249, 249,
+    249, 249, 249, 248, 248, 248, 248, 248, 248, 248, 247, 247, 247, 247, 247, 246,
+    246, 246, 246, 246, 246, 245, 245, 245, 245, 245, 244, 244, 244, 244, 243, 243,
+    243, 243, 243, 242, 242, 242, 242, 241, 241, 241, 241, 240, 240, 240, 239, 239,
+    239, 239, 238, 238, 238, 238, 237, 237, 237, 236, 236, 236, 235, 235, 235, 234,
+    234, 234, 233, 233, 233, 232, 232, 232, 231, 231, 230, 230, 230, 229, 229, 229,
+    228, 228, 227, 227, 227, 226, 226, 225, 225, 224, 224, 224, 223, 223, 222, 222,
+    221, 221, 220, 220, 219, 219, 219, 218, 218, 217, 217, 216, 216, 215, 214, 214,
+    213, 213, 212, 212, 211, 211, 210, 210, 209, 209, 208, 207, 207, 206, 206, 205,
+    204, 204, 203, 203, 202, 201, 201, 200, 200, 199, 198, 198, 197, 196, 196, 195,
+    194, 194, 193, 192, 192, 191, 190, 190, 189, 188, 188, 187, 186, 186, 185, 184,
+    183, 183, 182, 181, 180, 180, 179, 178, 177, 177, 176, 175, 174, 174, 173, 172,
+    171, 171, 170, 169, 168, 167, 166, 166, 165, 164, 163, 162, 162, 161, 160, 159,
+    158, 157, 156, 156, 155, 154, 153, 152, 151, 150, 149, 148, 148, 147, 146, 145,
+    144, 143, 142, 141, 140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129,
+    128, 128, 127, 125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114, 113,
+    112, 111, 110, 109, 108, 107, 106, 105, 104, 102, 101, 100,  99,  98,  97,  96,
+     95,  94,  93,  91,  90,  89,  88,  87,  86,  85,  84,  82,  81,  80,  79,  78,
+     77,  75,  74,  73,  72,  71,  70,  69,  67,  66,  65,  64,  63,  61,  60,  59,
+     58,  57,  56,  54,  53,  52,  51,  50,  48,  47,  46,  45,  44,  42,  41,  40,
+     39,  37,  36,  35,  34,  33,  31,  30,  29,  28,  27,  25,  24,  23,  22,  20,
+     19,  18,  17,  15,  14,  13,  12,  11,   9,   8,   7,   6,   4,   3,   2,   1,
+];
 
-    let w = width as f64;
-    let h = height as f64;
+/// Pattern source that reads from RGBA pixel data and converts brightness to alpha.
+/// Port of C++ `pattern_src_brightness_to_alpha`.
+struct PatternSrcBrightnessToAlpha {
+    data: Vec<u8>,   // RGBA data
+    w: u32,
+    h: u32,
+}
+
+impl PatternSrcBrightnessToAlpha {
+    fn new(data: Vec<u8>, w: u32, h: u32) -> Self {
+        Self { data, w, h }
+    }
+}
+
+impl agg_rust::renderer_outline_image::ImagePatternSource for PatternSrcBrightnessToAlpha {
+    fn width(&self) -> f64 { self.w as f64 }
+    fn height(&self) -> f64 { self.h as f64 }
+    fn pixel(&self, x: i32, y: i32) -> Rgba8 {
+        let x = x.max(0).min(self.w as i32 - 1) as usize;
+        let y = y.max(0).min(self.h as i32 - 1) as usize;
+        let off = (y * self.w as usize + x) * 4;
+        let r = self.data[off] as u32;
+        let g = self.data[off + 1] as u32;
+        let b = self.data[off + 2] as u32;
+        let sum = r + g + b;
+        // C++: i = sum * sizeof(brightness_to_alpha) / (3 * color_type::full_value())
+        //    = sum * 768 / 765
+        let i = (sum * BRIGHTNESS_TO_ALPHA.len() as u32 / (3 * 255)).min(BRIGHTNESS_TO_ALPHA.len() as u32 - 1) as usize;
+        let cover = BRIGHTNESS_TO_ALPHA[i];
+        // mult_cover: (255 * cover + 255) >> 8
+        let a = ((255u32 * cover as u32) + 255) >> 8;
+        Rgba8::new(r, g, b, a)
+    }
+}
+
+/// Load an embedded pattern image from a .rgba file (8-byte header: u32 LE width, u32 LE height,
+/// then width*height*4 bytes of RGBA pixel data).
+/// These are the original AGG line pattern images (1.bmp–9.bmp) converted from the PPM sources.
+fn load_embedded_pattern(data: &[u8]) -> (u32, u32, Vec<u8>) {
+    let w = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    let h = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let pixels = data[8..].to_vec();
+    debug_assert_eq!(pixels.len(), (w * h * 4) as usize);
+    (w, h, pixels)
+}
+
+// Embed the original AGG line pattern images (converted from PPM to raw RGBA).
+static PATTERN_1: &[u8] = include_bytes!("../../assets/1.rgba");
+static PATTERN_2: &[u8] = include_bytes!("../../assets/2.rgba");
+static PATTERN_3: &[u8] = include_bytes!("../../assets/3.rgba");
+static PATTERN_4: &[u8] = include_bytes!("../../assets/4.rgba");
+static PATTERN_5: &[u8] = include_bytes!("../../assets/5.rgba");
+static PATTERN_6: &[u8] = include_bytes!("../../assets/6.rgba");
+static PATTERN_7: &[u8] = include_bytes!("../../assets/7.rgba");
+static PATTERN_8: &[u8] = include_bytes!("../../assets/8.rgba");
+static PATTERN_9: &[u8] = include_bytes!("../../assets/9.rgba");
+
+/// Get the original AGG pattern image for a given curve index (0-8).
+fn get_pattern(index: usize) -> (u32, u32, Vec<u8>) {
+    let data = match index {
+        0 => PATTERN_1,
+        1 => PATTERN_2,
+        2 => PATTERN_3,
+        3 => PATTERN_4,
+        4 => PATTERN_5,
+        5 => PATTERN_6,
+        6 => PATTERN_7,
+        7 => PATTERN_8,
+        8 => PATTERN_9,
+        _ => PATTERN_1,
+    };
+    load_embedded_pattern(data)
+}
+
+/// Render bezier curves with image patterns — port of C++ line_patterns.cpp.
+///
+/// params[0] = scale_x (0.2..3.0, default 1.0)
+/// params[1] = start_x (0.0..10.0, default 0.0)
+pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    use agg_rust::pattern_filters_rgba::PatternFilterBilinearRgba;
+    use agg_rust::renderer_outline_image::{LineImagePattern, RendererOutlineImage};
+
+    let scale_x = params.get(0).copied().unwrap_or(1.0).clamp(0.2, 3.0);
+    let start_x = params.get(1).copied().unwrap_or(0.0).clamp(0.0, 10.0);
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
     setup_renderer(&mut buf, &mut ra, width, height);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 255, 255));
+    // Match C++ background: rgba(1.0, 1.0, 0.95) → Rgba8(255, 255, 242, 255)
+    rb.clear(&Rgba8::new(255, 255, 242, 255));
 
-    let join = if accurate_joins {
-        OutlineAaJoin::MiterAccurate
-    } else {
-        OutlineAaJoin::Round
-    };
-
-    // Draw spirals with different colors and widths
-    let configs: [(f64, f64, Rgba8, f64); 5] = [
-        (w * 0.2, h * 0.3, Rgba8::new(153, 87, 87, 255), line_width),
-        (w * 0.5, h * 0.3, Rgba8::new(87, 153, 87, 255), line_width * 0.7),
-        (w * 0.8, h * 0.3, Rgba8::new(87, 87, 153, 255), line_width * 1.3),
-        (w * 0.35, h * 0.7, Rgba8::new(153, 153, 87, 255), line_width * 0.5),
-        (w * 0.65, h * 0.7, Rgba8::new(153, 87, 153, 255), line_width * 1.5),
+    // Default bezier curve control points — exact match of C++ line_patterns.cpp
+    let defaults: [(f64, f64, f64, f64, f64, f64, f64, f64); 9] = [
+        ( 64.0,  19.0,  14.0, 126.0, 118.0, 266.0,  19.0, 265.0),
+        (112.0, 113.0, 178.0,  32.0, 200.0, 132.0, 125.0, 438.0),
+        (401.0,  24.0, 326.0, 149.0, 285.0,  11.0, 177.0,  77.0),
+        (188.0, 427.0, 129.0, 295.0,  19.0, 283.0,  25.0, 410.0),
+        (451.0, 346.0, 302.0, 218.0, 265.0, 441.0, 459.0, 400.0),
+        (454.0, 198.0,  14.0,  13.0, 220.0, 291.0, 483.0, 283.0),
+        (301.0, 398.0, 355.0, 231.0, 209.0, 211.0, 170.0, 353.0),
+        (484.0, 101.0, 222.0,  33.0, 486.0, 435.0, 487.0, 138.0),
+        (143.0, 147.0,  11.0,  45.0,  83.0, 427.0, 132.0, 197.0),
     ];
 
-    for (cx, cy, color, lw) in configs {
-        let profile = LineProfileAa::with_width(lw);
-        let mut ren_oaa = RendererOutlineAa::new(&mut rb, &profile);
-        ren_oaa.set_color(color);
-        let mut ras_oaa = RasterizerOutlineAa::new();
-        ras_oaa.set_round_cap(true);
-        ras_oaa.set_line_join(join);
-        let mut spiral = Spiral::new(cx, cy, 5.0, 60.0, 14.0, start_angle);
-        ras_oaa.add_path(&mut spiral, 0, &mut ren_oaa);
+    // Read control points from params[2..74] if provided (from interactive JS drag),
+    // otherwise use the C++ defaults.
+    let curves: [(f64, f64, f64, f64, f64, f64, f64, f64); 9] = if params.len() >= 74 {
+        let p = &params[2..];
+        let mut c = defaults;
+        for i in 0..9 {
+            let o = i * 8;
+            c[i] = (p[o], p[o+1], p[o+2], p[o+3], p[o+4], p[o+5], p[o+6], p[o+7]);
+        }
+        c
+    } else {
+        defaults
+    };
+
+    // Draw each bezier curve with its own pattern
+    for (i, &(x1, y1, x2, y2, x3, y3, x4, y4)) in curves.iter().enumerate() {
+        let (pw, ph, pdata) = get_pattern(i);
+        let src = PatternSrcBrightnessToAlpha::new(pdata, pw, ph);
+        let pat = LineImagePattern::<PatternFilterBilinearRgba>::with_source(&src);
+
+        let mut ren_img = RendererOutlineImage::new(&mut rb, &pat);
+        ren_img.set_scale_x(scale_x);
+        ren_img.set_start_x(start_x);
+
+        let mut ras_img = RasterizerOutlineAa::new();
+        ras_img.set_line_join(OutlineAaJoin::MiterAccurate);
+
+        // Create bezier curve path
+        let mut path = PathStorage::new();
+        path.move_to(x1, y1);
+        path.curve4(x2, y2, x3, y3, x4, y4);
+        let mut curve = ConvCurve::new(&mut path);
+
+        ras_img.add_path(&mut curve, 0, &mut ren_img);
     }
 
-    // Controls
+    // Render bezier control visualizations (matching C++ bezier_ctrl rendering).
+    // Color: rgba(0, 0.3, 0.5, 0.3) = Rgba8(0, 77, 128, 77)
+    let ctrl_color = Rgba8::new(0, 77, 128, 77);
+    let point_radius = 5.0;
+
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
-    let mut s_width = SliderCtrl::new(10.0, 14.0, w - 10.0, 22.0);
-    s_width.range(0.5, 10.0);
-    s_width.set_value(line_width);
-    s_width.label("Width=%1.2f");
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
 
-    let mut cbox = CboxCtrl::new(10.0, 30.0, "Accurate Joins");
-    cbox.set_status(accurate_joins);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox);
+    for &(x1, y1, x2, y2, x3, y3, x4, y4) in curves.iter() {
+        // Path 0: Control line P1→P2 (stroked straight line)
+        {
+            let mut line_path = PathStorage::new();
+            line_path.move_to(x1, y1);
+            line_path.line_to(x2, y2);
+            let mut stroke = ConvStroke::new(&mut line_path);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
+        }
+
+        // Path 1: Control line P3→P4 (stroked straight line)
+        {
+            let mut line_path = PathStorage::new();
+            line_path.move_to(x3, y3);
+            line_path.line_to(x4, y4);
+            let mut stroke = ConvStroke::new(&mut line_path);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
+        }
+
+        // Path 2: The bezier curve itself (stroked thin line)
+        {
+            let mut curve_path = PathStorage::new();
+            curve_path.move_to(x1, y1);
+            curve_path.curve4(x2, y2, x3, y3, x4, y4);
+            let mut conv = ConvCurve::new(&mut curve_path);
+            let mut stroke = ConvStroke::new(&mut conv);
+            stroke.set_width(1.0);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
+        }
+
+        // Paths 3-6: Filled ellipses at each control point
+        for &(px, py) in &[(x1, y1), (x2, y2), (x3, y3), (x4, y4)] {
+            let mut ell = Ellipse::new(px, py, point_radius, point_radius, 20, false);
+            ras.reset();
+            ras.add_path(&mut ell, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
+        }
+    }
+
+    // Render slider controls
+    let w = width as f64;
+
+    let mut s_scale = SliderCtrl::new(5.0, 5.0, 240.0, 12.0);
+    s_scale.range(0.2, 3.0);
+    s_scale.set_value(scale_x);
+    s_scale.label("Scale X=%.2f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_scale);
+
+    let mut s_start = SliderCtrl::new(250.0, 5.0, w - 5.0, 12.0);
+    s_start.range(0.0, 10.0);
+    s_start.set_value(start_x);
+    s_start.label("Start X=%.2f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_start);
 
     buf
 }

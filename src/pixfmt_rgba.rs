@@ -113,6 +113,50 @@ impl<'a> PixfmtRgba32<'a> {
         p[2] = Rgba8::lerp(p[2], cb, alpha);
         p[3] = Rgba8::lerp(p[3], 255, alpha);
     }
+
+    /// Apply inverse gamma correction to every pixel in the buffer.
+    ///
+    /// For each pixel, applies `gamma.inv()` to the R, G, B channels,
+    /// leaving the alpha channel unchanged. This matches the C++
+    /// `pixfmt_rgb24::apply_gamma_inv()` from `agg_pixfmt_rgb.h`.
+    pub fn apply_gamma_inv(&mut self, gamma: &crate::gamma::GammaLut) {
+        let w = self.rbuf.width();
+        let h = self.rbuf.height();
+        for y in 0..h {
+            let row = unsafe {
+                let ptr = self.rbuf.row_ptr(y as i32);
+                std::slice::from_raw_parts_mut(ptr, (w as usize) * BPP)
+            };
+            for x in 0..w as usize {
+                let off = x * BPP;
+                row[off] = gamma.inv(row[off]);
+                row[off + 1] = gamma.inv(row[off + 1]);
+                row[off + 2] = gamma.inv(row[off + 2]);
+                // row[off + 3] (alpha) is left unchanged
+            }
+        }
+    }
+
+    /// Apply forward gamma correction to every pixel in the buffer.
+    ///
+    /// For each pixel, applies `gamma.dir()` to the R, G, B channels,
+    /// leaving the alpha channel unchanged.
+    pub fn apply_gamma_dir(&mut self, gamma: &crate::gamma::GammaLut) {
+        let w = self.rbuf.width();
+        let h = self.rbuf.height();
+        for y in 0..h {
+            let row = unsafe {
+                let ptr = self.rbuf.row_ptr(y as i32);
+                std::slice::from_raw_parts_mut(ptr, (w as usize) * BPP)
+            };
+            for x in 0..w as usize {
+                let off = x * BPP;
+                row[off] = gamma.dir(row[off]);
+                row[off + 1] = gamma.dir(row[off + 1]);
+                row[off + 2] = gamma.dir(row[off + 2]);
+            }
+        }
+    }
 }
 
 impl<'a> PixelFormat for PixfmtRgba32<'a> {

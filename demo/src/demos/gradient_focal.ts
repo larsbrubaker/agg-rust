@@ -52,6 +52,7 @@ export function init(container: HTMLElement) {
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', onMove);
   canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
 
   const slGamma = addSlider(sidebar, 'Gamma', 0.5, 2.5, 1.0, 0.01, v => { gamma = v; draw(); });
 
@@ -70,6 +71,7 @@ export function init(container: HTMLElement) {
     canvas.removeEventListener('pointerdown', onDown);
     canvas.removeEventListener('pointermove', onMove);
     canvas.removeEventListener('pointerup', onUp);
+    canvas.removeEventListener('pointercancel', onUp);
     cleanupCC();
   };
 }

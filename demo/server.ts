@@ -16,9 +16,13 @@ const MIME_TYPES: Record<string, string> = {
   ".wasm": "application/wasm",
   ".json": "application/json",
   ".png": "image/png",
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".txt": "text/plain",
   ".map": "application/json",
+  ".ppm": "image/x-portable-pixmap",
 };
 
 // --- Live reload via SSE ---
@@ -28,7 +32,7 @@ const RELOAD_SCRIPT = `<script>
 (function(){
   const es = new EventSource("/__reload");
   es.onmessage = function(e) {
-    if (e.data === "reload") location.reload();
+    if (e.data === "reload") { es.close(); location.reload(); }
   };
 })();
 </script>`;
@@ -70,13 +74,15 @@ const server = Bun.serve({
 
     // SSE endpoint for live reload
     if (pathname === "/__reload") {
+      let ctrl: ReadableStreamDefaultController;
       const stream = new ReadableStream({
         start(controller) {
+          ctrl = controller;
           reloadClients.add(controller);
           controller.enqueue("data: connected\n\n");
         },
-        cancel(controller) {
-          reloadClients.delete(controller);
+        cancel() {
+          reloadClients.delete(ctrl);
         },
       });
       return new Response(stream, {

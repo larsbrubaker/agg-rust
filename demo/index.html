@@ -7,6 +7,11 @@
   <link rel="stylesheet" href="./styles/main.css">
 </head>
 <body>
+  <button id="menu-toggle" class="menu-toggle" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
   <nav id="sidebar">
     <div class="sidebar-header">
       <h1 class="logo">AGG<span class="logo-accent">.rs</span></h1>
@@ -81,7 +86,7 @@
             <img class="nav-thumb" src="./public/thumbnails/alpha_mask3.gif" alt=""> Alpha Mask 3
           </a></li>
           <li><a href="#/multi_clip" class="nav-link" data-route="multi_clip">
-            <img class="nav-thumb" src="./public/thumbnails/multi_clip.gif" alt=""> Multi Clip
+            <img class="nav-thumb" src="./public/thumbnails/multi_clip.png" alt=""> Multi Clip
           </a></li>
           <li><a href="#/simple_blur" class="nav-link" data-route="simple_blur">
             <img class="nav-thumb" src="./public/thumbnails/simple_blur.gif" alt=""> Simple Blur
@@ -241,6 +246,9 @@
           </a></li>
           <li><a href="#/raster_text" class="nav-link" data-route="raster_text">
             <img class="nav-thumb" src="./public/thumbnails/raster_text.gif" alt=""> Raster Text
+          </a></li>
+          <li><a href="#/truetype_test" class="nav-link" data-route="truetype_test">
+            <img class="nav-thumb" src="./public/thumbnails/truetype_test.png" alt=""> TrueType LCD
           </a></li>
         </ul>
       </li>
@@ -428,6 +436,40 @@
         searchInput.value = '';
         updateSearch();
         searchInput.focus();
+      });
+    })();
+
+    // Mobile sidebar toggle
+    (function() {
+      var menuToggle = document.getElementById('menu-toggle');
+      var sidebar = document.getElementById('sidebar');
+      var sidebarOverlay = document.getElementById('sidebar-overlay');
+
+      function openSidebar() {
+        sidebar.classList.add('open');
+        menuToggle.classList.add('open');
+        sidebarOverlay.classList.add('visible');
+      }
+
+      function closeSidebar() {
+        sidebar.classList.remove('open');
+        menuToggle.classList.remove('open');
+        sidebarOverlay.classList.remove('visible');
+      }
+
+      menuToggle.addEventListener('click', function() {
+        if (sidebar.classList.contains('open')) {
+          closeSidebar();
+        } else {
+          openSidebar();
+        }
+      });
+
+      sidebarOverlay.addEventListener('click', closeSidebar);
+
+      // Close sidebar when a nav link is clicked (mobile UX)
+      document.querySelectorAll('.nav-link').forEach(function(link) {
+        link.addEventListener('click', closeSidebar);
       });
     })();
   </script>

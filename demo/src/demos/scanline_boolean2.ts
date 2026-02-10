@@ -113,6 +113,9 @@ export function init(container: HTMLElement) {
   canvas.addEventListener('pointerup', () => {
     isDragging = false;
   });
+  canvas.addEventListener('pointercancel', () => {
+    isDragging = false;
+  });
 
   draw();
 }

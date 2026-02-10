@@ -69,6 +69,7 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'gouraud_mesh': () => import('./demos/gouraud_mesh.ts'),
   'image_resample': () => import('./demos/image_resample.ts'),
   'alpha_mask2': () => import('./demos/alpha_mask2.ts'),
+  'truetype_test': () => import('./demos/truetype_test.ts'),
 };
 
 // Mapping of demo route name to thumbnail image filename (full-size images from C++ AGG reference)
@@ -136,6 +137,7 @@ const thumbnails: Record<string, string> = {
   'simple_blur': 'simple_blur.gif',
   'trans_curve1': 'trans_curve1.gif',
   'trans_curve2': 'trans_curve2.gif',
+  'truetype_test': 'truetype_test.png',
   'trans_polar': 'trans_polar.gif',
 };
 
@@ -245,6 +247,7 @@ const demoCards: Array<{ route: string; title: string; desc: string }> = [
   { route: 'gouraud_mesh', title: 'Gouraud Mesh', desc: 'Triangle mesh with Gouraud shading interpolation.' },
   { route: 'image_resample', title: 'Image Resample', desc: 'Image resampling with perspective transform and filter comparison.' },
   { route: 'alpha_mask2', title: 'Alpha Mask 2', desc: 'Alpha mask with gray8 rendering buffer.' },
+  { route: 'truetype_test', title: 'TrueType LCD', desc: 'LCD subpixel font rendering with faux weight, faux italic, gamma, and multiple typefaces.' },
 ];
 
 function renderHome(container: HTMLElement) {

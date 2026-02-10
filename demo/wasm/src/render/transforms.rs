@@ -1,6 +1,6 @@
 //! Transform/text demo render functions: raster_text, gamma_ctrl, trans_polar,
 //! multi_clip, simple_blur, blur, trans_curve1, trans_curve2, lion_lens, distortions,
-//! gouraud_mesh.
+//! gouraud_mesh, truetype_test.
 
 use agg_rust::basics::{is_end_poly, is_move_to, is_stop, is_vertex, VertexSource};
 use agg_rust::bspline::Bspline;
@@ -37,6 +37,12 @@ use super::setup_renderer;
 /// Embedded Liberation Serif Italic font (SIL OFL license).
 /// Metrically compatible with Times New Roman Italic (timesi.ttf) used by the C++ demo.
 static LIBERATION_SERIF_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSerif-Italic.ttf");
+/// Embedded Liberation Serif Regular font.
+static LIBERATION_SERIF_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationSerif-Regular.ttf");
+/// Embedded Liberation Sans Regular font.
+static LIBERATION_SANS_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationSans-Regular.ttf");
+/// Embedded Liberation Sans Italic font.
+static LIBERATION_SANS_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSans-Italic.ttf");
 
 // ============================================================================
 // Raster Text
@@ -1481,6 +1487,320 @@ pub fn gouraud_mesh(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     txt_stroke.set_width(0.8);
     ras.add_path(&mut txt_stroke, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 200));
+
+    buf
+}
+
+// ============================================================================
+// TrueType LCD Subpixel Text Demo
+// ============================================================================
+// Port of C++ truetype_lcd.cpp (truetype_test_02_win).
+// Renders text paragraphs with LCD subpixel rendering, faux weight/italic,
+// gamma correction, and multiple typeface controls.
+
+static TEXT1: &str = "A single pixel on a color LCD is made of three colored elements \n\
+ordered (on various displays) either as blue, green, and red (BGR), \n\
+or as red, green, and blue (RGB). These pixel components, sometimes \n\
+called sub-pixels, appear as a single color to the human eye because \n\
+of blurring by the optics and spatial integration by nerve cells in the eye.";
+
+static TEXT2: &str = "The components are easily visible, however, when viewed with \n\
+a small magnifying glass, such as a loupe. Over a certain resolution \n\
+range the colors in the sub-pixels are not visible, but the relative \n\
+intensity of the components shifts the apparent position or orientation \n\
+of a line. Methods that take this interaction between the display \n\
+technology and the human visual system into account are called \n\
+subpixel rendering algorithms.";
+
+static TEXT3: &str = "The resolution at which colored sub-pixels go unnoticed differs, \n\
+however, with each user some users are distracted by the colored \n\
+\"fringes\" resulting from sub-pixel rendering. Subpixel rendering \n\
+is better suited to some display technologies than others. The \n\
+technology is well-suited to LCDs, but less so for CRTs. In a CRT \n\
+the light from the pixel components often spread across pixels, \n\
+and the outputs of adjacent pixels are not perfectly independent.";
+
+static TEXT4: &str = "If a designer knew precisely a great deal about the display's \n\
+electron beams and aperture grille, subpixel rendering might \n\
+have some advantage. But the properties of the CRT components, \n\
+coupled with the alignment variations that are part of the \n\
+production process, make subpixel rendering less effective for \n\
+these displays. The technique should have good application to \n\
+organic light emitting diodes and other display technologies.";
+
+/// Draw a block of text using the TrueType font pipeline.
+///
+/// Port of C++ `draw_text()` from truetype_lcd.cpp.
+/// Returns the final y position after rendering all lines.
+fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
+    ras: &mut RasterizerScanlineAa,
+    sl: &mut ScanlineU8,
+    rb: &mut RendererBase<PF>,
+    fman: &mut FontCacheManager,
+    text: &str,
+    x: f64,
+    mut y: f64,
+    height: f64,
+    subpixel_scale: u32,
+    invert: bool,
+    kerning: bool,
+    hinting: bool,
+    faux_italic: f64,
+    faux_weight_val: f64,
+    width_val: f64,
+    interval: f64,
+) -> f64 {
+    let color = if invert {
+        Rgba8::new(255, 255, 255, 255)
+    } else {
+        Rgba8::new(0, 0, 0, 255)
+    };
+
+    // Our buffer uses top-down coordinates (y=0 at top), unlike C++ which uses
+    // flip_y (y=0 at bottom). We set flip_y on the font engine so glyph outlines
+    // match our coordinate system. We track pen_x in subpixel space (3x for LCD,
+    // 1x for grayscale). Without the C++ 16x hinting trick, our coordinate math
+    // is simpler: pen_x directly represents the subpixel position.
+    let sp_scale = subpixel_scale as f64;
+
+    // Set font parameters — scale_x stretches outlines horizontally
+    fman.engine_mut().set_height(height);
+    fman.engine_mut().set_scale_x(sp_scale);
+    fman.engine_mut().set_hinting(hinting);
+    fman.engine_mut().set_flip_y(true); // top-down screen coords
+    fman.reset_cache();
+
+    // pen_x tracks relative advance from start_x, in subpixel space
+    let start_x = x * sp_scale;
+    let mut pen_x = 0.0_f64;
+
+    for ch in text.chars() {
+        if ch == '\n' {
+            pen_x = 0.0;
+            y += height * 1.25; // top-down: move DOWN for next line
+            continue;
+        }
+
+        let char_code = ch as u32;
+        let glyph_info = match fman.glyph(char_code) {
+            Some(g) => (g.advance_x, g.advance_y, g.data_type),
+            None => continue,
+        };
+        let (adv_x, adv_y, data_type) = glyph_info;
+
+        if kerning {
+            fman.add_kerning(char_code, &mut pen_x, &mut y);
+        }
+
+        fman.init_embedded_adaptors(char_code, 0.0, 0.0);
+
+        if data_type == agg_rust::font_engine::GlyphDataType::Outline {
+            let ty = if hinting { (y + 0.5).floor() } else { y };
+
+            // Build transform: scale(width, 1) * skew(faux_italic, 0) * translate(pos)
+            // pen_x is in subpixel space; start_x + pen_x gives absolute position
+            let mut mtx = TransAffine::new_scaling(width_val, 1.0);
+            mtx *= TransAffine::new_skewing(faux_italic * sp_scale / 3.0, 0.0);
+            mtx *= TransAffine::new_translation(start_x + pen_x, ty);
+
+            let adaptor = fman.path_adaptor_mut();
+            let mut curves = ConvCurve::new(adaptor);
+
+            let use_faux_weight = faux_weight_val.abs() >= 0.05;
+
+            if !use_faux_weight {
+                // Simple path: curves -> transform -> rasterize
+                let mut trans = ConvTransform::new(&mut curves, mtx);
+                ras.reset();
+                ras.add_path(&mut trans, 0);
+            } else {
+                // Faux weight pipeline: curves -> transform -> zoom_in_y ->
+                //   conv_contour -> zoom_out_y -> rasterize
+                // This adds horizontal weight while preserving vertical sharpness.
+                let mut trans = ConvTransform::new(&mut curves, mtx);
+
+                let zoom_in = TransAffine::new_scaling(1.0, 100.0);
+                let mut zoomed_in = ConvTransform::new(&mut trans, zoom_in);
+
+                let mut contour =
+                    agg_rust::conv_contour::ConvContour::new(&mut zoomed_in);
+                contour.set_auto_detect_orientation(false);
+                contour.set_width(
+                    -faux_weight_val * height * sp_scale / 15.0,
+                );
+
+                let zoom_out = TransAffine::new_scaling(1.0, 1.0 / 100.0);
+                let mut zoomed_out = ConvTransform::new(&mut contour, zoom_out);
+
+                ras.reset();
+                ras.add_path(&mut zoomed_out, 0);
+            }
+
+            render_scanlines_aa_solid(ras, sl, rb, &color);
+        }
+
+        // Advance pen position
+        pen_x += adv_x + interval * sp_scale;
+        y += adv_y;
+    }
+
+    y
+}
+
+/// Render the truetype_test_02 LCD subpixel text demo.
+///
+/// Port of C++ truetype_lcd.cpp (truetype_test_02_win).
+/// Parameters:
+///   [0] typeface_idx: 0=Liberation Serif, 1=Liberation Sans
+///   [1] font_scale: 0.5..2.0 (default 1.0)
+///   [2] faux_italic: -1..1 (default 0.0)
+///   [3] faux_weight: -1..1 (default 0.0)
+///   [4] interval: -0.2..0.2 (default 0.0)
+///   [5] width: 0.75..1.25 (default 1.0)
+///   [6] gamma: 0.5..2.5 (default 1.0)
+///   [7] primary_weight: 0..1 (default 1/3)
+///   [8] grayscale: 0 or 1 (default 0)
+///   [9] hinting: 0 or 1 (default 1)
+///  [10] kerning: 0 or 1 (default 1)
+///  [11] invert: 0 or 1 (default 0)
+pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    use agg_rust::gamma::GammaLut;
+    use agg_rust::pixfmt_lcd::{LcdDistributionLut, PixfmtRgba32Lcd};
+
+    // Parse parameters
+    let typeface_idx = params.first().copied().unwrap_or(0.0) as usize;
+    let font_scale = params.get(1).copied().unwrap_or(1.0);
+    let faux_italic = params.get(2).copied().unwrap_or(0.0);
+    let faux_weight = params.get(3).copied().unwrap_or(0.0);
+    let interval = params.get(4).copied().unwrap_or(0.0);
+    let width_val = params.get(5).copied().unwrap_or(1.0);
+    let gamma_val = params.get(6).copied().unwrap_or(1.0);
+    let primary_weight = params.get(7).copied().unwrap_or(1.0 / 3.0);
+    let grayscale = params.get(8).copied().unwrap_or(0.0) > 0.5;
+    let hinting = params.get(9).copied().unwrap_or(1.0) > 0.5;
+    let kerning = params.get(10).copied().unwrap_or(1.0) > 0.5;
+    let invert = params.get(11).copied().unwrap_or(0.0) > 0.5;
+
+    // Select font data based on typeface
+    let (font_regular, font_italic): (&[u8], &[u8]) = match typeface_idx {
+        1 => (LIBERATION_SANS_REGULAR, LIBERATION_SANS_ITALIC),
+        _ => (LIBERATION_SERIF_REGULAR, LIBERATION_SERIF_ITALIC),
+    };
+
+    // Step 1: Setup RGBA32 buffer and clear to white
+    let mut buf = Vec::new();
+    let mut ra = RowAccessor::new();
+    setup_renderer(&mut buf, &mut ra, width, height);
+
+    // Clear to white using PixfmtRgba32
+    {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        rb.clear(&Rgba8::new(255, 255, 255, 255));
+        if invert {
+            // Fill the entire canvas with black (controls are in HTML sidebar)
+            rb.blend_bar(
+                0,
+                0,
+                width as i32,
+                height as i32,
+                &Rgba8::new(0, 0, 0, 255),
+                255,
+            );
+        }
+    }
+
+    // Step 2: Render text
+    let mut sl = ScanlineU8::new();
+    let mut ras = RasterizerScanlineAa::new();
+
+    let text_height = font_scale * 12.0;
+    let texts: [(&str, bool); 4] = [
+        (TEXT1, false),
+        (TEXT2, true),
+        (TEXT3, false),
+        (TEXT4, true),
+    ];
+
+    if grayscale {
+        // Grayscale rendering: standard RGBA32 pipeline at 1x scale
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        // Clip to full canvas (controls are in HTML sidebar, not on canvas)
+        ras.clip_box(0.0, 0.0, width as f64, height as f64);
+
+        // Top-down coords: start near top of canvas
+        let mut y = 20.0;
+        for &(text, italic) in &texts {
+            let font_data = if italic { font_italic } else { font_regular };
+            let mut fman = FontCacheManager::from_data(font_data.to_vec())
+                .expect("Failed to load font");
+
+            y = draw_text_lcd(
+                &mut ras,
+                &mut sl,
+                &mut rb,
+                &mut fman,
+                text,
+                10.0,
+                y,
+                text_height,
+                1, // subpixel_scale = 1 for grayscale
+                invert,
+                kerning,
+                hinting,
+                faux_italic,
+                faux_weight,
+                width_val,
+                interval,
+            );
+            y += 7.0 + text_height; // top-down: move DOWN for next paragraph
+        }
+    } else {
+        // LCD subpixel rendering: 3x horizontal resolution
+        let lut = LcdDistributionLut::new(primary_weight, 2.0 / 9.0, 1.0 / 9.0);
+        let pf_lcd = PixfmtRgba32Lcd::new(&mut ra, &lut);
+        let mut rb_lcd = RendererBase::new(pf_lcd);
+
+        // Clip box in 3x subpixel space, full canvas height
+        ras.clip_box(0.0, 0.0, (width * 3) as f64, height as f64);
+
+        // Top-down coords: start near top of canvas
+        let mut y = 20.0;
+        for &(text, italic) in &texts {
+            let font_data = if italic { font_italic } else { font_regular };
+            let mut fman = FontCacheManager::from_data(font_data.to_vec())
+                .expect("Failed to load font");
+
+            y = draw_text_lcd(
+                &mut ras,
+                &mut sl,
+                &mut rb_lcd,
+                &mut fman,
+                text,
+                10.0,
+                y,
+                text_height,
+                3, // subpixel_scale = 3 for LCD
+                invert,
+                kerning,
+                hinting,
+                faux_italic,
+                faux_weight,
+                width_val,
+                interval,
+            );
+            y += 7.0 + text_height; // top-down: move DOWN for next paragraph
+        }
+    }
+
+    // Step 3: Apply inverse gamma correction
+    // C++: pf.apply_gamma_inv(m_gamma_lut)
+    if (gamma_val - 1.0).abs() > 0.01 {
+        let gamma_lut = GammaLut::new_with_gamma(gamma_val);
+        let mut pf = PixfmtRgba32::new(&mut ra);
+        pf.apply_gamma_inv(&gamma_lut);
+    }
 
     buf
 }

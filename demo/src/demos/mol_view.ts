@@ -64,6 +64,7 @@ export function init(container: HTMLElement) {
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
   canvas.addEventListener('contextmenu', onContextMenu);
 
   // Molecule radio buttons
@@ -119,6 +120,7 @@ export function init(container: HTMLElement) {
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointercancel', onPointerUp);
     canvas.removeEventListener('contextmenu', onContextMenu);
     cleanupCC();
   };
