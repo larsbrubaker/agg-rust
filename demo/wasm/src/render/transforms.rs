@@ -843,11 +843,49 @@ pub fn trans_curve1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Trans Curve 2
 // ============================================================================
 
-/// Text along a curved path (second variant) — uses trans_single_path with different layout.
+/// Text warped between two curved paths using TrueType font outlines
+/// and trans_double_path. Matching C++ trans_curve2_ft.cpp.
 ///
-/// params[0] = num_points (10-400, default 200)
+/// params[0]       = num_points (10-400, default 200)
+/// params[1..12]   = poly1 control points x,y pairs (6 points)
+/// params[13..24]  = poly2 control points x,y pairs (6 points)
+/// params[25]      = preserve_x_scale (0 or 1, default 1)
+/// params[26]      = fixed_length (0 or 1, default 1)
+/// params[27]      = animate (0 or 1, default 0)
 pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    use agg_rust::trans_double_path::TransDoublePath;
+
     let num_points = params.first().copied().unwrap_or(200.0).clamp(10.0, 400.0);
+
+    // Default control points matching C++ on_init():
+    // poly1: offset (+10, -10) from diagonal
+    // poly2: offset (-10, +10) from diagonal
+    let default_poly1 = [
+        60.0, 40.0,     // 10+50, -10+50
+        180.0, 120.0,   // 10+150+20, -10+150-20
+        240.0, 260.0,   // 10+250-20, -10+250+20
+        380.0, 320.0,   // 10+350+20, -10+350-20
+        440.0, 460.0,   // 10+450-20, -10+450+20
+        560.0, 540.0,   // 10+550, -10+550
+    ];
+    let default_poly2 = [
+        40.0, 60.0,     // -10+50, 10+50
+        160.0, 140.0,   // -10+150+20, 10+150-20
+        220.0, 280.0,   // -10+250-20, 10+250+20
+        360.0, 340.0,   // -10+350+20, 10+350-20
+        420.0, 480.0,   // -10+450-20, 10+450+20
+        540.0, 560.0,   // -10+550, 10+550
+    ];
+
+    let pts1: Vec<f64> = (0..12)
+        .map(|i| params.get(i + 1).copied().unwrap_or(default_poly1[i]))
+        .collect();
+    let pts2: Vec<f64> = (0..12)
+        .map(|i| params.get(i + 13).copied().unwrap_or(default_poly2[i]))
+        .collect();
+    let preserve_x_scale = params.get(25).copied().unwrap_or(1.0) > 0.5;
+    let fixed_length = params.get(26).copied().unwrap_or(1.0) > 0.5;
+    let animate = params.get(27).copied().unwrap_or(0.0) > 0.5;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -859,77 +897,176 @@ pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    let w = width as f64;
-    let h = height as f64;
+    // Build B-splines from control points
+    let n_pts = 6;
+    let xs1: Vec<f64> = (0..n_pts).map(|i| pts1[i * 2]).collect();
+    let ys1: Vec<f64> = (0..n_pts).map(|i| pts1[i * 2 + 1]).collect();
+    let xs2: Vec<f64> = (0..n_pts).map(|i| pts2[i * 2]).collect();
+    let ys2: Vec<f64> = (0..n_pts).map(|i| pts2[i * 2 + 1]).collect();
+    let ts: Vec<f64> = (0..n_pts).map(|i| i as f64).collect();
 
-    // Build a sinusoidal path
-    let mut tcurve = TransSinglePath::new();
+    let mut bspline_x1 = Bspline::new();
+    let mut bspline_y1 = Bspline::new();
+    let mut bspline_x2 = Bspline::new();
+    let mut bspline_y2 = Bspline::new();
+    bspline_x1.init(&ts, &xs1);
+    bspline_y1.init(&ts, &ys1);
+    bspline_x2.init(&ts, &xs2);
+    bspline_y2.init(&ts, &ys2);
+
+    // Build trans_double_path from both B-splines
+    let mut tcurve = TransDoublePath::new();
+    tcurve.set_preserve_x_scale(preserve_x_scale);
+    if fixed_length {
+        tcurve.set_base_length(1140.0);
+    }
+    tcurve.set_base_height(30.0);
+
     let step = 1.0 / num_points;
-    let mut first = true;
+    // Feed path 1
     let mut t = 0.0;
-    while t <= 1.0 + 0.001 {
-        let x = 50.0 + t * (w - 100.0);
-        let y = h / 2.0 + (t * 4.0 * std::f64::consts::PI).sin() * 120.0;
-        if first {
-            tcurve.move_to(x, y);
-            first = false;
-        } else {
-            tcurve.line_to(x, y);
-        }
+    let mut first = true;
+    while t <= (n_pts - 1) as f64 + 0.001 {
+        let x = bspline_x1.get(t);
+        let y = bspline_y1.get(t);
+        if first { tcurve.move_to1(x, y); first = false; } else { tcurve.line_to1(x, y); }
         t += step;
     }
-    tcurve.finalize_path();
-
-    // Render the path
-    let mut path = PathStorage::new();
-    first = true;
+    // Feed path 2
     t = 0.0;
-    while t <= 1.0 + 0.001 {
-        let x = 50.0 + t * (w - 100.0);
-        let y = h / 2.0 + (t * 4.0 * std::f64::consts::PI).sin() * 120.0;
-        if first { path.move_to(x, y); first = false; } else { path.line_to(x, y); }
+    first = true;
+    while t <= (n_pts - 1) as f64 + 0.001 {
+        let x = bspline_x2.get(t);
+        let y = bspline_y2.get(t);
+        if first { tcurve.move_to2(x, y); first = false; } else { tcurve.line_to2(x, y); }
         t += step;
     }
-    let mut path_stroke = ConvStroke::new(&mut path);
-    path_stroke.set_width(2.0);
-    ras.reset();
-    ras.add_path(&mut path_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(170, 50, 20, 100));
+    tcurve.finalize_paths();
 
-    // Render text along the curve
-    let text_str = "This text follows a sinusoidal path using trans_single_path transformation";
-    let mut text = GsvText::new();
-    text.size(18.0, 0.0);
-    text.start_point(0.0, 0.0);
-    text.text(text_str);
+    // ===== Render TrueType text between the two curves =====
+    let text_str = "Anti-Grain Geometry is designed as a set of loosely coupled \
+        algorithms and class templates united with a common idea, \
+        so that all the components can be easily combined. Also, \
+        the template based design allows you to replace any part of \
+        the library without the necessity to modify a single byte in \
+        the existing code. ";
 
-    let mut segm = ConvSegmentator::new(&mut text);
-    segm.set_approximation_scale(3.0);
-    segm.rewind(0);
+    let mut fman = FontCacheManager::from_data(LIBERATION_SERIF_ITALIC.to_vec())
+        .expect("Failed to load embedded font");
+    fman.engine_mut().set_height(40.0);
+    fman.engine_mut().set_hinting(false);
 
-    let mut transformed = PathStorage::new();
-    let (mut x, mut y) = (0.0, 0.0);
-    loop {
-        let cmd = segm.vertex(&mut x, &mut y);
-        if is_stop(cmd) { break; }
-        if is_vertex(cmd) {
-            tcurve.transform(&mut x, &mut y);
-            if (cmd & 0x07) == 1 { transformed.move_to(x, y); } else { transformed.line_to(x, y); }
+    let mut x = 0.0_f64;
+    let mut y = 3.0_f64;
+
+    for ch in text_str.chars() {
+        let char_code = ch as u32;
+
+        let glyph_info = match fman.glyph(char_code) {
+            Some(g) => (g.advance_x, g.advance_y, g.data_type),
+            None => continue,
+        };
+        let (adv_x, adv_y, data_type) = glyph_info;
+
+        if x > tcurve.total_length1() {
+            break;
+        }
+
+        fman.add_kerning(char_code, &mut x, &mut y);
+        fman.init_embedded_adaptors(char_code, x, y);
+
+        if data_type == agg_rust::font_engine::GlyphDataType::Outline {
+            let adaptor = fman.path_adaptor_mut();
+            let mut fcurves = ConvCurve::new(adaptor);
+            fcurves.set_approximation_scale(5.0);
+            let mut fsegm = ConvSegmentator::new(&mut fcurves);
+            fsegm.set_approximation_scale(3.0);
+            let mut ftrans = ConvTransform::new(&mut fsegm, &tcurve);
+
+            ras.reset();
+            ras.add_path(&mut ftrans, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+        }
+
+        x += adv_x;
+        y += adv_y;
+    }
+
+    // Render both B-spline curves as strokes
+    let curve_color = Rgba8::new(170, 50, 20, 100);
+    for curve_idx in 0..2 {
+        let (bx, by) = if curve_idx == 0 {
+            (&bspline_x1, &bspline_y1)
         } else {
-            transformed.close_polygon(0);
+            (&bspline_x2, &bspline_y2)
+        };
+        let mut curve_path = PathStorage::new();
+        first = true;
+        t = 0.0;
+        while t <= (n_pts - 1) as f64 + 0.001 {
+            let cx = bx.get(t);
+            let cy = by.get(t);
+            if first { curve_path.move_to(cx, cy); first = false; } else { curve_path.line_to(cx, cy); }
+            t += step;
+        }
+        let mut curve_stroke = ConvStroke::new(&mut curve_path);
+        curve_stroke.set_width(2.0);
+        ras.reset();
+        ras.add_path(&mut curve_stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &curve_color);
+    }
+
+    // Render interactive polygon tools (connecting lines + circles)
+    // Matching C++ r.color(agg::rgba(0, 0.3, 0.5, 0.2))
+    let poly_color = Rgba8::new(0, 77, 128, 51);
+
+    for poly_pts in [&pts1, &pts2] {
+        // Connecting lines
+        let mut poly_path = PathStorage::new();
+        for i in 0..n_pts {
+            let px = poly_pts[i * 2];
+            let py = poly_pts[i * 2 + 1];
+            if i == 0 { poly_path.move_to(px, py); } else { poly_path.line_to(px, py); }
+        }
+        let mut poly_stroke = ConvStroke::new(&mut poly_path);
+        poly_stroke.set_width(1.0);
+        ras.reset();
+        ras.add_path(&mut poly_stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &poly_color);
+
+        // Control point circles
+        for i in 0..n_pts {
+            let cx = poly_pts[i * 2];
+            let cy = poly_pts[i * 2 + 1];
+            let mut ell = Ellipse::new(cx, cy, 5.0, 5.0, 16, false);
+            ras.reset();
+            ras.add_path(&mut ell, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &poly_color);
         }
     }
 
-    ras.reset();
-    ras.add_path(&mut transformed, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 100, 255));
-
-    // Slider
-    let mut s_pts = SliderCtrl::new(5.0, 5.0, w - 5.0, 12.0);
+    // Controls matching C++ layout:
+    //   m_num_points       (5, 5, 340, 12)
+    //   m_fixed_len        (350, 5, "Fixed Length")
+    //   m_preserve_x_scale (465, 5, "Preserve X scale")
+    //   m_animate          (350, 25, "Animate")
+    let mut s_pts = SliderCtrl::new(5.0, 5.0, 340.0, 12.0);
     s_pts.range(10.0, 400.0);
-    s_pts.label("Num Points=%.0f");
+    s_pts.label("Number of intermediate Points = %.3f");
     s_pts.set_value(num_points);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_pts);
+
+    let mut cb_fixed = CboxCtrl::new(350.0, 5.0, "Fixed Length");
+    cb_fixed.set_status(fixed_length);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_fixed);
+
+    let mut cb_preserve = CboxCtrl::new(465.0, 5.0, "Preserve X scale");
+    cb_preserve.set_status(preserve_x_scale);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_preserve);
+
+    let mut cb_animate = CboxCtrl::new(350.0, 25.0, "Animate");
+    cb_animate.set_status(animate);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut cb_animate);
 
     buf
 }

@@ -146,6 +146,9 @@ pub mod embedded_raster_fonts;
 pub mod glyph_raster_bin;
 pub mod renderer_raster_text;
 
+// Phase 15b: Double-path transformer
+pub mod trans_double_path;
+
 // Phase 16: TrueType Font Engine (optional, requires `font` feature)
 #[cfg(feature = "font")]
 pub mod font_engine;
