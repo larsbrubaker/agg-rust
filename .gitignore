@@ -2,6 +2,7 @@
 *.svg
 *.png
 !docs/screenshot.png
+!demo/public/thumbnails/*.png
 *.bmp
 node_modules/
 demo/dist/
