@@ -53,6 +53,8 @@ export const HISTORY_SECTIONS: HistorySection[] = [
       'Download links are historical snapshots. Prefer the Rust repository and releases for current work.',
     currentLinks: [
       { label: 'Rust Port on GitHub', href: 'https://github.com/larsbrubaker/agg-rust' },
+      { label: 'Crate on crates.io', href: 'https://crates.io/crates/agg-rust' },
+      { label: 'API Docs on docs.rs', href: 'https://docs.rs/agg-rust' },
       { label: 'Rust Port Releases', href: 'https://github.com/larsbrubaker/agg-rust/releases' },
     ],
   },

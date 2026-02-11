@@ -447,8 +447,11 @@ body {
   margin-top: 2px;
 }
 
-.github-badge {
+.project-links {
   margin-bottom: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .github-badge-link {

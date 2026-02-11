@@ -1,6 +1,7 @@
 # AGG.rs — Anti-Grain Geometry for Rust
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/agg-rust.svg)](https://crates.io/crates/agg-rust)
 [![Tests](https://img.shields.io/badge/tests-903_passing-brightgreen.svg)](#)
 [![Modules](https://img.shields.io/badge/modules-88_ported-brightgreen.svg)](#)
 [![Demos](https://img.shields.io/badge/demos-64_interactive-orange.svg)](https://larsbrubaker.github.io/agg-rust/)
@@ -8,6 +9,8 @@
 A pure Rust port of [Anti-Grain Geometry (AGG) 2.6](https://github.com/ghaerr/agg-2.6) — the legendary high-quality 2D software rendering library originally written in C++ by [Maxim Shemanarev](http://www.antigrain.com). Zero external dependencies. Pixel-perfect anti-aliased output. No GPU required.
 
 **[Try the Interactive Demo](https://larsbrubaker.github.io/agg-rust/)** — 64 demos running entirely in your browser via WebAssembly.
+
+Crate listing: **[`agg-rust` on crates.io](https://crates.io/crates/agg-rust)**.
 
 <p align="center">
   <a href="https://larsbrubaker.github.io/agg-rust/">
@@ -72,7 +75,7 @@ All 64 demos run in-browser via WebAssembly with no server-side processing. Cate
 
 ```toml
 [dependencies]
-agg-rust = "0.1"
+agg-rust = "1.0"
 ```
 
 ```rust
