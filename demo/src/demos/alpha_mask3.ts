@@ -1,4 +1,4 @@
-import { createDemoLayout, renderToCanvas } from '../render-canvas.ts';
+import { addRadioGroup, createDemoLayout, renderToCanvas } from '../render-canvas.ts';
 import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
@@ -10,10 +10,18 @@ export function init(container: HTMLElement) {
 
   const W = 640, H = 520;
 
-  let scenario = 0;
+  let scenario = 3;
   let operation = 0;
   let mouseX = W / 2;
   let mouseY = H / 2;
+  const scenarioLabels = [
+    'Two Simple Paths',
+    'Closed Stroke',
+    'Great Britain and Arrows',
+    'Great Britain and Spiral',
+    'Spiral and Glyph',
+  ];
+  const operationLabels = ['AND', 'SUB'];
 
   function draw() {
     renderToCanvas({
@@ -24,21 +32,32 @@ export function init(container: HTMLElement) {
     });
   }
 
-  // Mouse drag for position
+  // Mouse drag for position (AGG uses lower-left origin).
+  const aggMousePos = (e: PointerEvent): { x: number; y: number } => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const yTop = (e.clientY - rect.top) * scaleY;
+    return { x, y: H - yTop };
+  };
+
   let dragging = false;
   const onPointerDown = (e: PointerEvent) => {
     if (e.button === 0) {
+      const p = aggMousePos(e);
+      mouseX = p.x;
+      mouseY = p.y;
+      draw();
       dragging = true;
       canvas.setPointerCapture(e.pointerId);
     }
   };
   const onPointerMove = (e: PointerEvent) => {
-    if (!dragging) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
-    mouseX = (e.clientX - rect.left) * scaleX;
-    mouseY = (e.clientY - rect.top) * scaleY;
+    if (!dragging || (e.buttons & 1) === 0) return;
+    const p = aggMousePos(e);
+    mouseX = p.x;
+    mouseY = p.y;
     draw();
   };
   const onPointerUp = () => { dragging = false; };
@@ -47,62 +66,74 @@ export function init(container: HTMLElement) {
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
 
-  // Scenario radio buttons
-  const scenarioDiv = document.createElement('div');
-  scenarioDiv.className = 'control-group';
-  const scenarioLabel = document.createElement('label');
-  scenarioLabel.className = 'control-label';
-  scenarioLabel.textContent = 'Scenario';
-  scenarioDiv.appendChild(scenarioLabel);
-  const scenarioNames = ['Two Triangles', 'Star', 'Spiral', 'Pentagons', 'Hexagons'];
-  scenarioNames.forEach((name, i) => {
-    const row = document.createElement('label');
-    row.style.display = 'block';
-    row.style.cursor = 'pointer';
-    row.style.marginBottom = '2px';
-    const rb = document.createElement('input');
-    rb.type = 'radio';
-    rb.name = 'am3_scenario';
-    rb.value = String(i);
-    rb.checked = i === scenario;
-    rb.addEventListener('change', () => { scenario = i; draw(); });
-    row.appendChild(rb);
-    row.appendChild(document.createTextNode(' ' + name));
-    scenarioDiv.appendChild(row);
-  });
-  sidebar.appendChild(scenarioDiv);
+  // C++ rbox renders first item at the bottom. Show sidebar in the same visual order.
+  const scenarioLabelsUi = [...scenarioLabels].reverse();
+  const scenarioInputsUi = addRadioGroup(
+    sidebar,
+    'Polygons',
+    scenarioLabelsUi,
+    scenarioLabels.length - 1 - scenario,
+    (uiIndex) => {
+      scenario = scenarioLabels.length - 1 - uiIndex;
+      draw();
+    },
+  );
+  const scenarioInputs: HTMLInputElement[] = new Array(scenarioLabels.length);
+  for (let uiIndex = 0; uiIndex < scenarioLabels.length; uiIndex++) {
+    const logicalIndex = scenarioLabels.length - 1 - uiIndex;
+    scenarioInputs[logicalIndex] = scenarioInputsUi[uiIndex];
+  }
 
-  // Operation radio buttons
-  const opDiv = document.createElement('div');
-  opDiv.className = 'control-group';
-  const opLabel = document.createElement('label');
-  opLabel.className = 'control-label';
-  opLabel.textContent = 'Operation';
-  opDiv.appendChild(opLabel);
-  const opNames = ['AND (intersect)', 'SUB (subtract)'];
-  opNames.forEach((name, i) => {
-    const row = document.createElement('label');
-    row.style.display = 'block';
-    row.style.cursor = 'pointer';
-    row.style.marginBottom = '2px';
-    const rb = document.createElement('input');
-    rb.type = 'radio';
-    rb.name = 'am3_operation';
-    rb.value = String(i);
-    rb.checked = i === operation;
-    rb.addEventListener('change', () => { operation = i; draw(); });
-    row.appendChild(rb);
-    row.appendChild(document.createTextNode(' ' + name));
-    opDiv.appendChild(row);
-  });
-  sidebar.appendChild(opDiv);
+  const operationLabelsUi = [...operationLabels].reverse();
+  const operationInputsUi = addRadioGroup(
+    sidebar,
+    'Operation',
+    operationLabelsUi,
+    operationLabels.length - 1 - operation,
+    (uiIndex) => {
+      operation = operationLabels.length - 1 - uiIndex;
+      draw();
+    },
+  );
+  const operationInputs: HTMLInputElement[] = new Array(operationLabels.length);
+  for (let uiIndex = 0; uiIndex < operationLabels.length; uiIndex++) {
+    const logicalIndex = operationLabels.length - 1 - uiIndex;
+    operationInputs[logicalIndex] = operationInputsUi[uiIndex];
+  }
 
-  const controls: CanvasControl[] = [];
+  const controls: CanvasControl[] = [
+    {
+      type: 'radio',
+      x1: 5,
+      y1: 5,
+      x2: 210,
+      y2: 110,
+      numItems: 5,
+      sidebarEls: scenarioInputs,
+      onChange: (index: number) => {
+        scenario = index;
+        draw();
+      },
+    },
+    {
+      type: 'radio',
+      x1: 555,
+      y1: 5,
+      x2: 635,
+      y2: 55,
+      numItems: 2,
+      sidebarEls: operationInputs,
+      onChange: (index: number) => {
+        operation = index;
+        draw();
+      },
+    },
+  ];
   const cleanupCC = setupCanvasControls(canvas, controls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';
-  hint.textContent = 'Drag on canvas to move the second polygon. Choose scenario and operation.';
+  hint.textContent = 'Left-click or drag on canvas to move shapes. Canvas and sidebar controls are synchronized.';
   sidebar.appendChild(hint);
 
   draw();

@@ -1,6 +1,7 @@
 // Main entry point — SPA router and WASM initialization
 
 import { initWasm } from './wasm.ts';
+import { renderHistoryRoute } from './legacy/renderer.ts';
 
 // Demo page modules (lazy loaded)
 type DemoInit = (container: HTMLElement) => (() => void) | void;
@@ -52,6 +53,7 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'polymorphic_renderer': () => import('./demos/polymorphic_renderer.ts'),
   'scanline_boolean': () => import('./demos/scanline_boolean.ts'),
   'scanline_boolean2': () => import('./demos/scanline_boolean2.ts'),
+  'gpc_test': () => import('./demos/scanline_boolean2.ts'),
   'pattern_fill': () => import('./demos/pattern_fill.ts'),
   'pattern_perspective': () => import('./demos/pattern_perspective.ts'),
   'pattern_resample': () => import('./demos/pattern_resample.ts'),
@@ -130,6 +132,7 @@ const thumbnails: Record<string, string> = {
   'rounded_rect': 'rounded_rect.gif',
   'scanline_boolean': 'scanline_boolean.gif',
   'scanline_boolean2': 'scanline_boolean2.gif',
+  'gpc_test': 'scanline_boolean2.gif',
   'simple_blur': 'simple_blur.gif',
   'trans_curve1': 'trans_curve1.gif',
   'trans_curve2': 'trans_curve2.gif',
@@ -147,6 +150,34 @@ function thumbImg(route: string, cssClass: string): string {
 }
 
 let currentCleanup: (() => void) | null = null;
+let currentRouteKey: string | null = null;
+const routeScrollPositions = new Map<string, number>();
+
+function canonicalRoute(route: string): string {
+  if (route === 'legacy') return 'history';
+  if (route.startsWith('legacy/')) return `history/${route.slice('legacy/'.length)}`;
+  return route;
+}
+
+function saveCurrentRouteScroll() {
+  if (!currentRouteKey) return;
+  routeScrollPositions.set(currentRouteKey, window.scrollY || window.pageYOffset || 0);
+}
+
+function restoreRouteScroll(routeKey: string) {
+  const targetY = routeScrollPositions.get(routeKey) ?? 0;
+  // Two RAF ticks ensure DOM/layout is settled after route render.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: targetY, left: 0, behavior: 'auto' });
+    });
+  });
+}
+
+function finalizeNavigation(routeKey: string) {
+  currentRouteKey = routeKey;
+  restoreRouteScroll(routeKey);
+}
 
 function getRoute(): string {
   const hash = window.location.hash.slice(2) || '';
@@ -179,6 +210,7 @@ function updateNav(route: string) {
 
 // Demo card definitions for the home page grid
 const demoCards: Array<{ route: string; title: string; desc: string }> = [
+  { route: 'history', title: 'AGG History and Living Project', desc: 'The original AGG site in a modernized light theme, connected directly to ongoing Rust-port work and interactive demos.' },
   { route: 'lion', title: 'Lion', desc: 'The classic AGG lion &mdash; a complex vector graphic with rotation and scaling controls.' },
   { route: 'gradients', title: 'Gradients', desc: 'Linear and radial gradient fills with multi-stop color interpolation.' },
   { route: 'gouraud', title: 'Gouraud Shading', desc: 'Smooth color interpolation across triangles using Gouraud shading.' },
@@ -220,12 +252,13 @@ const demoCards: Array<{ route: string; title: string; desc: string }> = [
   { route: 'trans_curve1', title: 'Text on Curve', desc: 'Text warped along a B-spline curve with draggable control points.' },
   { route: 'trans_curve2', title: 'Text on Curve 2', desc: 'Text warped along a curve with adjustable approximation scale.' },
   { route: 'lion_lens', title: 'Lion Lens', desc: 'Magnifying lens distortion on the lion using trans_warp_magnifier.' },
-  { route: 'distortions', title: 'Distortions', desc: 'Wave and swirl distortions on a procedural image with adjustable parameters.' },
+  { route: 'distortions', title: 'Distortions', desc: 'Animated wave and swirl distortions on image and gradient sources with adjustable controls.' },
   { route: 'blend_color', title: 'Blend Color', desc: 'Color blending modes with alpha compositing demonstration.' },
   { route: 'component_rendering', title: 'Component Rendering', desc: 'Per-component rendering of individual color channels.' },
   { route: 'polymorphic_renderer', title: 'Polymorphic Renderer', desc: 'Multiple renderer types dispatched through a common interface.' },
   { route: 'scanline_boolean', title: 'Scanline Boolean', desc: 'Boolean operations (AND, OR, XOR, SUB) on scanline shapes.' },
   { route: 'scanline_boolean2', title: 'Scanline Boolean 2', desc: 'Advanced boolean polygon operations with multiple shapes.' },
+  { route: 'gpc_test', title: 'GPC Test (Rust Replacement)', desc: 'Original GPC test workflow mapped to the Rust boolean-operations demo implementation.' },
   { route: 'pattern_fill', title: 'Pattern Fill', desc: 'Tiled pattern fill on polygon shapes.' },
   { route: 'pattern_perspective', title: 'Pattern Perspective', desc: 'Pattern fill with perspective transformation.' },
   { route: 'pattern_resample', title: 'Pattern Resample', desc: 'Pattern resampling with various filter types.' },
@@ -309,6 +342,9 @@ function renderHome(container: HTMLElement) {
 
 async function navigate(route: string) {
   const container = document.getElementById('main-content')!;
+  const canonicalRouteKey = canonicalRoute(route);
+
+  saveCurrentRouteScroll();
 
   // Cleanup previous demo
   if (currentCleanup) {
@@ -316,16 +352,29 @@ async function navigate(route: string) {
     currentCleanup = null;
   }
 
-  updateNav(route);
+  updateNav(canonicalRouteKey);
 
-  if (route === 'home') {
+  if (canonicalRouteKey === 'home') {
     renderHome(container);
+    finalizeNavigation(canonicalRouteKey);
     return;
   }
 
-  const loader = demoModules[route];
+  if (
+    canonicalRouteKey === 'history' ||
+    canonicalRouteKey.startsWith('history/') ||
+    route === 'legacy' ||
+    route.startsWith('legacy/')
+  ) {
+    await renderHistoryRoute(container, canonicalRouteKey);
+    finalizeNavigation(canonicalRouteKey);
+    return;
+  }
+
+  const loader = demoModules[canonicalRouteKey];
   if (!loader) {
-    container.innerHTML = `<div class="home-page"><h2>Page not found</h2><p>Unknown route: ${route}</p></div>`;
+    container.innerHTML = `<div class="home-page"><h2>Page not found</h2><p>Unknown route: ${canonicalRouteKey}</p></div>`;
+    finalizeNavigation(canonicalRouteKey);
     return;
   }
 
@@ -337,9 +386,11 @@ async function navigate(route: string) {
     container.innerHTML = '';
     const cleanup = mod.init(container);
     if (cleanup) currentCleanup = cleanup;
+    finalizeNavigation(canonicalRouteKey);
   } catch (e) {
     console.error('Failed to load demo:', e);
     container.innerHTML = `<div class="home-page"><h2>Error loading demo</h2><pre style="color:var(--accent)">${e}</pre></div>`;
+    finalizeNavigation(canonicalRouteKey);
   }
 }
 

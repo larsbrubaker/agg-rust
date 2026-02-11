@@ -77,6 +77,38 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Vec<u
     }
 }
 
+/// Flash demos: pick nearest editable vertex under cursor.
+///
+/// `demo_name` must be either "flash_rasterizer" or "flash_rasterizer2".
+#[wasm_bindgen]
+pub fn flash_pick_vertex(
+    demo_name: &str,
+    width: u32,
+    height: u32,
+    params: &[f64],
+    x: f64,
+    y: f64,
+    radius: f64,
+) -> i32 {
+    match demo_name {
+        "flash_rasterizer2" => render::flash_pick_vertex(true, width, height, params, x, y, radius),
+        _ => render::flash_pick_vertex(false, width, height, params, x, y, radius),
+    }
+}
+
+/// Flash demos: convert screen/device coordinates to shape-local coordinates.
+#[wasm_bindgen]
+pub fn flash_screen_to_shape(
+    _demo_name: &str,
+    width: u32,
+    height: u32,
+    params: &[f64],
+    x: f64,
+    y: f64,
+) -> Vec<f64> {
+    render::flash_screen_to_shape(width, height, params, x, y)
+}
+
 /// Get the library version string.
 #[wasm_bindgen]
 pub fn version() -> String {

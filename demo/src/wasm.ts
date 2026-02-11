@@ -24,6 +24,32 @@ export function renderDemo(name: string, width: number, height: number, params: 
   return new Uint8Array(result);
 }
 
+export function flashPickVertex(
+  demoName: 'flash_rasterizer' | 'flash_rasterizer2',
+  width: number,
+  height: number,
+  params: number[],
+  x: number,
+  y: number,
+  radius: number,
+): number {
+  const w = getWasm();
+  return w.flash_pick_vertex(demoName, width, height, new Float64Array(params), x, y, radius);
+}
+
+export function flashScreenToShape(
+  demoName: 'flash_rasterizer' | 'flash_rasterizer2',
+  width: number,
+  height: number,
+  params: number[],
+  x: number,
+  y: number,
+): [number, number] {
+  const w = getWasm();
+  const out = w.flash_screen_to_shape(demoName, width, height, new Float64Array(params), x, y) as number[] | Float64Array;
+  return [out[0] ?? x, out[1] ?? y];
+}
+
 /**
  * Get AGG-Rust version.
  */

@@ -203,13 +203,27 @@ export function setupCanvasControls(
       e.stopPropagation();
       e.preventDefault();
     } else if (ctrl.type === 'radio') {
-      // Determine which item was clicked by y position
-      const itemHeight = (ctrl.y2 - ctrl.y1) / ctrl.numItems;
-      const idx = Math.floor((pos.y - ctrl.y1) / itemHeight);
-      const clamped = Math.max(0, Math.min(ctrl.numItems - 1, idx));
-      if (ctrl.sidebarEls[clamped]) {
-        ctrl.sidebarEls[clamped].checked = true;
-        ctrl.sidebarEls[clamped].dispatchEvent(new Event('change'));
+      // Match AGG rbox_ctrl hit testing:
+      // click only counts when it's inside an item's radio circle.
+      const textHeight = 9.0;
+      const dy = textHeight * 2.0;
+      const xs1 = ctrl.x1 + 1.0;
+      const ys1 = ctrl.y1 + 1.0;
+      const cx = xs1 + dy / 1.3;
+      const radius = textHeight / 1.5;
+      let picked = -1;
+      for (let i = 0; i < ctrl.numItems; i++) {
+        const cy = ys1 + dy * i + dy / 1.3;
+        const dx = pos.x - cx;
+        const dyClick = pos.y - cy;
+        if (Math.hypot(dx, dyClick) <= radius) {
+          picked = i;
+          break;
+        }
+      }
+      if (picked >= 0 && ctrl.sidebarEls[picked]) {
+        ctrl.sidebarEls[picked].checked = true;
+        ctrl.sidebarEls[picked].dispatchEvent(new Event('change'));
       }
       e.stopPropagation();
       e.preventDefault();

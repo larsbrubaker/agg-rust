@@ -1,0 +1,221 @@
+{
+  "generatedAt": "2026-02-11T16:30:43.386Z",
+  "entries": [
+    {
+      "route": "history/home",
+      "sourcePath": "index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/index.html",
+      "title": "Main Page",
+      "contentPath": "./public/history/fragments/history_home.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/about",
+      "sourcePath": "about/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/about/index.html",
+      "title": "About the Project",
+      "contentPath": "./public/history/fragments/history_about.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/news",
+      "sourcePath": "news/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/news/index.html",
+      "title": "News and History",
+      "contentPath": "./public/history/fragments/history_news.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/license",
+      "sourcePath": "license/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/license/index.html",
+      "title": "The License",
+      "contentPath": "./public/history/fragments/history_license.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/download",
+      "sourcePath": "download/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/download/index.html",
+      "title": "Download",
+      "contentPath": "./public/history/fragments/history_download.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/screenshots",
+      "sourcePath": "screenshots/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/screenshots/index.html",
+      "title": "Screenshots",
+      "contentPath": "./public/history/fragments/history_screenshots.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/demo",
+      "sourcePath": "demo/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/demo/index.html",
+      "title": "Demo Examples",
+      "contentPath": "./public/history/fragments/history_demo.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/svg",
+      "sourcePath": "svg/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/svg/index.html",
+      "title": "A Simple SVG Viewer",
+      "contentPath": "./public/history/fragments/history_svg.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/docs",
+      "sourcePath": "doc/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/doc/index.html",
+      "title": "AGG Reference Manual",
+      "contentPath": "./public/history/fragments/history_docs.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/tips",
+      "sourcePath": "tips/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/index.html",
+      "title": "Tips and Tricks",
+      "contentPath": "./public/history/fragments/history_tips.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/research",
+      "sourcePath": "research/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/research/index.html",
+      "title": "Research",
+      "contentPath": "./public/history/fragments/history_research.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/svn",
+      "sourcePath": "svn/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/svn/index.html",
+      "title": "The SVN Repository",
+      "contentPath": "./public/history/fragments/history_svn.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/sponsors",
+      "sourcePath": "sponsors/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/sponsors/index.html",
+      "title": "AGG Sponsors",
+      "contentPath": "./public/history/fragments/history_sponsors.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/customers",
+      "sourcePath": "customers/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/customers/index.html",
+      "title": "Users and Customers",
+      "contentPath": "./public/history/fragments/history_customers.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/links",
+      "sourcePath": "links/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/links/index.html",
+      "title": "Links",
+      "contentPath": "./public/history/fragments/history_links.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/contact",
+      "sourcePath": "mcseem/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/mcseem/index.html",
+      "title": "Maxim Shemanarev",
+      "contentPath": "./public/history/fragments/history_contact.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/research/adaptive_bezier/index.html",
+      "sourcePath": "research/adaptive_bezier/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/research/adaptive_bezier/index.html",
+      "title": "Adaptive Subdivision of Bezier Curves",
+      "contentPath": "./public/history/fragments/history_page_research_adaptive_bezier_index.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/research/bezier_interpolation/index.html",
+      "sourcePath": "research/bezier_interpolation/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/research/bezier_interpolation/index.html",
+      "title": "Interpolation with Bezier Curves",
+      "contentPath": "./public/history/fragments/history_page_research_bezier_interpolation_index.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/research/flash_rasterizer/index.html",
+      "sourcePath": "research/flash_rasterizer/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/research/flash_rasterizer/index.html",
+      "title": "Perfect Rasterization of Flash Compound Shapes",
+      "contentPath": "./public/history/fragments/history_page_research_flash_rasterizer_index.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/research/font_rasterization/index.html",
+      "sourcePath": "research/font_rasterization/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/research/font_rasterization/index.html",
+      "title": "Texts Rasterization Exposures",
+      "contentPath": "./public/history/fragments/history_page_research_font_rasterization_index.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/research/gamma_correction/index.html",
+      "sourcePath": "research/gamma_correction/index.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/research/gamma_correction/index.html",
+      "title": "Gamma Correction",
+      "contentPath": "./public/history/fragments/history_page_research_gamma_correction_index.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/tips/gradients_tutorial/gradients_tutorial.agdoc.html",
+      "sourcePath": "tips/gradients_tutorial/gradients_tutorial.agdoc.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/gradients_tutorial/gradients_tutorial.agdoc.html",
+      "title": "Working with Gradients",
+      "contentPath": "./public/history/fragments/history_page_tips_gradients_tutorial_gradients_tutorial.agdoc.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/tips/image_plg/image_plg.agdoc.html",
+      "sourcePath": "tips/image_plg/image_plg.agdoc.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/image_plg/image_plg.agdoc.html",
+      "title": "Image Parallelogram Transformations",
+      "contentPath": "./public/history/fragments/history_page_tips_image_plg_image_plg.agdoc.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/tips/line_alignment/line_alignment.agdoc.html",
+      "sourcePath": "tips/line_alignment/line_alignment.agdoc.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/line_alignment/line_alignment.agdoc.html",
+      "title": "The Problem of Line Alignment",
+      "contentPath": "./public/history/fragments/history_page_tips_line_alignment_line_alignment.agdoc.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/tips/square_color_interpolation/square_color_interpolation.agdoc.html",
+      "sourcePath": "tips/square_color_interpolation/square_color_interpolation.agdoc.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/square_color_interpolation/square_color_interpolation.agdoc.html",
+      "title": "Color Interpolation",
+      "contentPath": "./public/history/fragments/history_page_tips_square_color_interpolation_square_color_interpolation.agdoc.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/tips/win_ce/win_ce.agdoc.html",
+      "sourcePath": "tips/win_ce/win_ce.agdoc.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/win_ce/win_ce.agdoc.html",
+      "title": "Compiling AGG under Microsoft eMbedded VC 4.0",
+      "contentPath": "./public/history/fragments/history_page_tips_win_ce_win_ce.agdoc.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    },
+    {
+      "route": "history/page/tips/win_glyph/win_glyph.agdoc.html",
+      "sourcePath": "tips/win_glyph/win_glyph.agdoc.html",
+      "sourceUrl": "https://agg.sourceforge.net/antigrain.com/tips/win_glyph/win_glyph.agdoc.html",
+      "title": "Using WinAPI to Render Text",
+      "contentPath": "./public/history/fragments/history_page_tips_win_glyph_win_glyph.agdoc.html.html",
+      "generatedAt": "2026-02-11T16:30:43.386Z"
+    }
+  ]
+}

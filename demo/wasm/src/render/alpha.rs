@@ -3,9 +3,10 @@
 //! image_resample, alpha_mask2.
 
 use agg_rust::bounding_rect::bounding_rect;
-use agg_rust::basics::{VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
+use agg_rust::basics::{VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP, PATH_FLAGS_CCW};
+use agg_rust::conv_curve::ConvCurve;
 use agg_rust::bspline::Bspline;
-use agg_rust::color::Rgba8;
+use agg_rust::color::{Gray8, Rgba8};
 use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl};
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
@@ -15,9 +16,11 @@ use agg_rust::gsv_text::GsvText;
 use agg_rust::image_accessors::ImageAccessorClone;
 use agg_rust::image_filters::{ImageFilterBilinear, ImageFilterLut};
 use agg_rust::path_storage::PathStorage;
+use agg_rust::pixfmt_gray::PixfmtGray8;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
 use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
 use agg_rust::renderer_base::RendererBase;
+use agg_rust::renderer_primitives::RendererPrimitives;
 use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid};
 use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::scanline_u::ScanlineU8;
@@ -36,6 +39,7 @@ use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
 use agg_rust::math::calc_orthogonal;
 use agg_rust::math_stroke::{LineCap, LineJoin};
+use super::gb_poly::{make_arrows, make_gb_poly, Spiral};
 use super::{setup_renderer, load_spheres_image};
 use std::sync::OnceLock;
 
@@ -278,9 +282,9 @@ pub fn image_perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8
 }
 
 /// Alpha mask — lion with elliptical alpha mask.
-/// Simplified from C++ alpha_mask.cpp (manual compositing instead of ScanlineU8Am).
+/// Ported from C++ alpha_mask.cpp.
 pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let angle_rad = params.get(0).copied().unwrap_or(0.0);
+    let angle_rad = params.first().copied().unwrap_or(0.0);
     let scale = params.get(1).copied().unwrap_or(1.0).max(0.01);
     let skew_x = params.get(2).copied().unwrap_or(0.0);
     let skew_y = params.get(3).copied().unwrap_or(0.0);
@@ -288,48 +292,46 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
 
-    // Generate alpha mask: 10 random ellipses in grayscale
-    let mask_size = (width * height) as usize;
-    let mut mask = vec![0u8; mask_size];
+    // C++ alpha_mask.cpp uses std::rand() with no explicit seed.
+    // Use MSVC's rand() sequence so the demo visually matches the original on Windows.
+    fn msvc_rand(seed: &mut u32) -> u32 {
+        *seed = seed.wrapping_mul(214013).wrapping_add(2531011);
+        (*seed >> 16) & 0x7fff
+    }
+
+    // Generate gray8 alpha mask with 10 random ellipses.
+    let mut mask_buf = vec![0u8; (width * height) as usize];
     {
-        // Simple deterministic "random" based on seed
-        let mut seed = 1234u32;
-        let rng = |s: &mut u32| -> u32 {
-            *s = s.wrapping_mul(1103515245).wrapping_add(12345);
-            (*s >> 16) & 0x7FFF
-        };
+        let mut mask_ra = RowAccessor::new();
+        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, width as i32) };
+        let mask_pf = PixfmtGray8::new(&mut mask_ra);
+        let mut mask_rb = RendererBase::new(mask_pf);
+        let mut mask_ras = RasterizerScanlineAa::new();
+        let mut mask_sl = ScanlineU8::new();
+        mask_rb.clear(&Gray8::new(0, 255));
 
-        // Render 10 random ellipses into the mask
-        // Each pixel in mask stores max alpha from any overlapping ellipse
-        for _e in 0..10 {
-            let cx = (rng(&mut seed) as f64 / 32767.0) * w;
-            let cy = (rng(&mut seed) as f64 / 32767.0) * h;
-            let rx = (rng(&mut seed) as f64 / 32767.0) * 100.0 + 20.0;
-            let ry = (rng(&mut seed) as f64 / 32767.0) * 100.0 + 20.0;
-            let alpha = (rng(&mut seed) & 0xFF) as u8;
+        let mut seed = 1u32;
+        for _ in 0..10 {
+            let cx = (msvc_rand(&mut seed) % width.max(1)) as f64;
+            let cy = (msvc_rand(&mut seed) % height.max(1)) as f64;
+            let rx = (msvc_rand(&mut seed) % 100 + 20) as f64;
+            let ry = (msvc_rand(&mut seed) % 100 + 20) as f64;
+            let gray = (msvc_rand(&mut seed) & 0xFF) as u32;
+            let alpha = (msvc_rand(&mut seed) & 0xFF) as u32;
 
-            // Rasterize ellipse to mask using simple coverage
-            let x_min = ((cx - rx) as i32).max(0);
-            let x_max = ((cx + rx) as i32 + 1).min(width as i32 - 1);
-            let y_min = ((cy - ry) as i32).max(0);
-            let y_max = ((cy + ry) as i32 + 1).min(height as i32 - 1);
-
-            for y in y_min..=y_max {
-                for x in x_min..=x_max {
-                    let dx = (x as f64 - cx) / rx;
-                    let dy = (y as f64 - cy) / ry;
-                    let d2 = dx * dx + dy * dy;
-                    if d2 <= 1.0 {
-                        let idx = (y as u32 * width + x as u32) as usize;
-                        let val = mask[idx] as u32 + alpha as u32;
-                        mask[idx] = val.min(255) as u8;
-                    }
-                }
-            }
+            let mut ell = Ellipse::new(cx, cy, rx, ry, 100, false);
+            mask_ras.reset();
+            mask_ras.add_path(&mut ell, 0);
+            render_scanlines_aa_solid(
+                &mut mask_ras,
+                &mut mask_sl,
+                &mut mask_rb,
+                &Gray8::new(gray, alpha),
+            );
         }
     }
 
-    // Render lion to a temp buffer
+    // Render lion to a transparent temporary RGBA buffer.
     let (mut path, colors, path_idx) = crate::lion_data::parse_lion();
     let npaths = colors.len();
 
@@ -337,8 +339,8 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
         agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
     );
-    let base_dx = (bbox.x1 + bbox.x2) / 2.0;
-    let base_dy = (bbox.y1 + bbox.y2) / 2.0;
+    let base_dx = (bbox.x2 - bbox.x1) / 2.0;
+    let base_dy = (bbox.y2 - bbox.y1) / 2.0;
 
     let mut mtx = TransAffine::new();
     mtx.multiply(&TransAffine::new_translation(-base_dx, -base_dy));
@@ -347,35 +349,47 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     mtx.multiply(&TransAffine::new_skewing(skew_x / 1000.0, skew_y / 1000.0));
     mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0));
 
-    let mut buf = Vec::new();
-    let mut ra = RowAccessor::new();
-    setup_renderer(&mut buf, &mut ra, width, height);
-    let pf = PixfmtRgba32::new(&mut ra);
-    let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 255, 255));
+    let mut lion_buf = vec![0u8; (width * height * 4) as usize];
+    {
+        let mut lion_ra = RowAccessor::new();
+        unsafe { lion_ra.attach(lion_buf.as_mut_ptr(), width, height, (width * 4) as i32) };
+        let lion_pf = PixfmtRgba32::new(&mut lion_ra);
+        let mut lion_rb = RendererBase::new(lion_pf);
+        lion_rb.clear(&Rgba8::new(0, 0, 0, 0));
 
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-
-    // Render lion with transform
-    let mut transformed = ConvTransform::new(&mut path, mtx);
-    for i in 0..npaths {
-        let start = path_idx[i] as u32;
-        ras.reset();
-        ras.add_path(&mut transformed, start);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &colors[i]);
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+        let mut transformed = ConvTransform::new(&mut path, mtx);
+        for i in 0..npaths {
+            ras.reset();
+            ras.add_path(&mut transformed, path_idx[i] as u32);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut lion_rb, &colors[i]);
+        }
     }
 
-    // Apply alpha mask: multiply each pixel's alpha by mask value
-    for y in 0..height {
-        for x in 0..width {
-            let mask_val = mask[(y * width + x) as usize] as u32;
-            let idx = ((y * width + x) * 4) as usize;
-            // Multiply RGB by mask/255 (pre-multiply alpha effect)
-            buf[idx] = ((buf[idx] as u32 * mask_val) / 255) as u8;
-            buf[idx + 1] = ((buf[idx + 1] as u32 * mask_val) / 255) as u8;
-            buf[idx + 2] = ((buf[idx + 2] as u32 * mask_val) / 255) as u8;
-            buf[idx + 3] = ((buf[idx + 3] as u32 * mask_val) / 255) as u8;
+    // Composite the masked lion over a white background.
+    let mut buf = vec![255u8; (width * height * 4) as usize];
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let i = y * width as usize + x;
+            let pi = i * 4;
+            let sr = lion_buf[pi] as u32;
+            let sg = lion_buf[pi + 1] as u32;
+            let sb = lion_buf[pi + 2] as u32;
+            let sa = lion_buf[pi + 3] as u32;
+            if sa == 0 {
+                continue;
+            }
+            let m = mask_buf[i] as u32;
+            let a = (255 + sa * m) >> 8;
+            if a == 0 {
+                continue;
+            }
+            let inv_a = 255 - a;
+            buf[pi] = ((sr * a + buf[pi] as u32 * inv_a) / 255) as u8;
+            buf[pi + 1] = ((sg * a + buf[pi + 1] as u32 * inv_a) / 255) as u8;
+            buf[pi + 2] = ((sb * a + buf[pi + 2] as u32 * inv_a) / 255) as u8;
+            buf[pi + 3] = 255;
         }
     }
 
@@ -651,13 +665,94 @@ pub fn image_alpha(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 }
 
 /// Alpha mask 3 — alpha mask polygon clipping (AND/SUB).
-/// Simplified from C++ alpha_mask3.cpp.
+/// Ported from C++ alpha_mask3.cpp.
 /// Params: [scenario, operation, mouse_x, mouse_y]
 pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
+    fn generate_alpha_mask<V: VertexSource>(
+        width: u32,
+        height: u32,
+        operation: i32,
+        path: &mut V,
+    ) -> Vec<u8> {
+        let mut mask_buf = vec![0u8; (width * height) as usize];
+        let mut mask_ra = RowAccessor::new();
+        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, width as i32) };
+        let mask_pf = PixfmtGray8::new(&mut mask_ra);
+        let mut mask_rb = RendererBase::new(mask_pf);
+        let mut mask_ras = RasterizerScanlineAa::new();
+        let mut mask_sl = ScanlineU8::new();
+
+        if operation == 0 {
+            mask_rb.clear(&Gray8::new(0, 255));
+            mask_ras.reset();
+            mask_ras.add_path(path, 0);
+            render_scanlines_aa_solid(
+                &mut mask_ras,
+                &mut mask_sl,
+                &mut mask_rb,
+                &Gray8::new(255, 255),
+            );
+        } else {
+            mask_rb.clear(&Gray8::new(255, 255));
+            mask_ras.reset();
+            mask_ras.add_path(path, 0);
+            render_scanlines_aa_solid(
+                &mut mask_ras,
+                &mut mask_sl,
+                &mut mask_rb,
+                &Gray8::new(0, 255),
+            );
+        }
+
+        mask_buf
+    }
+
+    fn render_with_alpha_mask<V: VertexSource>(
+        width: u32,
+        height: u32,
+        path: &mut V,
+        mask: &[u8],
+        color: Rgba8,
+        dst: &mut [u8],
+    ) {
+        let mut temp_buf = vec![0u8; (width * height * 4) as usize];
+        let mut temp_ra = RowAccessor::new();
+        unsafe { temp_ra.attach(temp_buf.as_mut_ptr(), width, height, (width * 4) as i32) };
+        let temp_pf = PixfmtRgba32::new(&mut temp_ra);
+        let mut temp_rb = RendererBase::new(temp_pf);
+        temp_rb.clear(&Rgba8::new(0, 0, 0, 0));
+
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+        ras.reset();
+        ras.add_path(path, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut temp_rb, &color);
+
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let i = y * width as usize + x;
+                let si = i * 4;
+                let mask_val = mask[i] as u32;
+                let sa = (temp_buf[si + 3] as u32 * mask_val) / 255;
+                if sa == 0 {
+                    continue;
+                }
+                let inv = 255 - sa;
+                let sr = temp_buf[si] as u32;
+                let sg = temp_buf[si + 1] as u32;
+                let sb = temp_buf[si + 2] as u32;
+                dst[si] = ((sr * sa + dst[si] as u32 * inv) / 255) as u8;
+                dst[si + 1] = ((sg * sa + dst[si + 1] as u32 * inv) / 255) as u8;
+                dst[si + 2] = ((sb * sa + dst[si + 2] as u32 * inv) / 255) as u8;
+                dst[si + 3] = (sa + (dst[si + 3] as u32 * inv) / 255).min(255) as u8;
+            }
+        }
+    }
+
     let w = width as f64;
     let h = height as f64;
-    let scenario = params.get(0).copied().unwrap_or(0.0) as usize;
-    let operation = params.get(1).copied().unwrap_or(0.0) as usize;
+    let scenario = (params.first().copied().unwrap_or(3.0) as i32).clamp(0, 4) as usize;
+    let operation = if (params.get(1).copied().unwrap_or(0.0) as i32) == 0 { 0 } else { 1 };
     let mx = params.get(2).copied().unwrap_or(w / 2.0);
     let my = params.get(3).copied().unwrap_or(h / 2.0);
 
@@ -671,201 +766,390 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    let (mut path1, mut path2) = match scenario {
-        0 => {
-            let mut p1 = PathStorage::new();
-            p1.move_to(100.0, 50.0);
-            p1.line_to(300.0, 150.0);
-            p1.line_to(50.0, 300.0);
-            p1.close_polygon(0);
-            p1.move_to(350.0, 50.0);
-            p1.line_to(500.0, 200.0);
-            p1.line_to(250.0, 350.0);
-            p1.close_polygon(0);
+    macro_rules! draw_text {
+        ($x:expr, $y:expr, $text:expr) => {{
+            let mut txt = GsvText::new();
+            txt.size(10.0, 0.0);
+            txt.start_point($x, $y);
+            txt.text($text);
+            let mut txt_stroke = ConvStroke::new(&mut txt);
+            txt_stroke.set_width(1.5);
+            txt_stroke.set_line_cap(LineCap::Round);
+            ras.reset();
+            ras.add_path(&mut txt_stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+        }};
+    }
 
-            let mut p2 = PathStorage::new();
-            p2.move_to(mx - 100.0, my - 80.0);
-            p2.line_to(mx + 100.0, my - 80.0);
-            p2.line_to(mx, my + 100.0);
-            p2.close_polygon(0);
-            (p1, p2)
+    match scenario {
+        0 => {
+            let mut ps1 = PathStorage::new();
+            let mut ps2 = PathStorage::new();
+
+            let x = mx - w / 2.0 + 100.0;
+            let y = my - h / 2.0 + 100.0;
+            ps1.move_to(x + 140.0, y + 145.0);
+            ps1.line_to(x + 225.0, y + 44.0);
+            ps1.line_to(x + 296.0, y + 219.0);
+            ps1.close_polygon(0);
+
+            ps1.line_to(x + 226.0, y + 289.0);
+            ps1.line_to(x + 82.0, y + 292.0);
+
+            ps1.move_to(x + 220.0, y + 222.0);
+            ps1.line_to(x + 363.0, y + 249.0);
+            ps1.line_to(x + 265.0, y + 331.0);
+
+            ps1.move_to(x + 242.0, y + 243.0);
+            ps1.line_to(x + 268.0, y + 309.0);
+            ps1.line_to(x + 325.0, y + 261.0);
+
+            ps1.move_to(x + 259.0, y + 259.0);
+            ps1.line_to(x + 273.0, y + 288.0);
+            ps1.line_to(x + 298.0, y + 266.0);
+
+            ps2.move_to(132.0, 177.0);
+            ps2.line_to(573.0, 363.0);
+            ps2.line_to(451.0, 390.0);
+            ps2.line_to(454.0, 474.0);
+
+            ras.reset();
+            ras.add_path(&mut ps1, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 26));
+            ras.reset();
+            ras.add_path(&mut ps2, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 26));
+
+            let t0 = std::time::Instant::now();
+            let mask = generate_alpha_mask(width, height, operation, &mut ps1);
+            let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
+
+            let t1 = std::time::Instant::now();
+            render_with_alpha_mask(
+                width,
+                height,
+                &mut ps2,
+                &mask,
+                Rgba8::new(127, 0, 0, 127),
+                &mut buf,
+            );
+            let render_ms = t1.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
         }
         1 => {
-            let mut p1 = PathStorage::new();
-            p1.move_to(100.0, 50.0);
-            p1.line_to(500.0, 150.0);
-            p1.line_to(200.0, 400.0);
-            p1.close_polygon(0);
+            let mut ps1 = PathStorage::new();
+            let mut ps2 = PathStorage::new();
 
-            let mut p2 = PathStorage::new();
-            p2.move_to(mx - 80.0, my - 60.0);
-            p2.line_to(mx + 80.0, my);
-            p2.line_to(mx, my + 80.0);
-            p2.close_polygon(0);
-            (p1, p2)
+            let x = mx - w / 2.0 + 100.0;
+            let y = my - h / 2.0 + 100.0;
+            ps1.move_to(x + 140.0, y + 145.0);
+            ps1.line_to(x + 225.0, y + 44.0);
+            ps1.line_to(x + 296.0, y + 219.0);
+            ps1.close_polygon(0);
+
+            ps1.line_to(x + 226.0, y + 289.0);
+            ps1.line_to(x + 82.0, y + 292.0);
+
+            ps1.move_to(x + 170.0, y + 222.0);
+            ps1.line_to(x + 215.0, y + 331.0);
+            ps1.line_to(x + 313.0, y + 249.0);
+            ps1.close_polygon(PATH_FLAGS_CCW);
+
+            ps2.move_to(132.0, 177.0);
+            ps2.line_to(573.0, 363.0);
+            ps2.line_to(451.0, 390.0);
+            ps2.line_to(454.0, 474.0);
+            ps2.close_polygon(0);
+
+            let mut stroke = ConvStroke::new(&mut ps2);
+            stroke.set_width(10.0);
+
+            ras.reset();
+            ras.add_path(&mut ps1, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 26));
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 26));
+
+            let t0 = std::time::Instant::now();
+            let mask = generate_alpha_mask(width, height, operation, &mut ps1);
+            let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
+
+            let mut ps2_for_masked = PathStorage::new();
+            ps2_for_masked.move_to(132.0, 177.0);
+            ps2_for_masked.line_to(573.0, 363.0);
+            ps2_for_masked.line_to(451.0, 390.0);
+            ps2_for_masked.line_to(454.0, 474.0);
+            ps2_for_masked.close_polygon(0);
+            let mut stroke_for_masked = ConvStroke::new(&mut ps2_for_masked);
+            stroke_for_masked.set_width(10.0);
+
+            let t1 = std::time::Instant::now();
+            render_with_alpha_mask(
+                width,
+                height,
+                &mut stroke_for_masked,
+                &mask,
+                Rgba8::new(127, 0, 0, 127),
+                &mut buf,
+            );
+            let render_ms = t1.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
         }
         2 => {
-            let mut p1 = PathStorage::new();
-            let cx1 = 250.0;
-            let cy1 = 250.0;
-            for i in 0..10 {
-                let angle = std::f64::consts::PI * 2.0 * i as f64 / 10.0 - std::f64::consts::PI / 2.0;
-                let r = if i % 2 == 0 { 150.0 } else { 60.0 };
-                let px = cx1 + angle.cos() * r;
-                let py = cy1 + angle.sin() * r;
-                if i == 0 { p1.move_to(px, py); } else { p1.line_to(px, py); }
-            }
-            p1.close_polygon(0);
+            let mut gb_poly = PathStorage::new();
+            let mut arrows = PathStorage::new();
+            make_gb_poly(&mut gb_poly);
+            make_arrows(&mut arrows);
 
-            let mut p2 = PathStorage::new();
-            p2.move_to(mx - 120.0, my - 80.0);
-            p2.line_to(mx + 120.0, my - 80.0);
-            p2.line_to(mx + 120.0, my + 80.0);
-            p2.line_to(mx - 120.0, my + 80.0);
-            p2.close_polygon(0);
-            (p1, p2)
+            let mut mtx1 = TransAffine::new();
+            mtx1.multiply(&TransAffine::new_translation(-1150.0, -1150.0));
+            mtx1.multiply(&TransAffine::new_scaling(2.0, 2.0));
+
+            let mut mtx2 = mtx1;
+            mtx2.multiply(&TransAffine::new_translation(mx - w / 2.0, my - h / 2.0));
+
+            {
+                let mut trans_gb = ConvTransform::new(&mut gb_poly, mtx1);
+                ras.reset();
+                ras.add_path(&mut trans_gb, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(127, 127, 0, 26));
+            }
+            {
+                let mut trans_gb = ConvTransform::new(&mut gb_poly, mtx1);
+                let mut stroke_gb = ConvStroke::new(&mut trans_gb);
+                stroke_gb.set_width(0.1);
+                ras.reset();
+                ras.add_path(&mut stroke_gb, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+            }
+            {
+                let mut trans_arrows = ConvTransform::new(&mut arrows, mtx2);
+                ras.reset();
+                ras.add_path(&mut trans_arrows, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 127, 127, 26));
+            }
+
+            let t0 = std::time::Instant::now();
+            let mut trans_gb_for_mask = ConvTransform::new(&mut gb_poly, mtx1);
+            let mask = generate_alpha_mask(width, height, operation, &mut trans_gb_for_mask);
+            let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
+
+            let t1 = std::time::Instant::now();
+            let mut trans_arrows_for_masked = ConvTransform::new(&mut arrows, mtx2);
+            render_with_alpha_mask(
+                width,
+                height,
+                &mut trans_arrows_for_masked,
+                &mask,
+                Rgba8::new(127, 0, 0, 127),
+                &mut buf,
+            );
+            let render_ms = t1.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
         }
         3 => {
-            let mut p1 = PathStorage::new();
-            for i in 0..14 {
-                let angle = std::f64::consts::PI * 2.0 * i as f64 / 14.0 - std::f64::consts::PI / 2.0;
-                let r = if i % 2 == 0 { 180.0 } else { 70.0 };
-                let px = 300.0 + angle.cos() * r;
-                let py = 250.0 + angle.sin() * r;
-                if i == 0 { p1.move_to(px, py); } else { p1.line_to(px, py); }
-            }
-            p1.close_polygon(0);
+            let mut gb_poly = PathStorage::new();
+            make_gb_poly(&mut gb_poly);
 
-            let mut p2 = PathStorage::new();
-            let n = 100;
-            for i in 0..n {
-                let t = i as f64 / n as f64;
-                let angle = t * std::f64::consts::PI * 8.0;
-                let r = 10.0 + t * 140.0;
-                let px = mx + angle.cos() * r;
-                let py = my + angle.sin() * r;
-                if i == 0 { p2.move_to(px, py); } else { p2.line_to(px, py); }
+            let mut mtx = TransAffine::new();
+            mtx.multiply(&TransAffine::new_translation(-1150.0, -1150.0));
+            mtx.multiply(&TransAffine::new_scaling(2.0, 2.0));
+
+            let mut sp = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
+            let mut stroke = ConvStroke::new(&mut sp);
+            stroke.set_width(15.0);
+
+            {
+                let mut trans_gb = ConvTransform::new(&mut gb_poly, mtx);
+                ras.reset();
+                ras.add_path(&mut trans_gb, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(127, 127, 0, 26));
             }
-            (p1, p2)
+            {
+                let mut trans_gb = ConvTransform::new(&mut gb_poly, mtx);
+                let mut stroke_gb = ConvStroke::new(&mut trans_gb);
+                stroke_gb.set_width(0.1);
+                ras.reset();
+                ras.add_path(&mut stroke_gb, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+            }
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 127, 127, 26));
+
+            let t0 = std::time::Instant::now();
+            let mut trans_gb_for_mask = ConvTransform::new(&mut gb_poly, mtx);
+            let mask = generate_alpha_mask(width, height, operation, &mut trans_gb_for_mask);
+            let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
+
+            let mut sp2 = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
+            let mut stroke_for_masked = ConvStroke::new(&mut sp2);
+            stroke_for_masked.set_width(15.0);
+            let t1 = std::time::Instant::now();
+            render_with_alpha_mask(
+                width,
+                height,
+                &mut stroke_for_masked,
+                &mask,
+                Rgba8::new(127, 0, 0, 127),
+                &mut buf,
+            );
+            let render_ms = t1.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
         }
         _ => {
-            let mut p1 = PathStorage::new();
-            for i in 0..5 {
-                let angle = std::f64::consts::PI * 2.0 * i as f64 / 5.0 - std::f64::consts::PI / 2.0;
-                let px = 250.0 + angle.cos() * 150.0;
-                let py = 250.0 + angle.sin() * 150.0;
-                if i == 0 { p1.move_to(px, py); } else { p1.line_to(px, py); }
-            }
-            p1.close_polygon(0);
+            let mut sp = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
+            let mut stroke = ConvStroke::new(&mut sp);
+            stroke.set_width(15.0);
 
-            let mut p2 = PathStorage::new();
-            for i in 0..6 {
-                let angle = std::f64::consts::PI * 2.0 * i as f64 / 6.0;
-                let px = mx + angle.cos() * 100.0;
-                let py = my + angle.sin() * 100.0;
-                if i == 0 { p2.move_to(px, py); } else { p2.line_to(px, py); }
-            }
-            p2.close_polygon(0);
-            (p1, p2)
-        }
-    };
+            let mut glyph = PathStorage::new();
+            glyph.move_to(28.47, 6.45);
+            glyph.curve3(21.58, 1.12, 19.82, 0.29);
+            glyph.curve3(17.19, -0.93, 14.21, -0.93);
+            glyph.curve3(9.57, -0.93, 6.57, 2.25);
+            glyph.curve3(3.56, 5.42, 3.56, 10.60);
+            glyph.curve3(3.56, 13.87, 5.03, 16.26);
+            glyph.curve3(7.03, 19.58, 11.99, 22.51);
+            glyph.curve3(16.94, 25.44, 28.47, 29.64);
+            glyph.line_to(28.47, 31.40);
+            glyph.curve3(28.47, 38.09, 26.34, 40.58);
+            glyph.curve3(24.22, 43.07, 20.17, 43.07);
+            glyph.curve3(17.09, 43.07, 15.28, 41.41);
+            glyph.curve3(13.43, 39.75, 13.43, 37.60);
+            glyph.line_to(13.53, 34.77);
+            glyph.curve3(13.53, 32.52, 12.38, 31.30);
+            glyph.curve3(11.23, 30.08, 9.38, 30.08);
+            glyph.curve3(7.57, 30.08, 6.42, 31.35);
+            glyph.curve3(5.27, 32.62, 5.27, 34.81);
+            glyph.curve3(5.27, 39.01, 9.57, 42.53);
+            glyph.curve3(13.87, 46.04, 21.63, 46.04);
+            glyph.curve3(27.59, 46.04, 31.40, 44.04);
+            glyph.curve3(34.28, 42.53, 35.64, 39.31);
+            glyph.curve3(36.52, 37.21, 36.52, 30.71);
+            glyph.line_to(36.52, 15.53);
+            glyph.curve3(36.52, 9.13, 36.77, 7.69);
+            glyph.curve3(37.01, 6.25, 37.57, 5.76);
+            glyph.curve3(38.13, 5.27, 38.87, 5.27);
+            glyph.curve3(39.65, 5.27, 40.23, 5.62);
+            glyph.curve3(41.26, 6.25, 44.19, 9.18);
+            glyph.line_to(44.19, 6.45);
+            glyph.curve3(38.72, -0.88, 33.74, -0.88);
+            glyph.curve3(31.35, -0.88, 29.93, 0.78);
+            glyph.curve3(28.52, 2.44, 28.47, 6.45);
+            glyph.close_polygon(0);
+            glyph.move_to(28.47, 9.62);
+            glyph.line_to(28.47, 26.66);
+            glyph.curve3(21.09, 23.73, 18.95, 22.51);
+            glyph.curve3(15.09, 20.36, 13.43, 18.02);
+            glyph.curve3(11.77, 15.67, 11.77, 12.89);
+            glyph.curve3(11.77, 9.38, 13.87, 7.06);
+            glyph.curve3(15.97, 4.74, 18.70, 4.74);
+            glyph.curve3(22.41, 4.74, 28.47, 9.62);
+            glyph.close_polygon(0);
 
-    // Render alpha mask manually
-    let mask_size = (width * height) as usize;
-    let mut mask = vec![if operation == 0 { 0u8 } else { 255u8 }; mask_size];
+            let mut mtx = TransAffine::new();
+            mtx.multiply(&TransAffine::new_scaling(4.0, 4.0));
+            mtx.multiply(&TransAffine::new_translation(220.0, 200.0));
+            let mut trans = ConvTransform::new(&mut glyph, mtx);
+            let mut curve = ConvCurve::new(&mut trans);
 
-    {
-        let mut mask_buf: Vec<u8> = vec![0; (width * height * 4) as usize];
-        let mut mask_ra = RowAccessor::new();
-        let stride = (width * 4) as i32;
-        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, stride) };
-        let mask_pf = PixfmtRgba32::new(&mut mask_ra);
-        let mut mask_rb = RendererBase::new(mask_pf);
-        mask_rb.clear(&Rgba8::new(0, 0, 0, 0));
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 26));
+            ras.reset();
+            ras.add_path(&mut curve, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 26));
 
-        let mut mask_ras = RasterizerScanlineAa::new();
-        let mut mask_sl = ScanlineU8::new();
-        mask_ras.add_path(&mut path1, 0);
-        render_scanlines_aa_solid(&mut mask_ras, &mut mask_sl, &mut mask_rb,
-            &Rgba8::new(255, 255, 255, 255));
+            let mut sp_for_mask = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
+            let mut stroke_for_mask = ConvStroke::new(&mut sp_for_mask);
+            stroke_for_mask.set_width(15.0);
+            let t0 = std::time::Instant::now();
+            let mask = generate_alpha_mask(width, height, operation, &mut stroke_for_mask);
+            let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
 
-        for y in 0..height {
-            for x in 0..width {
-                let idx = ((y * width + x) * 4 + 3) as usize;
-                let coverage = mask_buf[idx];
-                let mi = (y * width + x) as usize;
-                if operation == 0 {
-                    mask[mi] = coverage;
-                } else {
-                    mask[mi] = 255u8.saturating_sub(coverage);
-                }
-            }
+            let mut glyph_for_masked = PathStorage::new();
+            glyph_for_masked.move_to(28.47, 6.45);
+            glyph_for_masked.curve3(21.58, 1.12, 19.82, 0.29);
+            glyph_for_masked.curve3(17.19, -0.93, 14.21, -0.93);
+            glyph_for_masked.curve3(9.57, -0.93, 6.57, 2.25);
+            glyph_for_masked.curve3(3.56, 5.42, 3.56, 10.60);
+            glyph_for_masked.curve3(3.56, 13.87, 5.03, 16.26);
+            glyph_for_masked.curve3(7.03, 19.58, 11.99, 22.51);
+            glyph_for_masked.curve3(16.94, 25.44, 28.47, 29.64);
+            glyph_for_masked.line_to(28.47, 31.40);
+            glyph_for_masked.curve3(28.47, 38.09, 26.34, 40.58);
+            glyph_for_masked.curve3(24.22, 43.07, 20.17, 43.07);
+            glyph_for_masked.curve3(17.09, 43.07, 15.28, 41.41);
+            glyph_for_masked.curve3(13.43, 39.75, 13.43, 37.60);
+            glyph_for_masked.line_to(13.53, 34.77);
+            glyph_for_masked.curve3(13.53, 32.52, 12.38, 31.30);
+            glyph_for_masked.curve3(11.23, 30.08, 9.38, 30.08);
+            glyph_for_masked.curve3(7.57, 30.08, 6.42, 31.35);
+            glyph_for_masked.curve3(5.27, 32.62, 5.27, 34.81);
+            glyph_for_masked.curve3(5.27, 39.01, 9.57, 42.53);
+            glyph_for_masked.curve3(13.87, 46.04, 21.63, 46.04);
+            glyph_for_masked.curve3(27.59, 46.04, 31.40, 44.04);
+            glyph_for_masked.curve3(34.28, 42.53, 35.64, 39.31);
+            glyph_for_masked.curve3(36.52, 37.21, 36.52, 30.71);
+            glyph_for_masked.line_to(36.52, 15.53);
+            glyph_for_masked.curve3(36.52, 9.13, 36.77, 7.69);
+            glyph_for_masked.curve3(37.01, 6.25, 37.57, 5.76);
+            glyph_for_masked.curve3(38.13, 5.27, 38.87, 5.27);
+            glyph_for_masked.curve3(39.65, 5.27, 40.23, 5.62);
+            glyph_for_masked.curve3(41.26, 6.25, 44.19, 9.18);
+            glyph_for_masked.line_to(44.19, 6.45);
+            glyph_for_masked.curve3(38.72, -0.88, 33.74, -0.88);
+            glyph_for_masked.curve3(31.35, -0.88, 29.93, 0.78);
+            glyph_for_masked.curve3(28.52, 2.44, 28.47, 6.45);
+            glyph_for_masked.close_polygon(0);
+            glyph_for_masked.move_to(28.47, 9.62);
+            glyph_for_masked.line_to(28.47, 26.66);
+            glyph_for_masked.curve3(21.09, 23.73, 18.95, 22.51);
+            glyph_for_masked.curve3(15.09, 20.36, 13.43, 18.02);
+            glyph_for_masked.curve3(11.77, 15.67, 11.77, 12.89);
+            glyph_for_masked.curve3(11.77, 9.38, 13.87, 7.06);
+            glyph_for_masked.curve3(15.97, 4.74, 18.70, 4.74);
+            glyph_for_masked.curve3(22.41, 4.74, 28.47, 9.62);
+            glyph_for_masked.close_polygon(0);
+
+            let mut mtx2 = TransAffine::new();
+            mtx2.multiply(&TransAffine::new_scaling(4.0, 4.0));
+            mtx2.multiply(&TransAffine::new_translation(220.0, 200.0));
+            let mut trans2 = ConvTransform::new(&mut glyph_for_masked, mtx2);
+            let mut curve_for_masked = ConvCurve::new(&mut trans2);
+            let t1 = std::time::Instant::now();
+            render_with_alpha_mask(
+                width,
+                height,
+                &mut curve_for_masked,
+                &mask,
+                Rgba8::new(127, 0, 0, 127),
+                &mut buf,
+            );
+            let render_ms = t1.elapsed().as_secs_f64() * 1000.0;
+            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
         }
     }
-
-    {
-        let mut temp_buf: Vec<u8> = vec![0; (width * height * 4) as usize];
-        let mut temp_ra = RowAccessor::new();
-        let stride = (width * 4) as i32;
-        unsafe { temp_ra.attach(temp_buf.as_mut_ptr(), width, height, stride) };
-        let temp_pf = PixfmtRgba32::new(&mut temp_ra);
-        let mut temp_rb = RendererBase::new(temp_pf);
-        temp_rb.clear(&Rgba8::new(0, 0, 0, 0));
-
-        let mut temp_ras = RasterizerScanlineAa::new();
-        let mut temp_sl = ScanlineU8::new();
-        temp_ras.add_path(&mut path2, 0);
-        render_scanlines_aa_solid(&mut temp_ras, &mut temp_sl, &mut temp_rb,
-            &Rgba8::new(127, 0, 0, 127));
-
-        for y in 0..height {
-            for x in 0..width {
-                let mi = (y * width + x) as usize;
-                let mask_val = mask[mi] as u32;
-                let si = mi * 4;
-                let sr = temp_buf[si] as u32;
-                let sgreen = temp_buf[si + 1] as u32;
-                let sb = temp_buf[si + 2] as u32;
-                let salpha = (temp_buf[si + 3] as u32 * mask_val) / 255;
-
-                if salpha > 0 {
-                    let di = si;
-                    let da = 255 - salpha;
-                    buf[di] = ((sr * salpha + buf[di] as u32 * da) / 255) as u8;
-                    buf[di + 1] = ((sgreen * salpha + buf[di + 1] as u32 * da) / 255) as u8;
-                    buf[di + 2] = ((sb * salpha + buf[di + 2] as u32 * da) / 255) as u8;
-                    buf[di + 3] = (salpha + (buf[di + 3] as u32 * da) / 255).min(255) as u8;
-                }
-            }
-        }
-    }
-
-    // Draw path outlines
-    let mut stroke1 = ConvStroke::new(&mut path1);
-    stroke1.set_width(1.0);
-    ras.reset();
-    ras.add_path(&mut stroke1, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(127, 127, 0, 60));
-
-    let mut stroke2 = ConvStroke::new(&mut path2);
-    stroke2.set_width(1.0);
-    ras.reset();
-    ras.add_path(&mut stroke2, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 127, 127, 60));
 
     let mut m_polygons = RboxCtrl::new(5.0, 5.0, 210.0, 110.0);
     m_polygons.add_item("Two Simple Paths");
     m_polygons.add_item("Closed Stroke");
-    m_polygons.add_item("Star + Rectangle");
-    m_polygons.add_item("Star + Spiral");
-    m_polygons.add_item("Pentagon + Hexagon");
+    m_polygons.add_item("Great Britain and Arrows");
+    m_polygons.add_item("Great Britain and Spiral");
+    m_polygons.add_item("Spiral and Glyph");
     m_polygons.set_cur_item(scenario as i32);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_polygons);
 
-    let mut m_operation = RboxCtrl::new(w - 85.0, 5.0, w - 5.0, 55.0);
+    let mut m_operation = RboxCtrl::new(555.0, 5.0, 635.0, 55.0);
     m_operation.add_item("AND");
     m_operation.add_item("SUB");
-    m_operation.set_cur_item(operation as i32);
+    m_operation.set_cur_item(operation);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_operation);
 
     buf
@@ -1916,15 +2200,25 @@ pub fn image_resample_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // ============================================================================
 
 /// Alpha mask demo with random ellipses creating a mask pattern.
-/// Adapted from C++ alpha_mask2.cpp.
+/// Ported from C++ `alpha_mask2.cpp`.
 ///
-/// params[0] = num_mask_ellipses (5-200, default 50)
-/// params[1] = rotation angle for lion (degrees)
-/// params[2] = scale factor
+/// params[0] = num_mask_ellipses (5-100, default 10)
+/// params[1] = lion angle (radians)
+/// params[2] = lion scale
+/// params[3] = skew_x
+/// params[4] = skew_y
 pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let num_ellipses = params.get(0).copied().unwrap_or(50.0).clamp(5.0, 200.0) as u32;
+    fn msvc_rand15(state: &mut u32) -> u32 {
+        // Match MSVC's rand() sequence used by AGG demos on Windows.
+        *state = state.wrapping_mul(214013).wrapping_add(2531011);
+        (*state >> 16) & 0x7FFF
+    }
+
+    let num_ellipses = params.get(0).copied().unwrap_or(10.0).clamp(5.0, 100.0) as u32;
     let angle = params.get(1).copied().unwrap_or(0.0);
-    let scale = params.get(2).copied().unwrap_or(1.0).clamp(0.3, 3.0);
+    let scale = params.get(2).copied().unwrap_or(1.0).max(0.01);
+    let skew_x = params.get(3).copied().unwrap_or(0.0);
+    let skew_y = params.get(4).copied().unwrap_or(0.0);
 
     let w = width as f64;
     let h = height as f64;
@@ -1936,47 +2230,38 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    // Step 1: Generate alpha mask buffer (grayscale)
+    // Step 1: Generate alpha mask buffer (Gray8), matching C++ sequence.
     let mask_size = (width * height) as usize;
-    let mut mask_buf = vec![0u8; mask_size * 4]; // RGBA for rendering
+    let mut mask_gray = vec![0u8; mask_size];
+    let mut rng_state = 1432u32;
     {
         let mut mask_ra = RowAccessor::new();
-        let mask_stride = (width * 4) as i32;
-        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, mask_stride) };
-        let mask_pf = PixfmtRgba32::new(&mut mask_ra);
+        let mask_stride = width as i32;
+        unsafe { mask_ra.attach(mask_gray.as_mut_ptr(), width, height, mask_stride) };
+        let mask_pf = PixfmtGray8::new(&mut mask_ra);
         let mut mask_rb = RendererBase::new(mask_pf);
-        mask_rb.clear(&Rgba8::new(0, 0, 0, 255));
+        mask_rb.clear(&Gray8::new(0, 255));
 
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
 
-        // Render random ellipses into mask
-        for i in 0..num_ellipses {
-            let hash = |seed: u32, off: u32| -> f64 {
-                let v = (seed.wrapping_mul(2654435761).wrapping_add(off.wrapping_mul(2246822519))) >> 16;
-                (v & 0xFFFF) as f64 / 65536.0
-            };
-            let cx = hash(i, 0) * w;
-            let cy = hash(i, 1) * h;
-            let rx = 10.0 + hash(i, 2) * 80.0;
-            let ry = 10.0 + hash(i, 3) * 80.0;
-            let alpha = (80 + (hash(i, 4) * 175.0) as u32).min(255);
+        for _ in 0..num_ellipses {
+            let cx = (msvc_rand15(&mut rng_state) % width) as f64;
+            let cy = (msvc_rand15(&mut rng_state) % height) as f64;
+            let rx = (msvc_rand15(&mut rng_state) % 100 + 20) as f64;
+            let ry = (msvc_rand15(&mut rng_state) % 100 + 20) as f64;
+            let v = ((msvc_rand15(&mut rng_state) & 127) + 128) as u32;
+            let a = ((msvc_rand15(&mut rng_state) & 127) + 128) as u32;
 
-            let mut ell = Ellipse::new(cx, cy, rx, ry, 32, false);
+            let mut ell = Ellipse::new(cx, cy, rx, ry, 100, false);
             ras.reset();
             ras.add_path(&mut ell, 0);
             render_scanlines_aa_solid(&mut ras, &mut sl, &mut mask_rb,
-                &Rgba8::new(alpha, alpha, alpha, 255));
+                &Gray8::new(v, a));
         }
     }
 
-    // Extract grayscale mask from the rendered mask buffer
-    let mut mask_gray = vec![0u8; mask_size];
-    for i in 0..mask_size {
-        mask_gray[i] = mask_buf[i * 4]; // R channel = grayscale value
-    }
-
-    // Step 2: Render lion into a temporary buffer
+    // Step 2: Render lion and random primitives into a temporary buffer.
     let (mut path, colors, path_idx) = crate::lion_data::parse_lion();
     let mut temp_buf = vec![0u8; (width * height * 4) as usize];
     {
@@ -1988,45 +2273,119 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         temp_rb.clear(&Rgba8::new(0, 0, 0, 0)); // transparent
 
         let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
-        let npaths = path_ids.len();
+        let npaths = path_idx.len();
         let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
             agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
         );
-        let lion_cx = (bbox.x1 + bbox.x2) / 2.0;
-        let lion_cy = (bbox.y1 + bbox.y2) / 2.0;
+        let base_dx = (bbox.x2 - bbox.x1) / 2.0;
+        let base_dy = (bbox.y2 - bbox.y1) / 2.0;
 
         let mut mtx = TransAffine::new();
-        mtx.translate(-lion_cx, -lion_cy);
-        mtx.scale(scale, scale);
-        mtx.rotate(angle.to_radians());
-        mtx.translate(w / 2.0, h / 2.0);
+        mtx.multiply(&TransAffine::new_translation(-base_dx, -base_dy));
+        mtx.multiply(&TransAffine::new_scaling(scale, scale));
+        mtx.multiply(&TransAffine::new_rotation(angle + std::f64::consts::PI));
+        mtx.multiply(&TransAffine::new_skewing(skew_x / 1000.0, skew_y / 1000.0));
+        mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0));
 
         let mut conv = ConvTransform::new(&mut path, mtx);
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
 
-        for i in 0..path_idx.len() {
+        for i in 0..npaths {
             ras.reset();
             ras.add_path(&mut conv, path_idx[i] as u32);
             render_scanlines_aa_solid(&mut ras, &mut sl, &mut temp_rb, &colors[i]);
         }
+        // Random Bresenham lines + simple filled markers.
+        {
+            let mut prim = RendererPrimitives::new(&mut temp_rb);
+            for _ in 0..50 {
+                let line_color = Rgba8::new(
+                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                    ((msvc_rand15(&mut rng_state) & 0x7F) + 0x7F) as u32,
+                );
+                let fill_color = Rgba8::new(
+                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                    ((msvc_rand15(&mut rng_state) & 0x7F) + 0x7F) as u32,
+                );
+                prim.set_line_color(line_color);
+                prim.set_fill_color(fill_color);
+                prim.line(
+                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % width) as f64),
+                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % height) as f64),
+                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % width) as f64),
+                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % height) as f64),
+                    true,
+                );
+
+                let mx = (msvc_rand15(&mut rng_state) % width) as i32;
+                let my = (msvc_rand15(&mut rng_state) % height) as i32;
+                let mr = (msvc_rand15(&mut rng_state) % 10 + 5) as i32;
+                prim.solid_ellipse(mx, my, mr, mr);
+            }
+        }
+
+        // Random anti-aliased lines.
+        for _ in 0..50 {
+            let mut line_path = PathStorage::new();
+            line_path.move_to(
+                (msvc_rand15(&mut rng_state) % width) as f64,
+                (msvc_rand15(&mut rng_state) % height) as f64,
+            );
+            line_path.line_to(
+                (msvc_rand15(&mut rng_state) % width) as f64,
+                (msvc_rand15(&mut rng_state) % height) as f64,
+            );
+            let mut stroke = ConvStroke::new(&mut line_path);
+            stroke.set_width(5.0);
+            stroke.set_line_cap(LineCap::Round);
+            let color = Rgba8::new(
+                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                ((msvc_rand15(&mut rng_state) & 0x7F) + 0x7F) as u32,
+            );
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut temp_rb, &color);
+        }
+
+        // Random circles (C++ uses gradient circles; this keeps the same structure/count).
+        for _ in 0..50 {
+            let x = (msvc_rand15(&mut rng_state) % width) as f64;
+            let y = (msvc_rand15(&mut rng_state) % height) as f64;
+            let r = (msvc_rand15(&mut rng_state) % 10 + 5) as f64;
+            let color = Rgba8::new(
+                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                255,
+            );
+            let mut ell = Ellipse::new(x, y, r, r, 32, false);
+            ras.reset();
+            ras.add_path(&mut ell, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut temp_rb, &color);
+        }
     }
 
-    // Step 3: Composite lion onto main buffer using alpha mask
+    // Step 3: Composite masked temp buffer onto main buffer.
     for y in 0..height as usize {
         for x in 0..width as usize {
             let idx = y * width as usize + x;
             let pi = idx * 4;
             let mask_val = mask_gray[idx] as u32;
-            let sr = temp_buf[pi] as u32;
-            let sg = temp_buf[pi + 1] as u32;
-            let sb = temp_buf[pi + 2] as u32;
             let sa = temp_buf[pi + 3] as u32;
             if sa > 0 && mask_val > 0 {
-                // Modulate source alpha by mask
                 let a = (sa * mask_val) / 255;
                 let inv_a = 255 - a;
-                buf[pi]     = ((sr * a + buf[pi] as u32 * inv_a) / 255) as u8;
+                let sr = temp_buf[pi] as u32;
+                let sg = temp_buf[pi + 1] as u32;
+                let sb = temp_buf[pi + 2] as u32;
+                buf[pi] = ((sr * a + buf[pi] as u32 * inv_a) / 255) as u8;
                 buf[pi + 1] = ((sg * a + buf[pi + 1] as u32 * inv_a) / 255) as u8;
                 buf[pi + 2] = ((sb * a + buf[pi + 2] as u32 * inv_a) / 255) as u8;
                 buf[pi + 3] = (a + (buf[pi + 3] as u32 * inv_a) / 255).min(255) as u8;
@@ -2034,49 +2393,19 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
     }
 
-    // Drop the first renderer to release borrow on ra
     drop(rb);
 
-    // Step 4: Render gradient circles + label
+    // Step 4: Render C++ slider control on top.
     {
         let pf2 = PixfmtRgba32::new(&mut ra);
         let mut rb2 = RendererBase::new(pf2);
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
-
-        for i in 0..5u32 {
-            let hash_f = |seed: u32, off: u32| -> f64 {
-                let v = (seed.wrapping_mul(2654435761).wrapping_add(off.wrapping_mul(374761393))) >> 16;
-                (v & 0xFFFF) as f64 / 65536.0
-            };
-            let cx = 50.0 + hash_f(i + 100, 0) * (w - 100.0);
-            let cy = 50.0 + hash_f(i + 100, 1) * (h - 100.0);
-            let r = 30.0 + hash_f(i + 100, 2) * 60.0;
-
-            let mut ell = Ellipse::new(cx, cy, r, r, 32, false);
-            ras.reset();
-            ras.add_path(&mut ell, 0);
-            let color = Rgba8::new(
-                (hash_f(i + 100, 3) * 255.0) as u32,
-                (hash_f(i + 100, 4) * 255.0) as u32,
-                (hash_f(i + 100, 5) * 255.0) as u32,
-                180,
-            );
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &color);
-        }
-
-        // Draw label
-        let label = format!("Alpha Mask 2: {} ellipses, angle={:.0}, scale={:.2}",
-            num_ellipses, angle, scale);
-        let mut txt = GsvText::new();
-        txt.size(8.0, 0.0);
-        txt.start_point(5.0, h - 15.0);
-        txt.text(&label);
-        let mut txt_stroke = ConvStroke::new(&mut txt);
-        txt_stroke.set_width(0.8);
-        ras.reset();
-        ras.add_path(&mut txt_stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(0, 0, 0, 255));
+        let mut m_num = SliderCtrl::new(5.0, 5.0, 150.0, 12.0);
+        m_num.range(5.0, 100.0);
+        m_num.set_value(num_ellipses as f64);
+        m_num.label("N=%.2f");
+        render_ctrl(&mut ras, &mut sl, &mut rb2, &mut m_num);
     }
 
     buf

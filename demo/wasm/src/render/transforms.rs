@@ -30,12 +30,15 @@ use agg_rust::span_gradient::GradientFunction;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
-use agg_rust::span_interpolator_linear::{SpanInterpolatorLinear, Transformer};
+use agg_rust::span_interpolator_adaptor::{Distortion, SpanInterpolatorAdaptor};
+use agg_rust::span_interpolator_linear::{
+    SpanInterpolator, SpanInterpolatorLinear, Transformer, SUBPIXEL_SCALE, SUBPIXEL_SHIFT,
+};
 use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_polar::TransPolar;
 use agg_rust::trans_single_path::TransSinglePath;
 use agg_rust::trans_warp_magnifier::TransWarpMagnifier;
-use super::setup_renderer;
+use super::{load_spheres_image, setup_renderer};
 
 /// Embedded Liberation Serif Italic font (SIL OFL license).
 /// Metrically compatible with Times New Roman Italic (timesi.ttf) used by the C++ demo.
@@ -652,9 +655,186 @@ fn apply_box_blur_3x3(buf: &mut Vec<u8>, width: u32, height: u32) {
 ///
 /// params[0] = blur radius (0-40, default 15)
 /// params[1] = method (0=stack_blur, 1=recursive, 2=channels)
+/// params[2] = channel_r enabled (0/1, default 0)
+/// params[3] = channel_g enabled (0/1, default 1)
+/// params[4] = channel_b enabled (0/1, default 0)
+/// params[5..12] = shadow quad x0,y0,x1,y1,x2,y2,x3,y3
+fn build_blur_a_shape() -> PathStorage {
+    // Exact "a" glyph outline from C++ blur.cpp.
+    let mut path = PathStorage::new();
+    path.move_to(28.47, 6.45);
+    path.curve3(21.58, 1.12, 19.82, 0.29);
+    path.curve3(17.19, -0.93, 14.21, -0.93);
+    path.curve3(9.57, -0.93, 6.57, 2.25);
+    path.curve3(3.56, 5.42, 3.56, 10.60);
+    path.curve3(3.56, 13.87, 5.03, 16.26);
+    path.curve3(7.03, 19.58, 11.99, 22.51);
+    path.curve3(16.94, 25.44, 28.47, 29.64);
+    path.line_to(28.47, 31.40);
+    path.curve3(28.47, 38.09, 26.34, 40.58);
+    path.curve3(24.22, 43.07, 20.17, 43.07);
+    path.curve3(17.09, 43.07, 15.28, 41.41);
+    path.curve3(13.43, 39.75, 13.43, 37.60);
+    path.line_to(13.53, 34.77);
+    path.curve3(13.53, 32.52, 12.38, 31.30);
+    path.curve3(11.23, 30.08, 9.38, 30.08);
+    path.curve3(7.57, 30.08, 6.42, 31.35);
+    path.curve3(5.27, 32.62, 5.27, 34.81);
+    path.curve3(5.27, 39.01, 9.57, 42.53);
+    path.curve3(13.87, 46.04, 21.63, 46.04);
+    path.curve3(27.59, 46.04, 31.40, 44.04);
+    path.curve3(34.28, 42.53, 35.64, 39.31);
+    path.curve3(36.52, 37.21, 36.52, 30.71);
+    path.line_to(36.52, 15.53);
+    path.curve3(36.52, 9.13, 36.77, 7.69);
+    path.curve3(37.01, 6.25, 37.57, 5.76);
+    path.curve3(38.13, 5.27, 38.87, 5.27);
+    path.curve3(39.65, 5.27, 40.23, 5.62);
+    path.curve3(41.26, 6.25, 44.19, 9.18);
+    path.line_to(44.19, 6.45);
+    path.curve3(38.72, -0.88, 33.74, -0.88);
+    path.curve3(31.35, -0.88, 29.93, 0.78);
+    path.curve3(28.52, 2.44, 28.47, 6.45);
+    path.close_polygon(0);
+
+    path.move_to(28.47, 9.62);
+    path.line_to(28.47, 26.66);
+    path.curve3(21.09, 23.73, 18.95, 22.51);
+    path.curve3(15.09, 20.36, 13.43, 18.02);
+    path.curve3(11.77, 15.67, 11.77, 12.89);
+    path.curve3(11.77, 9.38, 13.87, 7.06);
+    path.curve3(15.97, 4.74, 18.70, 4.74);
+    path.curve3(22.41, 4.74, 28.47, 9.62);
+    path.close_polygon(0);
+    path
+}
+
+fn transform_path_vertices<F: FnMut(&mut f64, &mut f64)>(path: &mut PathStorage, mut tf: F) {
+    let n = path.total_vertices();
+    for i in 0..n {
+        let (mut x, mut y) = (0.0, 0.0);
+        let cmd = path.vertex_idx(i, &mut x, &mut y);
+        if is_vertex(cmd) {
+            tf(&mut x, &mut y);
+            path.modify_vertex(i, x, y);
+        }
+    }
+}
+
+fn path_bounds(path: &mut PathStorage) -> Option<(f64, f64, f64, f64)> {
+    let mut x1 = f64::INFINITY;
+    let mut y1 = f64::INFINITY;
+    let mut x2 = f64::NEG_INFINITY;
+    let mut y2 = f64::NEG_INFINITY;
+    let n = path.total_vertices();
+    for i in 0..n {
+        let (mut x, mut y) = (0.0, 0.0);
+        let cmd = path.vertex_idx(i, &mut x, &mut y);
+        if is_vertex(cmd) {
+            if x < x1 {
+                x1 = x;
+            }
+            if y < y1 {
+                y1 = y;
+            }
+            if x > x2 {
+                x2 = x;
+            }
+            if y > y2 {
+                y2 = y;
+            }
+        }
+    }
+    if x1.is_finite() && y1.is_finite() && x2.is_finite() && y2.is_finite() {
+        Some((x1, y1, x2, y2))
+    } else {
+        None
+    }
+}
+
+fn blur_subrect(
+    buf: &mut [u8],
+    width: u32,
+    height: u32,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    radius: f64,
+    method: u32,
+    ch_r: bool,
+    ch_g: bool,
+    ch_b: bool,
+) {
+    if radius <= 0.0 {
+        return;
+    }
+    let sx = (x1.floor() as i32).clamp(0, width as i32);
+    let sy = (y1.floor() as i32).clamp(0, height as i32);
+    let ex = (x2.ceil() as i32).clamp(0, width as i32);
+    let ey = (y2.ceil() as i32).clamp(0, height as i32);
+    if ex <= sx || ey <= sy {
+        return;
+    }
+
+    let sub_w = (ex - sx) as u32;
+    let sub_h = (ey - sy) as u32;
+    let mut sub = vec![0u8; (sub_w * sub_h * 4) as usize];
+    for y in 0..sub_h {
+        for x in 0..sub_w {
+            let src_i = (((sy as u32 + y) * width + (sx as u32 + x)) * 4) as usize;
+            let dst_i = ((y * sub_w + x) * 4) as usize;
+            sub[dst_i..dst_i + 4].copy_from_slice(&buf[src_i..src_i + 4]);
+        }
+    }
+
+    let original = sub.clone();
+    let mut sub_ra = RowAccessor::new();
+    let sub_stride = (sub_w * 4) as i32;
+    unsafe { sub_ra.attach(sub.as_mut_ptr(), sub_w, sub_h, sub_stride) };
+
+    match method {
+        0 => {
+            let r = radius.round().clamp(0.0, 254.0) as u32;
+            agg_rust::blur::stack_blur_rgba32(&mut sub_ra, r, r);
+        }
+        1 => {
+            agg_rust::blur::recursive_blur_rgba32(&mut sub_ra, radius);
+        }
+        _ => {
+            let rr = radius.round();
+            agg_rust::blur::recursive_blur_rgba32(&mut sub_ra, rr);
+            for i in (0..sub.len()).step_by(4) {
+                if !ch_r {
+                    sub[i] = original[i];
+                }
+                if !ch_g {
+                    sub[i + 1] = original[i + 1];
+                }
+                if !ch_b {
+                    sub[i + 2] = original[i + 2];
+                }
+                // Keep alpha unchanged for channel mode to match C++ gray-channel blur behavior.
+                sub[i + 3] = original[i + 3];
+            }
+        }
+    }
+
+    for y in 0..sub_h {
+        for x in 0..sub_w {
+            let dst_i = (((sy as u32 + y) * width + (sx as u32 + x)) * 4) as usize;
+            let src_i = ((y * sub_w + x) * 4) as usize;
+            buf[dst_i..dst_i + 4].copy_from_slice(&sub[src_i..src_i + 4]);
+        }
+    }
+}
+
 pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let radius = params.first().copied().unwrap_or(15.0).clamp(0.0, 40.0);
-    let method = params.get(1).copied().unwrap_or(0.0) as u32;
+    let method = (params.get(1).copied().unwrap_or(0.0) as i32).clamp(0, 2) as u32;
+    let channel_r = params.get(2).copied().unwrap_or(0.0) > 0.5;
+    let channel_g = params.get(3).copied().unwrap_or(1.0) > 0.5;
+    let channel_b = params.get(4).copied().unwrap_or(0.0) > 0.5;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -666,77 +846,145 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    let w = width as f64;
-    let h = height as f64;
+    let mut shape = build_blur_a_shape();
+    let mut shape_mtx = TransAffine::new();
+    shape_mtx.multiply(&TransAffine::new_scaling_uniform(4.0));
+    shape_mtx.multiply(&TransAffine::new_translation(150.0, 100.0));
+    transform_path_vertices(&mut shape, |x, y| shape_mtx.transform(x, y));
 
-    // Draw a colorful shape — bezier curves forming a closed shape
-    let mut shape = PathStorage::new();
-    shape.move_to(w * 0.2, h * 0.3);
-    shape.curve4(w * 0.4, h * 0.1, w * 0.6, h * 0.1, w * 0.8, h * 0.3);
-    shape.curve4(w * 0.9, h * 0.5, w * 0.8, h * 0.7, w * 0.6, h * 0.8);
-    shape.curve4(w * 0.4, h * 0.9, w * 0.2, h * 0.7, w * 0.15, h * 0.5);
-    shape.close_polygon(0);
+    // Never bail out to white output; keep deterministic defaults even if bounds fail.
+    let (sx1, sy1, sx2, sy2) = path_bounds(&mut shape).unwrap_or((150.0, 90.0, 330.0, 275.0));
 
-    let mut curve = ConvCurve::new(&mut shape);
+    let defaults_quad = [
+        sx1 + 10.0, sy1 - 10.0,
+        sx2 + 10.0, sy1 - 10.0,
+        sx2 + 10.0, sy2 - 10.0,
+        sx1 + 10.0, sy2 - 10.0,
+    ];
+    let mut shadow_quad = defaults_quad;
+    for i in 0..8 {
+        if let Some(v) = params.get(5 + i) {
+            shadow_quad[i] = *v;
+        }
+    }
+
+    let mut shadow = build_blur_a_shape();
+    transform_path_vertices(&mut shadow, |x, y| shape_mtx.transform(x, y));
+    let mut shadow_persp = agg_rust::trans_perspective::TransPerspective::new();
+    shadow_persp.rect_to_quad(sx1, sy1, sx2, sy2, &shadow_quad);
+    transform_path_vertices(&mut shadow, |x, y| shadow_persp.transform(x, y));
+
+    // Render shadow, then blur only the expanded shadow bbox, matching blur.cpp behavior.
+    let mut shadow_curve = ConvCurve::new(&mut shadow);
     ras.reset();
-    ras.add_path(&mut curve, 0);
-    let fill_color = Rgba8::new(100, 140, 220, 200);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &fill_color);
+    ras.add_path(&mut shadow_curve, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(26, 26, 26, 255));
 
-    // Draw a red circle
-    let mut ell = Ellipse::new(w * 0.35, h * 0.45, 60.0, 60.0, 64, false);
-    ras.reset();
-    ras.add_path(&mut ell, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(220, 60, 60, 200));
-
-    // Draw a green triangle
-    let mut tri = PathStorage::new();
-    tri.move_to(w * 0.5, h * 0.2);
-    tri.line_to(w * 0.7, h * 0.65);
-    tri.line_to(w * 0.3, h * 0.65);
-    tri.close_polygon(0);
-    ras.reset();
-    ras.add_path(&mut tri, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(60, 200, 60, 180));
-
-    // Apply blur based on method
-    if radius > 0.5 {
-        let r = radius as u32;
+    let mut blur_ms = 0.0;
+    if radius > 0.0 {
+        #[cfg(not(target_arch = "wasm32"))]
+        let t0 = std::time::Instant::now();
         let mut ra_blur = RowAccessor::new();
         let stride = (width * 4) as i32;
         unsafe { ra_blur.attach(buf.as_mut_ptr(), width, height, stride) };
         match method {
-            0 => agg_rust::blur::stack_blur_rgba32(&mut ra_blur, r, r),
-            1 => agg_rust::blur::recursive_blur_rgba32(&mut ra_blur, radius),
-            _ => {
+            0 => {
+                let r = radius.round().clamp(0.0, 254.0) as u32;
                 agg_rust::blur::stack_blur_rgba32(&mut ra_blur, r, r);
             }
+            1 => {
+                agg_rust::blur::recursive_blur_rgba32(&mut ra_blur, radius);
+            }
+            _ => {
+                let original = buf.clone();
+                let rr = radius.round();
+                agg_rust::blur::recursive_blur_rgba32(&mut ra_blur, rr);
+                for i in (0..buf.len()).step_by(4) {
+                    if !channel_r {
+                        buf[i] = original[i];
+                    }
+                    if !channel_g {
+                        buf[i + 1] = original[i + 1];
+                    }
+                    if !channel_b {
+                        buf[i + 2] = original[i + 2];
+                    }
+                    buf[i + 3] = original[i + 3];
+                }
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            blur_ms = t0.elapsed().as_secs_f64() * 1000.0;
         }
     }
 
-    // Render controls on top (after blur)
-    {
-        let mut ra2 = RowAccessor::new();
-        let stride = (width * 4) as i32;
-        unsafe { ra2.attach(buf.as_mut_ptr(), width, height, stride) };
-        let pf2 = PixfmtRgba32::new(&mut ra2);
-        let mut rb2 = RendererBase::new(pf2);
-        let mut ras2 = RasterizerScanlineAa::new();
-        let mut sl2 = ScanlineU8::new();
+    // Re-attach and continue drawing after direct buffer edits.
+    let stride = (width * 4) as i32;
+    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    let pf2 = PixfmtRgba32::new(&mut ra);
+    let mut rb2 = RendererBase::new(pf2);
 
-        let mut s_radius = SliderCtrl::new(5.0, 5.0, width as f64 - 5.0, 12.0);
-        s_radius.range(0.0, 40.0);
-        s_radius.label("Blur Radius=%.2f");
-        s_radius.set_value(radius);
-        render_ctrl(&mut ras2, &mut sl2, &mut rb2, &mut s_radius);
-
-        let mut r_method = RboxCtrl::new(5.0, 25.0, 130.0, 82.0);
-        r_method.add_item("Stack Blur");
-        r_method.add_item("Recursive Blur");
-        r_method.add_item("Channels");
-        r_method.set_cur_item(method as i32);
-        render_ctrl(&mut ras2, &mut sl2, &mut rb2, &mut r_method);
+    // Shadow control quad (line + handles).
+    let mut quad_path = PathStorage::new();
+    quad_path.move_to(shadow_quad[0], shadow_quad[1]);
+    quad_path.line_to(shadow_quad[2], shadow_quad[3]);
+    quad_path.line_to(shadow_quad[4], shadow_quad[5]);
+    quad_path.line_to(shadow_quad[6], shadow_quad[7]);
+    quad_path.close_polygon(0);
+    let mut quad_stroke = ConvStroke::new(&mut quad_path);
+    quad_stroke.set_width(1.0);
+    ras.reset();
+    ras.add_path(&mut quad_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(0, 77, 128, 77));
+    for i in 0..4 {
+        let mut handle = Ellipse::new(shadow_quad[i * 2], shadow_quad[i * 2 + 1], 3.5, 3.5, 20, false);
+        ras.reset();
+        ras.add_path(&mut handle, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(140, 180, 200, 220));
     }
+
+    // Foreground shape.
+    let mut shape_curve = ConvCurve::new(&mut shape);
+    ras.reset();
+    ras.add_path(&mut shape_curve, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(153, 230, 179, 204));
+
+    // Timing text
+    let mut t = GsvText::new();
+    t.size(10.0, 0.0);
+    t.start_point(140.0, 30.0);
+    t.text(&format!("{:.2} ms", blur_ms));
+    let mut t_stroke = ConvStroke::new(&mut t);
+    t_stroke.set_width(1.5);
+    ras.reset();
+    ras.add_path(&mut t_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(0, 0, 0, 255));
+
+    // AGG controls matching C++ blur.cpp layout.
+    let mut m_method = RboxCtrl::new(10.0, 10.0, 130.0, 70.0);
+    m_method.text_size(8.0, 0.0);
+    m_method.add_item("Stack blur");
+    m_method.add_item("Recursive blur");
+    m_method.add_item("Channels");
+    m_method.set_cur_item(method as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb2, &mut m_method);
+
+    let mut s_radius = SliderCtrl::new(140.0, 14.0, 430.0, 22.0);
+    s_radius.range(0.0, 40.0);
+    s_radius.label("Blur Radius=%1.2f");
+    s_radius.set_value(radius);
+    render_ctrl(&mut ras, &mut sl, &mut rb2, &mut s_radius);
+
+    let mut c_r = CboxCtrl::new(10.0, 80.0, "Red");
+    let mut c_g = CboxCtrl::new(10.0, 95.0, "Green");
+    let mut c_b = CboxCtrl::new(10.0, 110.0, "Blue");
+    c_r.set_status(channel_r);
+    c_g.set_status(channel_g);
+    c_b.set_status(channel_b);
+    render_ctrl(&mut ras, &mut sl, &mut rb2, &mut c_r);
+    render_ctrl(&mut ras, &mut sl, &mut rb2, &mut c_g);
+    render_ctrl(&mut ras, &mut sl, &mut rb2, &mut c_b);
 
     buf
 }
@@ -1315,19 +1563,167 @@ pub fn lion_lens(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Distortions
 // ============================================================================
 
-/// Wave/swirl distortion on a procedural image — matching C++ distortions.cpp.
+/// Wave/swirl distortion on image and gradient sources — matching C++ distortions.cpp.
 ///
 /// params[0] = angle (-180 to 180, default 20)
 /// params[1] = scale (0.1-5.0, default 1.0)
 /// params[2] = amplitude (0.1-40.0, default 10.0)
 /// params[3] = period (0.1-2.0, default 1.0)
 /// params[4] = distortion type (0=wave, 1=swirl, 2=wave-swirl, 3=swirl-wave)
+/// params[5] = center_x in device space (default img_w/2 + 10)
+/// params[6] = center_y in device space (default img_h/2 + 10 + 40)
+/// params[7] = phase in radians (animated on JS side)
+#[derive(Copy, Clone)]
+enum DistortionKind {
+    Wave,
+    Swirl,
+    WaveSwirl,
+    SwirlWave,
+}
+
+impl DistortionKind {
+    fn from_param(v: u32) -> Self {
+        match v {
+            1 => Self::Swirl,
+            2 => Self::WaveSwirl,
+            3 => Self::SwirlWave,
+            _ => Self::Wave,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct PeriodicDistortion {
+    kind: DistortionKind,
+    cx: f64,
+    cy: f64,
+    period: f64,
+    amplitude_inv: f64,
+    phase: f64,
+}
+
+impl PeriodicDistortion {
+    fn new(kind: DistortionKind, cx: f64, cy: f64, period: f64, amplitude: f64, phase: f64) -> Self {
+        Self {
+            kind,
+            cx,
+            cy,
+            period,
+            amplitude_inv: 1.0 / amplitude.max(0.0001),
+            phase,
+        }
+    }
+
+    fn apply_wave(&self, x: &mut i32, y: &mut i32) {
+        let xd = *x as f64 / SUBPIXEL_SCALE as f64 - self.cx;
+        let yd = *y as f64 / SUBPIXEL_SCALE as f64 - self.cy;
+        let d = (xd * xd + yd * yd).sqrt();
+        if d > 1.0 {
+            let a = (d / (16.0 * self.period) - self.phase).cos() * (1.0 / (self.amplitude_inv * d)) + 1.0;
+            *x = ((xd * a + self.cx) * SUBPIXEL_SCALE as f64) as i32;
+            *y = ((yd * a + self.cy) * SUBPIXEL_SCALE as f64) as i32;
+        }
+    }
+
+    fn apply_swirl(&self, x: &mut i32, y: &mut i32) {
+        let xd = *x as f64 / SUBPIXEL_SCALE as f64 - self.cx;
+        let yd = *y as f64 / SUBPIXEL_SCALE as f64 - self.cy;
+        let a = (100.0 - (xd * xd + yd * yd).sqrt()) / 100.0 * (0.1 / -self.amplitude_inv);
+        let sa = (a - self.phase / 25.0).sin();
+        let ca = (a - self.phase / 25.0).cos();
+        *x = ((xd * ca - yd * sa + self.cx) * SUBPIXEL_SCALE as f64) as i32;
+        *y = ((xd * sa + yd * ca + self.cy) * SUBPIXEL_SCALE as f64) as i32;
+    }
+}
+
+impl Distortion for PeriodicDistortion {
+    fn calculate(&self, x: &mut i32, y: &mut i32) {
+        match self.kind {
+            DistortionKind::Wave => self.apply_wave(x, y),
+            DistortionKind::Swirl => self.apply_swirl(x, y),
+            DistortionKind::WaveSwirl => {
+                self.apply_wave(x, y);
+                self.apply_swirl(x, y);
+            }
+            DistortionKind::SwirlWave => {
+                self.apply_swirl(x, y);
+                self.apply_wave(x, y);
+            }
+        }
+    }
+}
+
+struct DistortedRadialGradientSpan<'a, I: SpanInterpolator> {
+    interpolator: I,
+    colors: &'a [Rgba8; 256],
+    d1: i32,
+    d2: i32,
+}
+
+impl<'a, I: SpanInterpolator> DistortedRadialGradientSpan<'a, I> {
+    fn new(interpolator: I, colors: &'a [Rgba8; 256], d1: f64, d2: f64) -> Self {
+        const GRADIENT_SUBPIXEL_SCALE: i32 = 1 << 4;
+        Self {
+            interpolator,
+            colors,
+            d1: (d1 * GRADIENT_SUBPIXEL_SCALE as f64).round() as i32,
+            d2: (d2 * GRADIENT_SUBPIXEL_SCALE as f64).round() as i32,
+        }
+    }
+}
+
+impl<I: SpanInterpolator> SpanGenerator for DistortedRadialGradientSpan<'_, I> {
+    type Color = Rgba8;
+
+    fn prepare(&mut self) {}
+
+    fn generate(&mut self, span: &mut [Rgba8], x: i32, y: i32, len: u32) {
+        const GRADIENT_SUBPIXEL_SHIFT: i32 = 4;
+        const DOWNSCALE_SHIFT: i32 = SUBPIXEL_SHIFT as i32 - GRADIENT_SUBPIXEL_SHIFT;
+        let dd = (self.d2 - self.d1).max(1);
+
+        self.interpolator.begin(x as f64 + 0.5, y as f64 + 0.5, len);
+        for pixel in span.iter_mut().take(len as usize) {
+            let mut ix = 0i32;
+            let mut iy = 0i32;
+            self.interpolator.coordinates(&mut ix, &mut iy);
+            let gx = ix >> DOWNSCALE_SHIFT;
+            let gy = iy >> DOWNSCALE_SHIFT;
+            let d = fast_sqrt((gx * gx + gy * gy) as u32) as i32;
+            let idx = (((d - self.d1) * 256) / dd).clamp(0, 255) as usize;
+            *pixel = self.colors[idx];
+            self.interpolator.next();
+        }
+    }
+}
+
+const DISTORTIONS_GRADIENT_COLORS: [u8; 1024] = include!("distortions_gradient_256.in");
+
 pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let angle = params.first().copied().unwrap_or(20.0);
     let scale = params.get(1).copied().unwrap_or(1.0).clamp(0.1, 5.0);
     let amplitude = params.get(2).copied().unwrap_or(10.0).clamp(0.1, 40.0);
     let period = params.get(3).copied().unwrap_or(1.0).clamp(0.1, 2.0);
     let dist_type = params.get(4).copied().unwrap_or(0.0) as u32;
+    let kind = DistortionKind::from_param(dist_type);
+    let phase = params.get(7).copied().unwrap_or(0.0);
+
+    let (img_w, img_h, mut spheres) = load_spheres_image();
+    let default_cx = img_w as f64 / 2.0 + 10.0;
+    let default_cy = img_h as f64 / 2.0 + 10.0 + 40.0;
+    let center_x = params.get(5).copied().unwrap_or(default_cx);
+    let center_y = params.get(6).copied().unwrap_or(default_cy);
+
+    let mut gradient_colors = [Rgba8::new(0, 0, 0, 255); 256];
+    for (i, c) in gradient_colors.iter_mut().enumerate() {
+        let j = i * 4;
+        *c = Rgba8::new(
+            DISTORTIONS_GRADIENT_COLORS[j] as u32,
+            DISTORTIONS_GRADIENT_COLORS[j + 1] as u32,
+            DISTORTIONS_GRADIENT_COLORS[j + 2] as u32,
+            DISTORTIONS_GRADIENT_COLORS[j + 3] as u32,
+        );
+    }
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -1336,102 +1732,150 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-
-    let w = width as f64;
-    let h = height as f64;
-
-    // Generate a procedural image: concentric colored circles
-    let img_w = 200u32;
-    let img_h = 200u32;
-    let mut img_buf = vec![255u8; (img_w * img_h * 4) as usize];
-    for iy in 0..img_h {
-        for ix in 0..img_w {
-            let dx = ix as f64 - 100.0;
-            let dy = iy as f64 - 100.0;
-            let d = (dx * dx + dy * dy).sqrt();
-            let off = ((iy * img_w + ix) * 4) as usize;
-            if d < 90.0 {
-                let t = d / 90.0;
-                img_buf[off] = (128.0 + 127.0 * (t * 6.0).sin()) as u8;
-                img_buf[off + 1] = (128.0 + 127.0 * (t * 4.0 + 2.0).sin()) as u8;
-                img_buf[off + 2] = (128.0 + 127.0 * (t * 8.0 + 4.0).sin()) as u8;
-                img_buf[off + 3] = 255;
-            }
-        }
-    }
-
-    // Create rendering buffer for the source image
     let mut img_ra = RowAccessor::new();
-    let img_stride = (img_w * 4) as i32;
-    unsafe { img_ra.attach(img_buf.as_mut_ptr(), img_w, img_h, img_stride) };
-    // Set up transform
-    let angle_rad = angle * std::f64::consts::PI / 180.0;
-    let mut img_mtx = TransAffine::new();
-    img_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
-    img_mtx.multiply(&TransAffine::new_rotation(angle_rad));
-    img_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
-    img_mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0));
-    img_mtx.invert();
+    unsafe { img_ra.attach(spheres.as_mut_ptr(), img_w, img_h, (img_w * 4) as i32) };
 
-    // Render image with bilinear filter in an ellipse
-    let r_ell = (img_w.min(img_h) as f64) / 2.0 - 20.0;
+    let angle_rad = angle * std::f64::consts::PI / 180.0;
 
     let mut src_mtx = TransAffine::new();
     src_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
     src_mtx.multiply(&TransAffine::new_rotation(angle_rad));
-    src_mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0));
+    src_mtx.multiply(&TransAffine::new_translation(
+        img_w as f64 / 2.0 + 10.0,
+        img_h as f64 / 2.0 + 10.0 + 40.0,
+    ));
 
-    let mut ell = Ellipse::new(img_w as f64 / 2.0, img_h as f64 / 2.0, r_ell, r_ell, 200, false);
-    let mut tr = ConvTransform::new(&mut ell, src_mtx);
+    let mut img_mtx = TransAffine::new();
+    img_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
+    img_mtx.multiply(&TransAffine::new_rotation(angle_rad));
+    img_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
+    img_mtx.multiply(&TransAffine::new_translation(
+        img_w as f64 / 2.0 + 10.0,
+        img_h as f64 / 2.0 + 10.0 + 40.0,
+    ));
+    img_mtx.invert();
 
-    // Render with bilinear image filter
-    let mut inter = SpanInterpolatorLinear::new(img_mtx);
-    let bg_color = Rgba8::new(255, 255, 255, 255);
-    let mut sg = SpanImageFilterRgbaBilinearClip::new(&img_ra, bg_color, &mut inter);
+    let mut cx = center_x;
+    let mut cy = center_y;
+    img_mtx.transform(&mut cx, &mut cy);
+    let distortion_left = PeriodicDistortion::new(kind, cx, cy, period, amplitude, phase);
+
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
     let mut sa = SpanAllocator::new();
-    ras.reset();
-    ras.add_path(&mut tr, 0);
-    render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
 
-    // Render controls
-    let mut s_angle = SliderCtrl::new(5.0, 5.0, w - 5.0, 12.0);
+    let mut interpolator_left = SpanInterpolatorAdaptor::new(SpanInterpolatorLinear::new(img_mtx), distortion_left);
+    let mut span_left = SpanImageFilterRgbaBilinearClip::new(
+        &img_ra,
+        Rgba8::new(255, 255, 255, 255),
+        &mut interpolator_left,
+    );
+
+    let mut r = img_w.min(img_h) as f64;
+    if (img_h as f64) < r {
+        r = img_h as f64;
+    }
+    let mut ell_left = Ellipse::new(
+        img_w as f64 / 2.0,
+        img_h as f64 / 2.0,
+        r / 2.0 - 20.0,
+        r / 2.0 - 20.0,
+        200,
+        false,
+    );
+    let mut tr_left = ConvTransform::new(&mut ell_left, src_mtx);
+    ras.reset();
+    ras.add_path(&mut tr_left, 0);
+    render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut span_left);
+
+    let mut src_mtx_outline = src_mtx;
+    src_mtx_outline.multiply(&TransAffine::new_translation(
+        img_w as f64 - img_w as f64 / 10.0,
+        0.0,
+    ));
+    let mut ell_outline = Ellipse::new(
+        img_w as f64 / 2.0,
+        img_h as f64 / 2.0,
+        r / 2.0 - 20.0,
+        r / 2.0 - 20.0,
+        200,
+        false,
+    );
+    let mut tr_outline = ConvTransform::new(&mut ell_outline, src_mtx_outline);
+    ras.reset();
+    ras.add_path(&mut tr_outline, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    let mut gr1_mtx = TransAffine::new();
+    gr1_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
+    gr1_mtx.multiply(&TransAffine::new_scaling_uniform(0.8));
+    gr1_mtx.multiply(&TransAffine::new_rotation(angle_rad));
+    gr1_mtx.multiply(&TransAffine::new_translation(
+        img_w as f64 - img_w as f64 / 10.0 + img_w as f64 / 2.0 + 10.0,
+        img_h as f64 / 2.0 + 10.0 + 40.0,
+    ));
+
+    let mut gr2_mtx = TransAffine::new();
+    gr2_mtx.multiply(&TransAffine::new_rotation(angle_rad));
+    gr2_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
+    gr2_mtx.multiply(&TransAffine::new_translation(
+        img_w as f64 - img_w as f64 / 10.0 + img_w as f64 / 2.0 + 10.0 + 50.0,
+        img_h as f64 / 2.0 + 10.0 + 40.0 + 50.0,
+    ));
+    gr2_mtx.invert();
+
+    let mut cx2 = center_x + img_w as f64 - img_w as f64 / 10.0;
+    let mut cy2 = center_y;
+    gr2_mtx.transform(&mut cx2, &mut cy2);
+    let distortion_right = PeriodicDistortion::new(kind, cx2, cy2, period, amplitude, phase);
+    let interpolator_right =
+        SpanInterpolatorAdaptor::new(SpanInterpolatorLinear::new(gr2_mtx), distortion_right);
+    let mut gradient_span = DistortedRadialGradientSpan::new(interpolator_right, &gradient_colors, 0.0, 180.0);
+
+    let mut ell_right = Ellipse::new(
+        img_w as f64 / 2.0,
+        img_h as f64 / 2.0,
+        r / 2.0 - 20.0,
+        r / 2.0 - 20.0,
+        200,
+        false,
+    );
+    let mut tr_right = ConvTransform::new(&mut ell_right, gr1_mtx);
+    ras.reset();
+    ras.add_path(&mut tr_right, 0);
+    render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut gradient_span);
+
+    let mut s_angle = SliderCtrl::new(5.0, 5.0, 150.0, 12.0);
+    s_angle.label("Angle=%3.2f");
     s_angle.range(-180.0, 180.0);
-    s_angle.label("Angle=%.1f");
     s_angle.set_value(angle);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_angle);
 
-    let mut s_scale = SliderCtrl::new(5.0, 20.0, w - 5.0, 27.0);
+    let mut s_scale = SliderCtrl::new(5.0, 20.0, 150.0, 27.0);
+    s_scale.label("Scale=%3.2f");
     s_scale.range(0.1, 5.0);
-    s_scale.label("Scale=%.2f");
     s_scale.set_value(scale);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_scale);
 
-    let mut s_amp = SliderCtrl::new(5.0, 35.0, w - 5.0, 42.0);
-    s_amp.range(0.1, 40.0);
-    s_amp.label("Amplitude=%.1f");
-    s_amp.set_value(amplitude);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_amp);
-
-    let mut s_period = SliderCtrl::new(5.0, 50.0, w - 5.0, 57.0);
+    let mut s_period = SliderCtrl::new(175.0, 5.0, 320.0, 12.0);
+    s_period.label("Period=%3.2f");
     s_period.range(0.1, 2.0);
-    s_period.label("Period=%.2f");
     s_period.set_value(period);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_period);
 
-    // Label showing distortion type
-    let labels = ["Wave", "Swirl", "Wave-Swirl", "Swirl-Wave"];
-    let label = labels.get(dist_type as usize).unwrap_or(&"Wave");
-    let mut txt = GsvText::new();
-    txt.size(10.0, 0.0);
-    txt.start_point(5.0, h - 20.0);
-    txt.text(label);
-    let mut txt_stroke = ConvStroke::new(&mut txt);
-    txt_stroke.set_width(1.0);
-    ras.reset();
-    ras.add_path(&mut txt_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    let mut s_amp = SliderCtrl::new(175.0, 20.0, 320.0, 27.0);
+    s_amp.label("Amplitude=%3.2f");
+    s_amp.range(0.1, 40.0);
+    s_amp.set_value(amplitude);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_amp);
+
+    let mut r_dist = RboxCtrl::new(480.0, 5.0, 600.0, 90.0);
+    r_dist.add_item("Wave");
+    r_dist.add_item("Swirl");
+    r_dist.add_item("Wave-Swirl");
+    r_dist.add_item("Swirl-Wave");
+    r_dist.set_cur_item(dist_type as i32);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_dist);
 
     buf
 }
@@ -2000,7 +2444,7 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{raster_text, truetype_test};
+    use super::{blur_demo, raster_text, truetype_test};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -2071,6 +2515,30 @@ mod tests {
             }
         }
         assert!(non_white > 1000, "expected many control pixels in top panel, got {}", non_white);
+    }
+
+    #[test]
+    fn blur_demo_renders_non_white_pixels() {
+        let w = 440u32;
+        let h = 330u32;
+        let params = [
+            15.0, // radius
+            0.0,  // stack blur
+            0.0,  // red off
+            1.0,  // green on
+            0.0,  // blue off
+            174.24, 86.28, 336.76, 86.28, 336.76, 274.16, 174.24, 274.16,
+        ];
+        let buf = blur_demo(w, h, &params);
+        let non_white = buf
+            .chunks_exact(4)
+            .filter(|px| !(px[0] == 255 && px[1] == 255 && px[2] == 255))
+            .count();
+        assert!(
+            non_white > 5000,
+            "blur demo appears blank; non-white pixel count was {}",
+            non_white
+        );
     }
 
     fn load_raw_rgba(path: &Path) -> (u32, u32, Vec<u8>) {

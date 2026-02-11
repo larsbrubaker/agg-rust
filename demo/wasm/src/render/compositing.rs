@@ -425,18 +425,52 @@ fn render_storage_solid(
 // Scanline Boolean — two shape groups with boolean operations
 // ============================================================================
 
-/// Two overlapping shapes combined with boolean operations.
+/// C++-matching scanline_boolean demo: two circle groups generated from draggable quads.
 ///
-/// params[0] = operation (0=Or, 1=And, 2=Xor, 3=AMinusB, 4=BMinusA)
+/// params[0]  = operation (0=Union, 1=Intersection, 2=Linear XOR, 3=Saddle XOR, 4=Abs Diff XOR, 5=A-B, 6=B-A)
+/// params[1]  = opacity1 (0..1)
+/// params[2]  = opacity2 (0..1)
+/// params[3..10]   = quad1 (x0,y0,x1,y1,x2,y2,x3,y3)
+/// params[11..18]  = quad2 (x0,y0,x1,y1,x2,y2,x3,y3)
 pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let op_idx = params.first().copied().unwrap_or(0.0) as u32;
+    let op_idx = params.first().copied().unwrap_or(0.0) as i32;
     let op = match op_idx {
         1 => SBoolOp::And,
         2 => SBoolOp::Xor,
-        3 => SBoolOp::AMinusB,
-        4 => SBoolOp::BMinusA,
+        3 => SBoolOp::XorSaddle,
+        4 => SBoolOp::XorAbsDiff,
+        5 => SBoolOp::AMinusB,
+        6 => SBoolOp::BMinusA,
         _ => SBoolOp::Or,
     };
+    let opacity1 = params.get(1).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+    let opacity2 = params.get(2).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+
+    let w = width as f64;
+    let h = height as f64;
+    let defaults_quad1 = [
+        50.0, 180.0,
+        w / 2.0 - 25.0, 200.0,
+        w / 2.0 - 25.0, h - 70.0,
+        50.0, h - 50.0,
+    ];
+    let defaults_quad2 = [
+        w / 2.0 + 25.0, 180.0,
+        w - 50.0, 200.0,
+        w - 50.0, h - 70.0,
+        w / 2.0 + 25.0, h - 50.0,
+    ];
+
+    let mut quad1 = defaults_quad1;
+    let mut quad2 = defaults_quad2;
+    for i in 0..8 {
+        if let Some(v) = params.get(3 + i) {
+            quad1[i] = *v;
+        }
+        if let Some(v) = params.get(11 + i) {
+            quad2[i] = *v;
+        }
+    }
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -445,83 +479,109 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    let w = width as f64;
-    let h = height as f64;
+    // Build path with circles on each quad edge exactly like C++ generate_circles().
+    let generate_circles = |quad: &[f64; 8]| -> PathStorage {
+        let mut ps = PathStorage::new();
+        let num_circles = 5usize;
+        let radius = 20.0;
+        for i in 0..4usize {
+            let n1 = i * 2;
+            let n2 = if i < 3 { i * 2 + 2 } else { 0 };
+            for j in 0..num_circles {
+                let cx = quad[n1] + (quad[n2] - quad[n1]) * j as f64 / num_circles as f64;
+                let cy = quad[n1 + 1] + (quad[n2 + 1] - quad[n1 + 1]) * j as f64 / num_circles as f64;
+                let mut ell = Ellipse::new(cx, cy, radius, radius, 100, false);
+                ps.concat_path(&mut ell, 0);
+            }
+        }
+        ps
+    };
 
-    // Shape A: circle spiral (left group)
-    let mut ras1 = RasterizerScanlineAa::new();
-    for i in 0..5 {
-        let angle = i as f64 * std::f64::consts::PI * 2.0 / 5.0;
-        let cx = w * 0.35 + 50.0 * angle.cos();
-        let cy = h * 0.5 + 50.0 * angle.sin();
-        let mut ell = Ellipse::new(cx, cy, 40.0, 40.0, 32, false);
-        ras1.add_path(&mut ell, 0);
-    }
+    let mut ps1 = generate_circles(&quad1);
+    let mut ps2 = generate_circles(&quad2);
 
-    // Shape B: circle spiral (right group)
-    let mut ras2 = RasterizerScanlineAa::new();
-    for i in 0..5 {
-        let angle = i as f64 * std::f64::consts::PI * 2.0 / 5.0 + 0.3;
-        let cx = w * 0.65 + 50.0 * angle.cos();
-        let cy = h * 0.5 + 50.0 * angle.sin();
-        let mut ell = Ellipse::new(cx, cy, 40.0, 40.0, 32, false);
-        ras2.add_path(&mut ell, 0);
-    }
-
-    // Render the individual shapes semi-transparently for reference
     let mut sl = ScanlineU8::new();
-    {
-        let mut ras_a = RasterizerScanlineAa::new();
-        for i in 0..5 {
-            let angle = i as f64 * std::f64::consts::PI * 2.0 / 5.0;
-            let cx = w * 0.35 + 50.0 * angle.cos();
-            let cy = h * 0.5 + 50.0 * angle.sin();
-            let mut ell = Ellipse::new(cx, cy, 40.0, 40.0, 32, false);
-            ras_a.add_path(&mut ell, 0);
-        }
-        render_scanlines_aa_solid(&mut ras_a, &mut sl, &mut rb, &Rgba8::new(240, 200, 200, 128));
-    }
-    {
-        let mut ras_b = RasterizerScanlineAa::new();
-        for i in 0..5 {
-            let angle = i as f64 * std::f64::consts::PI * 2.0 / 5.0 + 0.3;
-            let cx = w * 0.65 + 50.0 * angle.cos();
-            let cy = h * 0.5 + 50.0 * angle.sin();
-            let mut ell = Ellipse::new(cx, cy, 40.0, 40.0, 32, false);
-            ras_b.add_path(&mut ell, 0);
-        }
-        render_scanlines_aa_solid(&mut ras_b, &mut sl, &mut rb, &Rgba8::new(200, 200, 240, 128));
-    }
+    let mut ras = RasterizerScanlineAa::new();
+    ras.clip_box(0.0, 0.0, w, h);
 
-    // Perform boolean operation
+    let mut ras1 = RasterizerScanlineAa::new();
+    ras1.filling_rule(FillingRule::EvenOdd);
+    ras1.add_path(&mut ps1, 0);
+
+    let mut ras2 = RasterizerScanlineAa::new();
+    ras2.add_path(&mut ps2, 0);
+
+    let a1 = (100.0 * opacity1).round().clamp(0.0, 255.0) as u32;
+    let a2 = (100.0 * opacity2).round().clamp(0.0, 255.0) as u32;
+    render_scanlines_aa_solid(&mut ras1, &mut sl, &mut rb, &Rgba8::new(240, 255, 200, a1));
+    render_scanlines_aa_solid(&mut ras2, &mut sl, &mut rb, &Rgba8::new(255, 240, 240, a2));
+
     let mut sl1 = ScanlineU8::new();
     let mut sl2 = ScanlineU8::new();
     let mut sl_result = ScanlineU8::new();
     let mut storage1 = ScanlineStorageAa::new();
     let mut storage2 = ScanlineStorageAa::new();
     let mut storage_result = ScanlineStorageAa::new();
-
     sbool_combine_shapes_aa(
         op, &mut ras1, &mut ras2,
         &mut sl1, &mut sl2, &mut sl_result,
         &mut storage1, &mut storage2, &mut storage_result,
     );
-
-    // Render the boolean result in solid color
     render_storage_solid(&mut storage_result, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
-    // Label
-    let op_names = ["OR (Union)", "AND (Intersect)", "XOR", "A - B", "B - A"];
-    let op_name = op_names.get(op_idx as usize).unwrap_or(&"OR");
-    let mut txt = GsvText::new();
-    txt.size(12.0, 0.0);
-    txt.start_point(10.0, h - 20.0);
-    txt.text(op_name);
-    let mut txt_stroke = ConvStroke::new(&mut txt);
-    txt_stroke.set_width(1.5);
-    let mut ras = RasterizerScanlineAa::new();
-    ras.add_path(&mut txt_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    // Render interactive quad guides (edges + vertex handles).
+    for quad in [&quad1, &quad2] {
+        let mut edge_path = PathStorage::new();
+        edge_path.move_to(quad[0], quad[1]);
+        edge_path.line_to(quad[2], quad[3]);
+        edge_path.line_to(quad[4], quad[5]);
+        edge_path.line_to(quad[6], quad[7]);
+        edge_path.close_polygon(0);
+
+        let mut edge_stroke = ConvStroke::new(&mut edge_path);
+        edge_stroke.set_width(1.5);
+        ras.reset();
+        ras.add_path(&mut edge_stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 77, 128, 153));
+
+        for i in 0..4usize {
+            let x = quad[i * 2];
+            let y = quad[i * 2 + 1];
+            let mut h = Ellipse::new(x, y, 4.5, 4.5, 32, false);
+            ras.reset();
+            ras.add_path(&mut h, 0);
+            // Match C++ tool look better: circular handles with softer contrast.
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 102, 140, 150));
+        }
+    }
+
+    // Render C++-matching controls.
+    let mut m_trans_type = RboxCtrl::new(420.0, 5.0, 550.0, 145.0);
+    m_trans_type.add_item("Union");
+    m_trans_type.add_item("Intersection");
+    m_trans_type.add_item("Linear XOR");
+    m_trans_type.add_item("Saddle XOR");
+    m_trans_type.add_item("Abs Diff XOR");
+    m_trans_type.add_item("A-B");
+    m_trans_type.add_item("B-A");
+    m_trans_type.set_cur_item(op_idx.clamp(0, 6));
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_trans_type);
+
+    let mut m_reset = CboxCtrl::new(350.0, 5.0, "Reset");
+    m_reset.set_status(false);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_reset);
+
+    let mut m_mul1 = SliderCtrl::new(5.0, 5.0, 340.0, 12.0);
+    m_mul1.range(0.0, 1.0);
+    m_mul1.set_value(opacity1);
+    m_mul1.label("Opacity1=%.3f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_mul1);
+
+    let mut m_mul2 = SliderCtrl::new(5.0, 20.0, 340.0, 27.0);
+    m_mul2.range(0.0, 1.0);
+    m_mul2.set_value(opacity2);
+    m_mul2.label("Opacity2=%.3f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_mul2);
 
     buf
 }
@@ -2649,15 +2709,22 @@ fn parse_flash_shapes() -> Vec<FlashShape> {
     out
 }
 
+fn flash_rand_byte(state: &mut u32) -> u8 {
+    // LCG variant used by the AGG demo output we're matching.
+    *state = state.wrapping_mul(1103515245).wrapping_add(12345);
+    ((*state >> 16) & 0xFF) as u8
+}
+
 fn flash_palette() -> Vec<Rgba8> {
-    let mut seed: u32 = 1;
-    let mut next = || {
-        seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
-        ((seed >> 16) & 0xFF) as u8
-    };
+    let mut holdrand: u32 = 1;
     let mut colors = vec![Rgba8::new(0, 0, 0, 255); 100];
     for c in &mut colors {
-        *c = Rgba8::new(next() as u32, next() as u32, next() as u32, 230);
+        *c = Rgba8::new(
+            flash_rand_byte(&mut holdrand) as u32,
+            flash_rand_byte(&mut holdrand) as u32,
+            flash_rand_byte(&mut holdrand) as u32,
+            230,
+        );
         c.premultiply();
     }
     colors
@@ -2685,12 +2752,139 @@ fn flash_shape_transform(shape: &FlashShape, width: u32, height: u32, scale: f64
     user
 }
 
-/// params[0] = scale, params[1] = rotation_degrees, params[2] = shape_index
-pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let scale_val = params.first().copied().unwrap_or(1.0).max(0.01);
-    let rotation = params.get(1).copied().unwrap_or(0.0).to_radians();
-    let shape_index = params.get(2).copied().unwrap_or(0.0).max(0.0) as usize;
+fn flash_user_transform_from_params(width: u32, height: u32, params: &[f64], shape: &FlashShape) -> (usize, TransAffine) {
+    // Backward compatible path:
+    // params[0] = scale, params[1] = rotation_degrees, params[2] = shape_index
+    if params.len() < 7 {
+        let scale_val = params.first().copied().unwrap_or(1.0).max(0.01);
+        let rotation = params.get(1).copied().unwrap_or(0.0).to_radians();
+        let shape_index = params.get(2).copied().unwrap_or(0.0).max(0.0) as usize;
+        return (shape_index, flash_shape_transform(shape, width, height, scale_val, rotation));
+    }
 
+    // Extended state:
+    // params[0]      = shape_index
+    // params[1..=6]  = user affine [sx, shy, shx, sy, tx, ty], pre-base
+    let shape_index = params[0].max(0.0) as usize;
+    let mut user = TransAffine::new_custom(
+        params[1],
+        params[2],
+        params[3],
+        params[4],
+        params[5],
+        params[6],
+    );
+    let mut path = shape.path.clone();
+    let path_ids: Vec<u32> = shape.styles.iter().map(|s| s.path_id).collect();
+    let mut base = TransAffine::new();
+    if let Some(rect) = agg_rust::bounding_rect::bounding_rect(&mut path, &path_ids, 0, path_ids.len()) {
+        let mut vp = TransViewport::new();
+        vp.preserve_aspect_ratio(0.5, 0.5, AspectRatio::Meet);
+        vp.set_world_viewport(rect.x1, rect.y1, rect.x2, rect.y2);
+        vp.set_device_viewport(0.0, 0.0, width as f64, height as f64);
+        base = vp.to_affine();
+    }
+    user.multiply(&base);
+    (shape_index, user)
+}
+
+fn flash_apply_vertex_overrides(path: &mut PathStorage, params: &[f64], start: usize) {
+    let total = path.total_vertices();
+    let mut i = start;
+    while i + 2 < params.len() {
+        let idx = params[i].round() as isize;
+        let x = params[i + 1];
+        let y = params[i + 2];
+        if idx >= 0 {
+            let u = idx as usize;
+            if u < total {
+                path.modify_vertex(u, x, y);
+            }
+        }
+        i += 3;
+    }
+}
+
+fn flash_params_state_start(params: &[f64]) -> usize {
+    // Legacy params have no extra state.
+    if params.len() < 7 {
+        return params.len();
+    }
+    10
+}
+
+fn flash_user_scale(params: &[f64]) -> f64 {
+    if params.len() >= 7 {
+        let sx = params[1];
+        let shx = params[3];
+        (sx * sx + shx * shx).sqrt().max(0.001)
+    } else {
+        params.first().copied().unwrap_or(1.0).abs().max(0.001)
+    }
+}
+
+pub fn flash_pick_vertex(demo2: bool, width: u32, height: u32, params: &[f64], x: f64, y: f64, radius: f64) -> i32 {
+    let shapes = parse_flash_shapes();
+    if shapes.is_empty() {
+        return -1;
+    }
+    let shape_for_index = &shapes[0];
+    let (shape_index, _) = flash_user_transform_from_params(width, height, params, shape_for_index);
+    let shape = &shapes[shape_index % shapes.len()];
+    let (_, mtx) = flash_user_transform_from_params(width, height, params, shape);
+
+    let mut path = shape.path.clone();
+    flash_apply_vertex_overrides(&mut path, params, flash_params_state_start(params));
+
+    // C++ logic:
+    // m_scale.inverse_transform(x, y); m_shape.hit_test(x, y, 4/m_scale.scale())
+    let mut sx = x;
+    let mut sy = y;
+    let mut inv_user = mtx;
+    inv_user.invert();
+    inv_user.transform(&mut sx, &mut sy);
+    let scale = mtx.scaling_abs().0.max(0.001);
+    let r = radius / scale;
+    let _ = demo2;
+
+    for i in 0..path.total_vertices() {
+        let mut vx = 0.0;
+        let mut vy = 0.0;
+        let cmd = path.vertex_idx(i, &mut vx, &mut vy);
+        if is_vertex(cmd) {
+            let dx = sx - vx;
+            let dy = sy - vy;
+            if (dx * dx + dy * dy).sqrt() <= r {
+                return i as i32;
+            }
+        }
+    }
+    -1
+}
+
+pub fn flash_screen_to_shape(width: u32, height: u32, params: &[f64], x: f64, y: f64) -> Vec<f64> {
+    let shapes = parse_flash_shapes();
+    if shapes.is_empty() {
+        return vec![x, y];
+    }
+    let shape_for_index = &shapes[0];
+    let (shape_index, mtx0) = flash_user_transform_from_params(width, height, params, shape_for_index);
+    let shape = &shapes[shape_index % shapes.len()];
+    let (_, mtx) = flash_user_transform_from_params(width, height, params, shape);
+    let _ = mtx0; // Keep decode symmetry; mtx from selected shape is the one we need.
+
+    let mut sx = x;
+    let mut sy = y;
+    let mut inv = mtx;
+    inv.invert();
+    inv.transform(&mut sx, &mut sy);
+    vec![sx, sy]
+}
+
+/// Legacy params: [scale, rotation_degrees, shape_index]
+/// Extended params:
+/// [shape_index, m0, m1, m2, m3, m4, m5, hit_x, hit_y, hit_active, ...vertex_overrides(idx,x,y)]
+pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let shapes = parse_flash_shapes();
     if shapes.is_empty() {
         let mut buf = Vec::new();
@@ -2698,6 +2892,7 @@ pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         setup_renderer(&mut buf, &mut ra, width, height);
         return buf;
     }
+    let (shape_index, _) = flash_user_transform_from_params(width, height, params, &shapes[0]);
     let shape = &shapes[shape_index % shapes.len()];
 
     let mut buf = Vec::new();
@@ -2707,15 +2902,19 @@ pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 242, 255));
 
-    let mtx = flash_shape_transform(shape, width, height, scale_val, rotation);
+    let (_, mtx) = flash_user_transform_from_params(width, height, params, shape);
     let colors = flash_palette();
+    let mut fill_src_path = shape.path.clone();
+    flash_apply_vertex_overrides(&mut fill_src_path, params, flash_params_state_start(params));
 
     // Fill (compound rasterizer), matching flash_rasterizer.cpp behavior.
     let mut rasc = RasterizerCompoundAa::new();
     rasc.clip_box(0.0, 0.0, width as f64, height as f64);
     rasc.layer_order(LayerOrder::Direct);
-    let mut fill_path = shape.path.clone();
-    let mut trans_shape = ConvTransform::new(&mut fill_path, mtx);
+    let mut fill_path = fill_src_path.clone();
+    let mut fill_curve = ConvCurve::new(&mut fill_path);
+    fill_curve.set_approximation_scale(flash_user_scale(params).max(1.0));
+    let mut trans_shape = ConvTransform::new(&mut fill_curve, mtx);
     for st in &shape.styles {
         if st.left_fill >= 0 || st.right_fill >= 0 {
             rasc.styles(st.left_fill, st.right_fill);
@@ -2724,22 +2923,48 @@ pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
     render_compound(&mut rasc, &mut rb, &colors);
 
+    // Hit-test behavior from C++: right mouse button suppresses stroke rendering
+    // when point falls inside any filled region.
+    let mut draw_strokes = true;
+    if params.len() >= 10 && params[9] > 0.5 {
+        let mut ras_hit = RasterizerScanlineAa::new();
+        ras_hit.clip_box(0.0, 0.0, width as f64, height as f64);
+        let mut fill_hit_path = fill_src_path.clone();
+        let mut fill_hit_curve = ConvCurve::new(&mut fill_hit_path);
+        fill_hit_curve.set_approximation_scale(flash_user_scale(params).max(1.0));
+        let mut trans_hit = ConvTransform::new(&mut fill_hit_curve, mtx);
+        for st in &shape.styles {
+            if st.left_fill >= 0 || st.right_fill >= 0 {
+                ras_hit.add_path(&mut trans_hit, st.path_id);
+            }
+        }
+        let hx = params[7] as i32;
+        let hy_top_down = params[8] as i32;
+        let hy_bottom_up = (height as f64 - params[8]) as i32;
+        if ras_hit.hit_test(hx, hy_top_down) || ras_hit.hit_test(hx, hy_bottom_up) {
+            draw_strokes = false;
+        }
+    }
+
     // Strokes
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
-    let mut stroke_path = shape.path.clone();
+    let mut stroke_path = fill_src_path.clone();
     let mut curve = ConvCurve::new(&mut stroke_path);
-    curve.set_approximation_scale(scale_val.max(1.0));
+    let user_scale = flash_user_scale(params);
+    curve.set_approximation_scale(user_scale.max(1.0));
     let mut trans_curve = ConvTransform::new(&mut curve, mtx);
     let mut stroke = ConvStroke::new(&mut trans_curve);
-    stroke.set_width(scale_val.sqrt());
+    stroke.set_width(user_scale.sqrt());
     stroke.set_line_join(LineJoin::Round);
     stroke.set_line_cap(LineCap::Round);
-    for st in &shape.styles {
-        if st.line >= 0 {
-            ras.reset();
-            ras.add_path(&mut stroke, st.path_id);
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 128));
+    if draw_strokes {
+        for st in &shape.styles {
+            if st.line >= 0 {
+                ras.reset();
+                ras.add_path(&mut stroke, st.path_id);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 128));
+            }
         }
     }
 
@@ -2758,12 +2983,10 @@ pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-/// params[0] = scale, params[1] = rotation_degrees, params[2] = shape_index
+/// Legacy params: [scale, rotation_degrees, shape_index]
+/// Extended params:
+/// [shape_index, m0, m1, m2, m3, m4, m5, _, _, _, ...vertex_overrides(idx,x,y)]
 pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let scale_val = params.first().copied().unwrap_or(1.0).max(0.01);
-    let rotation = params.get(1).copied().unwrap_or(0.0).to_radians();
-    let shape_index = params.get(2).copied().unwrap_or(0.0).max(0.0) as usize;
-
     let shapes = parse_flash_shapes();
     if shapes.is_empty() {
         let mut buf = Vec::new();
@@ -2771,6 +2994,7 @@ pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         setup_renderer(&mut buf, &mut ra, width, height);
         return buf;
     }
+    let (shape_index, _) = flash_user_transform_from_params(width, height, params, &shapes[0]);
     let shape = &shapes[shape_index % shapes.len()];
 
     let mut buf = Vec::new();
@@ -2780,7 +3004,7 @@ pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 242, 255));
 
-    let mtx = flash_shape_transform(shape, width, height, scale_val, rotation);
+    let (_, mtx) = flash_user_transform_from_params(width, height, params, shape);
     let colors = flash_palette();
     let min_style = shape
         .styles
@@ -2801,7 +3025,10 @@ pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut sl = ScanlineU8::new();
     ras.auto_close(false);
     let mut fill_path = shape.path.clone();
-    let mut trans_shape = ConvTransform::new(&mut fill_path, mtx);
+    flash_apply_vertex_overrides(&mut fill_path, params, flash_params_state_start(params));
+    let mut fill_curve = ConvCurve::new(&mut fill_path);
+    fill_curve.set_approximation_scale(flash_user_scale(params).max(1.0));
+    let mut trans_shape = ConvTransform::new(&mut fill_curve, mtx);
     for s in min_style..=max_style {
         ras.reset();
         for st in &shape.styles {
@@ -2823,11 +3050,13 @@ pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ras.auto_close(true);
 
     let mut stroke_path = shape.path.clone();
+    flash_apply_vertex_overrides(&mut stroke_path, params, flash_params_state_start(params));
     let mut curve = ConvCurve::new(&mut stroke_path);
-    curve.set_approximation_scale(scale_val.max(1.0));
+    let user_scale = flash_user_scale(params);
+    curve.set_approximation_scale(user_scale.max(1.0));
     let mut trans_curve = ConvTransform::new(&mut curve, mtx);
     let mut stroke = ConvStroke::new(&mut trans_curve);
-    stroke.set_width(scale_val.sqrt());
+    stroke.set_width(user_scale.sqrt());
     stroke.set_line_join(LineJoin::Round);
     stroke.set_line_cap(LineCap::Round);
     for st in &shape.styles {
@@ -2853,79 +3082,201 @@ pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-/// params[0] = stroke width, params[1] = invert layer order (0/1)
+fn compose_rasterizer_compound_path(path: &mut PathStorage) {
+    path.move_to(28.47, 6.45);
+    path.curve3(21.58, 1.12, 19.82, 0.29);
+    path.curve3(17.19, -0.93, 14.21, -0.93);
+    path.curve3(9.57, -0.93, 6.57, 2.25);
+    path.curve3(3.56, 5.42, 3.56, 10.60);
+    path.curve3(3.56, 13.87, 5.03, 16.26);
+    path.curve3(7.03, 19.58, 11.99, 22.51);
+    path.curve3(16.94, 25.44, 28.47, 29.64);
+    path.line_to(28.47, 31.40);
+    path.curve3(28.47, 38.09, 26.34, 40.58);
+    path.curve3(24.22, 43.07, 20.17, 43.07);
+    path.curve3(17.09, 43.07, 15.28, 41.41);
+    path.curve3(13.43, 39.75, 13.43, 37.60);
+    path.line_to(13.53, 34.77);
+    path.curve3(13.53, 32.52, 12.38, 31.30);
+    path.curve3(11.23, 30.08, 9.38, 30.08);
+    path.curve3(7.57, 30.08, 6.42, 31.35);
+    path.curve3(5.27, 32.62, 5.27, 34.81);
+    path.curve3(5.27, 39.01, 9.57, 42.53);
+    path.curve3(13.87, 46.04, 21.63, 46.04);
+    path.curve3(27.59, 46.04, 31.40, 44.04);
+    path.curve3(34.28, 42.53, 35.64, 39.31);
+    path.curve3(36.52, 37.21, 36.52, 30.71);
+    path.line_to(36.52, 15.53);
+    path.curve3(36.52, 9.13, 36.77, 7.69);
+    path.curve3(37.01, 6.25, 37.57, 5.76);
+    path.curve3(38.13, 5.27, 38.87, 5.27);
+    path.curve3(39.65, 5.27, 40.23, 5.62);
+    path.curve3(41.26, 6.25, 44.19, 9.18);
+    path.line_to(44.19, 6.45);
+    path.curve3(38.72, -0.88, 33.74, -0.88);
+    path.curve3(31.35, -0.88, 29.93, 0.78);
+    path.curve3(28.52, 2.44, 28.47, 6.45);
+    path.close_polygon(0);
+
+    path.move_to(28.47, 9.62);
+    path.line_to(28.47, 26.66);
+    path.curve3(21.09, 23.73, 18.95, 22.51);
+    path.curve3(15.09, 20.36, 13.43, 18.02);
+    path.curve3(11.77, 15.67, 11.77, 12.89);
+    path.curve3(11.77, 9.38, 13.87, 7.06);
+    path.curve3(15.97, 4.74, 18.70, 4.74);
+    path.curve3(22.41, 4.74, 28.47, 9.62);
+    path.close_polygon(0);
+}
+
+/// params[0] = width (-20..50)
+/// params[1] = alpha1 (0..1)
+/// params[2] = alpha2 (0..1)
+/// params[3] = alpha3 (0..1)
+/// params[4] = alpha4 (0..1)
+/// params[5] = invert layer order (0/1)
 pub fn rasterizer_compound(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let stroke_width = params.get(0).copied().unwrap_or(2.0).max(0.1);
-    let invert_order = params.get(1).copied().unwrap_or(0.0) > 0.5;
+    let stroke_width = params.get(0).copied().unwrap_or(10.0).clamp(-20.0, 50.0);
+    let alpha1 = params.get(1).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+    let alpha2 = params.get(2).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+    let alpha3 = params.get(3).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+    let alpha4 = params.get(4).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+    let invert_order = params.get(5).copied().unwrap_or(0.0) > 0.5;
     let w = width as f64;
     let h = height as f64;
-    let cx = w / 2.0;
-    let cy = h / 2.0;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
     setup_renderer(&mut buf, &mut ra, width, height);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 240, 255));
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
+
+    // C++: clear with a horizontal gradient from yellow to cyan.
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let k = x as f64 / w.max(1.0);
+            let c = Rgba8::new(255, 255, 0, 255).gradient(&Rgba8::new(0, 255, 255, 255), k);
+            let i = (y * width as usize + x) * 4;
+            buf[i] = c.r as u8;
+            buf[i + 1] = c.g as u8;
+            buf[i + 2] = c.b as u8;
+            buf[i + 3] = c.a as u8;
+        }
+    }
+
+    // Draw the same two background triangles as C++.
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
+    ras.move_to_d(0.0, 0.0);
+    ras.line_to_d(w, 0.0);
+    ras.line_to_d(w, h);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 100, 0, 255));
+    ras.reset();
+    ras.move_to_d(0.0, 0.0);
+    ras.line_to_d(0.0, h);
+    ras.line_to_d(w, 0.0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 100, 100, 255));
+
+    // Build transformed glyph path.
+    let mut base_path = PathStorage::new();
+    compose_rasterizer_compound_path(&mut base_path);
+    let mut mtx = TransAffine::new();
+    mtx.multiply(&TransAffine::new_scaling_uniform(4.0));
+    mtx.multiply(&TransAffine::new_translation(150.0, 100.0));
+    let mut trans = ConvTransform::new(&mut base_path, mtx);
+    let mut curve = ConvCurve::new(&mut trans);
+    let mut stroke = ConvStroke::new(&mut curve);
+    stroke.set_width(stroke_width);
 
     let mut rasc = RasterizerCompoundAa::new();
     rasc.clip_box(0.0, 0.0, w, h);
     rasc.layer_order(if invert_order { LayerOrder::Inverse } else { LayerOrder::Direct });
 
-    // Style 0: Large stroked ellipse
-    {
-        let mut ell = Ellipse::new(cx, cy, 130.0, 100.0, 100, false);
-        let mut stroke = ConvStroke::new(&mut ell);
-        stroke.set_width(stroke_width * 3.0);
-        rasc.styles(0, -1);
-        rasc.add_path(&mut stroke, 0);
-    }
-    // Style 1: Filled circle
-    {
-        let mut ell = Ellipse::new(cx - 60.0, cy - 30.0, 50.0, 50.0, 80, false);
-        rasc.styles(1, -1);
-        rasc.add_path(&mut ell, 0);
-    }
-    // Style 2: Triangle
-    {
-        let mut tri = PathStorage::new();
-        tri.move_to(cx + 20.0, cy - 60.0);
-        tri.line_to(cx + 90.0, cy + 40.0);
-        tri.line_to(cx - 50.0, cy + 40.0);
-        tri.close_polygon(0);
-        rasc.styles(2, -1);
-        rasc.add_path(&mut tri, 0);
-    }
-    // Style 3: Stroked curve
-    {
-        let mut c = PathStorage::new();
-        c.move_to(cx - 100.0, cy + 30.0);
-        c.curve4(cx - 50.0, cy - 80.0, cx + 50.0, cy + 80.0, cx + 100.0, cy - 30.0);
-        let mut cc = ConvCurve::new(&mut c);
-        let mut stroke = ConvStroke::new(&mut cc);
-        stroke.set_width(stroke_width * 5.0);
-        rasc.styles(3, -1);
-        rasc.add_path(&mut stroke, 0);
-    }
+    let mut ell = Ellipse::new(220.0, 180.0, 120.0, 10.0, 128, false);
+    let mut str_ell = ConvStroke::new(&mut ell);
+    str_ell.set_width(stroke_width / 2.0);
 
-    let colors = [
-        Rgba8::new(80, 80, 80, 200),
-        Rgba8::new(200, 60, 60, 200),
-        Rgba8::new(60, 200, 60, 200),
-        Rgba8::new(60, 60, 200, 200),
+    rasc.styles(3, -1);
+    rasc.add_path(&mut str_ell, 0);
+    rasc.styles(2, -1);
+    rasc.add_path(&mut ell, 0);
+    rasc.styles(1, -1);
+    rasc.add_path(&mut stroke, 0);
+    rasc.styles(0, -1);
+    rasc.add_path(&mut curve, 0);
+
+    let mut colors = [
+        Rgba8::new(0, 0, 255, 255),
+        Rgba8::new(143, 90, 6, 255),
+        Rgba8::new(51, 0, 151, 255),
+        Rgba8::new(255, 0, 108, 255),
     ];
+    colors[3].set_opacity(alpha1);
+    colors[2].set_opacity(alpha2);
+    colors[1].set_opacity(alpha3);
+    colors[0].set_opacity(alpha4);
+    for c in &mut colors {
+        c.premultiply();
+    }
     render_compound(&mut rasc, &mut rb, &colors);
 
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-    let mut s_sw = SliderCtrl::new(5.0, 5.0, w - 5.0, 12.0);
-    s_sw.range(0.5, 10.0);
+    // Controls rendered on the canvas (matching C++ placement/labels).
+    let mut s_sw = SliderCtrl::new(190.0, 5.0, 430.0, 12.0);
+    s_sw.range(-20.0, 50.0);
     s_sw.set_value(stroke_width);
-    s_sw.label("Stroke=%.1f");
+    s_sw.label("Width=%1.2f");
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_sw);
-    let mut cbox_rc = CboxCtrl::new(5.0, 20.0, "Invert Z-Order");
+
+    let mut s_a1 = SliderCtrl::new(5.0, 5.0, 180.0, 12.0);
+    s_a1.range(0.0, 1.0);
+    s_a1.set_value(alpha1);
+    s_a1.label("Alpha1=%1.3f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_a1);
+
+    let mut s_a2 = SliderCtrl::new(5.0, 25.0, 180.0, 32.0);
+    s_a2.range(0.0, 1.0);
+    s_a2.set_value(alpha2);
+    s_a2.label("Alpha2=%1.3f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_a2);
+
+    let mut s_a3 = SliderCtrl::new(5.0, 45.0, 180.0, 52.0);
+    s_a3.range(0.0, 1.0);
+    s_a3.set_value(alpha3);
+    s_a3.label("Alpha3=%1.3f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_a3);
+
+    let mut s_a4 = SliderCtrl::new(5.0, 65.0, 180.0, 72.0);
+    s_a4.range(0.0, 1.0);
+    s_a4.set_value(alpha4);
+    s_a4.label("Alpha4=%1.3f");
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_a4);
+
+    let mut cbox_rc = CboxCtrl::new(190.0, 25.0, "Invert Z-Order");
     cbox_rc.set_status(invert_order);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut cbox_rc);
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{flash_palette, flash_rand_byte};
+
+    #[test]
+    fn flash_rand_matches_reference_sequence() {
+        let mut state = 1u32;
+        let seq: Vec<u8> = (0..9).map(|_| flash_rand_byte(&mut state)).collect();
+        assert_eq!(seq, vec![198, 126, 129, 107, 75, 251, 226, 251, 84]);
+    }
+
+    #[test]
+    fn flash_palette_first_entry_matches_cpp_style() {
+        let colors = flash_palette();
+        assert_eq!(colors[0].a, 230);
+        // First generated RGB before premultiply is (198, 126, 129).
+        // After AGG premultiply with alpha=230:
+        assert_eq!(colors[0].r, 179);
+        assert_eq!(colors[0].g, 114);
+        assert_eq!(colors[0].b, 116);
+    }
 }
