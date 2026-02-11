@@ -2277,6 +2277,20 @@ fn draw_checkerboard(rb: &mut RendererBase<PixfmtRgba32>) {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn measure_scene_ms<F: FnOnce()>(f: F) -> f64 {
+    // std::time::Instant::now() can panic on wasm depending on runtime support.
+    f();
+    0.0
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn measure_scene_ms<F: FnOnce()>(f: F) -> f64 {
+    let t0 = std::time::Instant::now();
+    f();
+    t0.elapsed().as_secs_f64() * 1000.0
+}
+
 /// params[0] = comp_op index (0-23), params[1] = src alpha (0..1), params[2] = dst alpha (0..1)
 pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let comp_op_idx = params.first().copied().unwrap_or(3.0).clamp(0.0, 23.0) as u32;
@@ -2326,8 +2340,7 @@ pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         );
     }
 
-    let t0 = std::time::Instant::now();
-    {
+    let scene_ms = measure_scene_ms(|| {
         let mut pf = PixfmtRgba32CompOp::new(&mut ra_img);
         pf.set_comp_op(comp_op_from_index(comp_op_idx));
         let mut rb = RendererBase::new(pf);
@@ -2340,8 +2353,7 @@ pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             Rgba8::new(0x7F, 0xC1, 0xFF, (src_alpha * 255.0) as u32),
             Rgba8::new(0x05, 0x00, 0x5F, (src_alpha * 255.0) as u32),
         );
-    }
-    let scene_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    });
 
     // Blend scene image over checkerboard.
     for i in (0..buf.len()).step_by(4) {
