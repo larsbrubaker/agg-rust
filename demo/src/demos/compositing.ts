@@ -23,14 +23,25 @@ export function init(container: HTMLElement) {
 
   const slSrc = addSlider(sidebar, 'Src Alpha', 0, 1, 0.75, 0.01, v => { srcAlpha = v; draw(); });
   const slDst = addSlider(sidebar, 'Dst Alpha', 0, 1, 1, 0.01, v => { dstAlpha = v; draw(); });
-  const radios = addRadioGroup(sidebar, 'Comp Op', COMP_OP_NAMES, compOp, i => { compOp = i; draw(); });
+  const displayCompOps = [...COMP_OP_NAMES].reverse();
+  const initialDisplayIndex = COMP_OP_NAMES.length - 1 - compOp;
+  const radiosDisplay = addRadioGroup(sidebar, 'Comp Op', displayCompOps, initialDisplayIndex, i => {
+    compOp = COMP_OP_NAMES.length - 1 - i;
+    draw();
+  });
+  // Keep canvas control sync in AGG logical comp-op index order.
+  const radiosByCompOp: HTMLInputElement[] = new Array(COMP_OP_NAMES.length);
+  for (let displayIdx = 0; displayIdx < radiosDisplay.length; displayIdx++) {
+    const compOpIdx = COMP_OP_NAMES.length - 1 - displayIdx;
+    radiosByCompOp[compOpIdx] = radiosDisplay[displayIdx];
+  }
 
   const canvasControls: CanvasControl[] = [
     { type: 'slider', x1: 5, y1: 5, x2: 400, y2: 11, min: 0, max: 1, sidebarEl: slSrc, onChange: v => { srcAlpha = v; draw(); } },
     { type: 'slider', x1: 5, y1: 20, x2: 400, y2: 26, min: 0, max: 1, sidebarEl: slDst, onChange: v => { dstAlpha = v; draw(); } },
-    { type: 'radio', x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES.length, sidebarEls: radios, onChange: i => { compOp = i; draw(); } },
+    { type: 'radio', x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES.length, sidebarEls: radiosByCompOp, onChange: i => { compOp = i; draw(); } },
   ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: 'bottom-left' });
 
   draw();
   return () => cleanupCC();

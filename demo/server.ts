@@ -53,6 +53,7 @@ async function serveFile(pathname: string): Promise<Response | null> {
     return new Response(html, {
       headers: {
         "Content-Type": "text/html",
+        "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
       },
     });
@@ -61,6 +62,7 @@ async function serveFile(pathname: string): Promise<Response | null> {
   return new Response(file, {
     headers: {
       "Content-Type": contentType,
+      "Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
     },
   });
@@ -110,11 +112,11 @@ const server = Bun.serve({
         let html = await demoFile.text();
         html = html.replace("</body>", `${RELOAD_SCRIPT}</body>`);
         return new Response(html, {
-          headers: { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*" },
+          headers: { "Content-Type": "text/html", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
         });
       }
       return new Response(demoFile, {
-        headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" },
+        headers: { "Content-Type": contentType, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
       });
     }
 

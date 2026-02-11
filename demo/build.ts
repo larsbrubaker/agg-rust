@@ -13,12 +13,22 @@ import { mkdirSync, cpSync, existsSync, rmSync } from "fs";
 
 const DEMO_DIR = import.meta.dir;
 const DIST_DIR = join(DEMO_DIR, "dist");
+const PUBLIC_DIST_DIR = join(DEMO_DIR, "public", "dist");
 
 // Step 1: Bundle TypeScript into public/dist/
+if (existsSync(PUBLIC_DIST_DIR)) {
+  rmSync(PUBLIC_DIST_DIR, { recursive: true, force: true });
+}
+mkdirSync(PUBLIC_DIST_DIR, { recursive: true });
+
 const result = await Bun.build({
   entrypoints: ['./src/main.ts'],
   outdir: './public/dist',
-  splitting: true,
+  // Bun 1.3 may keep outputs in memory unless write is explicit.
+  // We need emitted files for both local dev server and GitHub Pages deploys.
+  write: true,
+  // Use a single bundle to avoid stale hashed chunk 404s on static hosting/CDN caches.
+  splitting: false,
   format: 'esm',
   minify: false,
   sourcemap: 'external',
