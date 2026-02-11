@@ -24,7 +24,7 @@ export const HISTORY_SECTIONS: HistorySection[] = [
     description: 'Project philosophy, original AGG context, and the current Rust-port direction.',
     rustRoutes: ['home', 'lion', 'gradients'],
     portUpdateNote:
-      'Rust-port update: references to the historical General Polygon Clipper are kept for context only. This project uses modern Rust approaches (including <a href="https://github.com/tirithen/clipper2" target="_blank" rel="noreferrer">clipper2-rust</a> workflows) and does not ship GPC.',
+      'Rust-port update: references to the historical General Polygon Clipper are kept for context only. This project uses modern Rust approaches (including <a href="https://github.com/larsbrubaker/clipper2-rust" target="_blank" rel="noreferrer">clipper2-rust</a> workflows and the <a href="https://crates.io/crates/clipper2-rust" target="_blank" rel="noreferrer">clipper2-rust crate</a>) and does not ship GPC.',
   },
   {
     route: 'history/news',
@@ -42,7 +42,7 @@ export const HISTORY_SECTIONS: HistorySection[] = [
     archiveNote:
       'This section is preserved for historical context. For this Rust port, see repository licensing details.',
     portUpdateNote:
-      'Rust-port update: the GPC component/license text is preserved historically, but GPC is not used in this Rust port. The Rust port uses <a href="https://github.com/tirithen/clipper2" target="_blank" rel="noreferrer">clipper2-rust</a>-based workflows for modern polygon operations where needed.',
+      'Rust-port update: the GPC component/license text is preserved historically, but GPC is not used in this Rust port. The Rust port uses <a href="https://github.com/larsbrubaker/clipper2-rust" target="_blank" rel="noreferrer">clipper2-rust</a>-based workflows and the <a href="https://crates.io/crates/clipper2-rust" target="_blank" rel="noreferrer">clipper2-rust crate</a> for modern polygon operations where needed.',
   },
   {
     route: 'history/download',

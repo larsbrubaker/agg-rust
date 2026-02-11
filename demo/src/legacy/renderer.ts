@@ -132,7 +132,7 @@ function livingUpdateHtml(sectionRoute: string, generatedAt?: string): string {
         <li>Porting and validating AGG modules with behavior parity against the original C++ implementation.</li>
         <li>Maintaining and expanding interactive WebAssembly demos while preserving AGG visual fidelity.</li>
         <li>Keeping this History and Living Project section in sync with current Rust-port progress.</li>
-        <li>Using Rust-native polygon workflows (including <a href="https://github.com/tirithen/clipper2" target="_blank" rel="noreferrer">clipper2-rust</a> patterns); GPC is not part of this port.</li>
+        <li>Using Rust-native polygon workflows (including <a href="https://github.com/larsbrubaker/clipper2-rust" target="_blank" rel="noreferrer">clipper2-rust</a> patterns and the <a href="https://crates.io/crates/clipper2-rust" target="_blank" rel="noreferrer">clipper2-rust crate</a>); GPC is not part of this port.</li>
       </ul>
       <p>
         See the main demo index and project repository for the latest implementation status.
