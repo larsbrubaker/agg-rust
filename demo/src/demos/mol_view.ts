@@ -1,4 +1,4 @@
-import { createDemoLayout, renderToCanvas } from '../render-canvas.ts';
+import { createDemoLayout, renderToCanvas, addSlider } from '../render-canvas.ts';
 import { setupCanvasControls, CanvasControl } from '../canvas-controls.ts';
 
 export function init(container: HTMLElement) {
@@ -11,8 +11,8 @@ export function init(container: HTMLElement) {
   const W = 400, H = 400;
 
   let molIdx = 0;
-  let thickness = 1.0;
-  let textSize = 1.0;
+  let thickness = 0.5;
+  let textSize = 0.5;
   let angle = 0.0;
   let scale = 1.0;
   let cx = W / 2;
@@ -27,36 +27,50 @@ export function init(container: HTMLElement) {
     });
   }
 
-  // Mouse drag: left=rotate, right=pan
+  // Mouse drag behavior matches C++ mol_view.cpp:
+  // left drag = rotate+scale around center, right drag = pan.
   let dragging = 0; // 0=none, 1=left, 2=right
-  let lastX = 0, lastY = 0;
+  let pdx = 0.0;
+  let pdy = 0.0;
+  let prevScale = 1.0;
+  let prevAngle = 0.0;
+
+  function aggPos(e: PointerEvent): { x: number; y: number } {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: H - (e.clientY - rect.top) * scaleY,
+    };
+  }
+
   const onPointerDown = (e: PointerEvent) => {
     canvas.setPointerCapture(e.pointerId);
-    const rect = canvas.getBoundingClientRect();
-    lastX = e.clientX - rect.left;
-    lastY = e.clientY - rect.top;
+    const p = aggPos(e);
     if (e.button === 0) dragging = 1;
     else if (e.button === 2) dragging = 2;
+    pdx = cx - p.x;
+    pdy = cy - p.y;
+    prevScale = scale;
+    prevAngle = angle + Math.PI;
     e.preventDefault();
   };
   const onPointerMove = (e: PointerEvent) => {
     if (!dragging) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const dx = mx - lastX;
-    const dy = my - lastY;
+    const p = aggPos(e);
     if (dragging === 1) {
-      angle += dx * 0.5;
-      scale = Math.max(0.01, scale + dy * -0.005);
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const prevLen = Math.hypot(pdx, pdy);
+      if (prevLen > 1e-6) {
+        scale = Math.max(0.01, prevScale * (Math.hypot(dx, dy) / prevLen));
+      }
+      angle = prevAngle + Math.atan2(dy, dx) - Math.atan2(pdy, pdx);
     } else if (dragging === 2) {
-      const scaleX = W / rect.width;
-      const scaleY = H / rect.height;
-      cx += dx * scaleX;
-      cy += dy * scaleY;
+      cx = p.x + pdx;
+      cy = p.y + pdy;
     }
-    lastX = mx;
-    lastY = my;
     draw();
   };
   const onPointerUp = () => { dragging = 0; };
@@ -74,7 +88,7 @@ export function init(container: HTMLElement) {
   radioLabel.className = 'control-label';
   radioLabel.textContent = 'Molecule';
   radioDiv.appendChild(radioLabel);
-  const molNames = ['Caffeine', 'Aspirin', 'Benzene'];
+  const molNames = ['Molecule 1', 'Molecule 2', 'Molecule 3'];
   molNames.forEach((name, i) => {
     const row = document.createElement('label');
     row.style.display = 'block';
@@ -92,23 +106,32 @@ export function init(container: HTMLElement) {
   });
   sidebar.appendChild(radioDiv);
 
-  const controls: CanvasControl[] = [
+  const slThickness = addSlider(sidebar, 'Thickness', 0, 1, thickness, 0.01, v => {
+    thickness = v;
+    draw();
+  });
+  const slText = addSlider(sidebar, 'Label Size', 0, 1, textSize, 0.01, v => {
+    textSize = v;
+    draw();
+  });
+
+  const canvasControls: CanvasControl[] = [
     {
       type: 'slider',
-      label: 'Bond Thickness',
-      min: 0.2, max: 3.0, step: 0.1,
-      initial: thickness,
+      x1: 5, y1: 5, x2: W - 5, y2: 12,
+      min: 0, max: 1,
+      sidebarEl: slThickness,
       onChange(v) { thickness = v; draw(); },
     },
     {
       type: 'slider',
-      label: 'Text Size',
-      min: 0.3, max: 3.0, step: 0.1,
-      initial: textSize,
+      x1: 5, y1: 20, x2: W - 5, y2: 27,
+      min: 0, max: 1,
+      sidebarEl: slText,
       onChange(v) { textSize = v; draw(); },
     },
   ];
-  const cleanupCC = setupCanvasControls(canvas, controls, draw);
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';

@@ -5,7 +5,7 @@ Cross-reference of all 75 C++ demos from `cpp-references/agg-web/demo/` against 
 Reference screenshots: `cpp-references/agg-web/demo/<name>/<name>.gif|png|jpg`
 Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
-## Currently Implemented (64 demos)
+## Currently Implemented (63 demos)
 
 | Demo | C++ Original | Window | Status |
 |------|-------------|--------|--------|
@@ -65,7 +65,6 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 | rounded_rect | rounded_rect.cpp | 600x400 | Done |
 | scanline_boolean | scanline_boolean.cpp | 512x400 | Done - boolean ops on scanline shapes |
 | scanline_boolean2 | scanline_boolean2.cpp | 512x400 | Done - boolean algebra on complex shapes |
-| shapes | (custom) | 600x400 | Done |
 | simple_blur | simple_blur.cpp | 512x400 | Done - simple stack blur |
 | trans_curve1 | trans_curve1.cpp | 512x400 | Done - text along curve (single path) |
 | trans_curve2 | trans_curve2.cpp | 512x400 | Done - text along curve variant |
@@ -94,7 +93,7 @@ Reference source: `cpp-references/agg-web/demo/<name>/<name>.cpp.html`
 
 | Category | Count |
 |----------|-------|
-| Implemented | 64 |
+| Implemented | 63 |
 | Deferred | 0 |
 | Not applicable | 11 |
 | **Total C++ demos** | **75** |

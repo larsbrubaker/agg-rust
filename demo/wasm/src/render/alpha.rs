@@ -3,6 +3,7 @@
 //! image_resample, alpha_mask2.
 
 use agg_rust::bounding_rect::bounding_rect;
+use agg_rust::basics::{VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
 use agg_rust::bspline::Bspline;
 use agg_rust::color::Rgba8;
 use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl};
@@ -33,7 +34,10 @@ use agg_rust::span_interpolator_trans::SpanInterpolatorTrans;
 use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
+use agg_rust::math::calc_orthogonal;
+use agg_rust::math_stroke::{LineCap, LineJoin};
 use super::{setup_renderer, load_spheres_image};
+use std::sync::OnceLock;
 
 
 /// BSpline — 6 draggable control points, B-spline curve through them.
@@ -1037,18 +1041,601 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     buf
 }
 
+const MOL_VIEW_SDF: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../cpp-references/agg-src/examples/X11/1.sdf"
+));
+
+const ATOM_COLOR_GENERAL: usize = 0;
+const ATOM_COLOR_N: usize = 1;
+const ATOM_COLOR_O: usize = 2;
+const ATOM_COLOR_S: usize = 3;
+const ATOM_COLOR_P: usize = 4;
+const ATOM_COLOR_HALOGEN: usize = 5;
+const ATOM_COLOR_COUNT: usize = 6;
+
+#[derive(Clone)]
+struct MolAtom {
+    x: f64,
+    y: f64,
+    label: String,
+    charge: i32,
+    color_idx: usize,
+}
+
+#[derive(Clone, Copy)]
+struct MolBond {
+    idx1: usize,
+    idx2: usize,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    order: u32,
+    stereo: i32,
+    topology: i32,
+}
+
+#[derive(Clone)]
+struct Molecule {
+    name: String,
+    atoms: Vec<MolAtom>,
+    bonds: Vec<MolBond>,
+    avr_len: f64,
+}
+
+fn get_field<'a>(line: &'a str, pos: usize, len: usize) -> &'a str {
+    let start = pos.saturating_sub(1);
+    if start >= line.len() {
+        return "";
+    }
+    let end = (start + len).min(line.len());
+    &line[start..end]
+}
+
+fn get_int(line: &str, pos: usize, len: usize) -> i32 {
+    let token = get_field(line, pos, len)
+        .trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or("0");
+    token.parse::<i32>().unwrap_or(0)
+}
+
+fn get_dbl(line: &str, pos: usize, len: usize) -> f64 {
+    let token = get_field(line, pos, len)
+        .trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or("0");
+    token.parse::<f64>().unwrap_or(0.0)
+}
+
+fn get_str(line: &str, pos: usize, len: usize) -> String {
+    get_field(line, pos, len)
+        .trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_string()
+}
+
+fn atom_color_idx(label: &str) -> usize {
+    match label {
+        "N" => ATOM_COLOR_N,
+        "O" => ATOM_COLOR_O,
+        "S" => ATOM_COLOR_S,
+        "P" => ATOM_COLOR_P,
+        "F" | "Cl" | "Br" | "I" => ATOM_COLOR_HALOGEN,
+        _ => ATOM_COLOR_GENERAL,
+    }
+}
+
+fn parse_molecules_from_sdf(src: &str, max_molecules: usize) -> Vec<Molecule> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = src.lines().collect();
+    let mut i = 0usize;
+
+    while i + 3 < lines.len() && out.len() < max_molecules {
+        let name = lines[i].to_string();
+        i += 1;
+        if i + 2 >= lines.len() {
+            break;
+        }
+        i += 2;
+
+        let count_line = lines[i];
+        i += 1;
+        let num_atoms = get_int(count_line, 1, 3).max(0) as usize;
+        let num_bonds = get_int(count_line, 4, 3).max(0) as usize;
+        if num_atoms == 0 || num_bonds == 0 {
+            break;
+        }
+        if i + num_atoms + num_bonds > lines.len() {
+            break;
+        }
+
+        let mut atoms = Vec::with_capacity(num_atoms);
+        for _ in 0..num_atoms {
+            let atom_line = lines[i];
+            i += 1;
+            let label = get_str(atom_line, 32, 3);
+            let mut charge = get_int(atom_line, 39, 1);
+            if charge != 0 {
+                charge = 4 - charge;
+            }
+            atoms.push(MolAtom {
+                x: get_dbl(atom_line, 1, 10),
+                y: get_dbl(atom_line, 11, 10),
+                label: label.clone(),
+                charge,
+                color_idx: atom_color_idx(&label),
+            });
+        }
+
+        let mut bonds = Vec::with_capacity(num_bonds);
+        let mut avr_len = 0.0f64;
+        for _ in 0..num_bonds {
+            let bond_line = lines[i];
+            i += 1;
+            let idx1 = get_int(bond_line, 1, 3) - 1;
+            let idx2 = get_int(bond_line, 4, 3) - 1;
+            if idx1 < 0 || idx2 < 0 {
+                continue;
+            }
+            let idx1 = idx1 as usize;
+            let idx2 = idx2 as usize;
+            if idx1 >= atoms.len() || idx2 >= atoms.len() {
+                continue;
+            }
+            let x1 = atoms[idx1].x;
+            let y1 = atoms[idx1].y;
+            let x2 = atoms[idx2].x;
+            let y2 = atoms[idx2].y;
+            let dx = x1 - x2;
+            let dy = y1 - y2;
+            avr_len += (dx * dx + dy * dy).sqrt();
+            bonds.push(MolBond {
+                idx1,
+                idx2,
+                x1,
+                y1,
+                x2,
+                y2,
+                order: get_int(bond_line, 7, 3).max(0) as u32,
+                stereo: get_int(bond_line, 10, 3),
+                topology: get_int(bond_line, 13, 3),
+            });
+        }
+        if !bonds.is_empty() {
+            avr_len /= bonds.len() as f64;
+        } else {
+            avr_len = 1.0;
+        }
+
+        while i < lines.len() {
+            let line = lines[i];
+            i += 1;
+            if line.starts_with('$') {
+                break;
+            }
+        }
+
+        out.push(Molecule {
+            name,
+            atoms,
+            bonds,
+            avr_len,
+        });
+    }
+
+    out
+}
+
+fn mol_data() -> &'static [Molecule] {
+    static DATA: OnceLock<Vec<Molecule>> = OnceLock::new();
+    DATA.get_or_init(|| parse_molecules_from_sdf(MOL_VIEW_SDF, 100))
+        .as_slice()
+}
+
+struct BondLine {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    dx: f64,
+    dy: f64,
+    thickness: f64,
+    vertex: u32,
+}
+
+impl BondLine {
+    fn new() -> Self {
+        Self {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 0.0,
+            dx: 0.0,
+            dy: 0.0,
+            thickness: 0.1,
+            vertex: 0,
+        }
+    }
+    fn init(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
+        self.x1 = x1;
+        self.y1 = y1;
+        self.x2 = x2;
+        self.y2 = y2;
+    }
+    fn thickness(&mut self, th: f64) {
+        self.thickness = th;
+    }
+}
+
+impl VertexSource for BondLine {
+    fn rewind(&mut self, _path_id: u32) {
+        let (dx, dy) = calc_orthogonal(
+            self.thickness * 0.5,
+            self.x1,
+            self.y1,
+            self.x2,
+            self.y2,
+        );
+        self.dx = dx;
+        self.dy = dy;
+        self.vertex = 0;
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        match self.vertex {
+            0 => {
+                *x = self.x1 - self.dx;
+                *y = self.y1 - self.dy;
+                self.vertex += 1;
+                PATH_CMD_MOVE_TO
+            }
+            1 => {
+                *x = self.x2 - self.dx;
+                *y = self.y2 - self.dy;
+                self.vertex += 1;
+                PATH_CMD_LINE_TO
+            }
+            2 => {
+                *x = self.x2 + self.dx;
+                *y = self.y2 + self.dy;
+                self.vertex += 1;
+                PATH_CMD_LINE_TO
+            }
+            3 => {
+                *x = self.x1 + self.dx;
+                *y = self.y1 + self.dy;
+                self.vertex += 1;
+                PATH_CMD_LINE_TO
+            }
+            _ => PATH_CMD_STOP,
+        }
+    }
+}
+
+struct SolidWedge {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    dx: f64,
+    dy: f64,
+    thickness: f64,
+    vertex: u32,
+}
+
+impl SolidWedge {
+    fn new() -> Self {
+        Self {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 0.0,
+            dx: 0.0,
+            dy: 0.0,
+            thickness: 0.1,
+            vertex: 0,
+        }
+    }
+    fn init(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
+        self.x1 = x1;
+        self.y1 = y1;
+        self.x2 = x2;
+        self.y2 = y2;
+    }
+    fn thickness(&mut self, th: f64) {
+        self.thickness = th;
+    }
+}
+
+impl VertexSource for SolidWedge {
+    fn rewind(&mut self, _path_id: u32) {
+        let (dx, dy) = calc_orthogonal(
+            self.thickness * 2.0,
+            self.x1,
+            self.y1,
+            self.x2,
+            self.y2,
+        );
+        self.dx = dx;
+        self.dy = dy;
+        self.vertex = 0;
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        match self.vertex {
+            0 => {
+                *x = self.x1;
+                *y = self.y1;
+                self.vertex += 1;
+                PATH_CMD_MOVE_TO
+            }
+            1 => {
+                *x = self.x2 - self.dx;
+                *y = self.y2 - self.dy;
+                self.vertex += 1;
+                PATH_CMD_LINE_TO
+            }
+            2 => {
+                *x = self.x2 + self.dx;
+                *y = self.y2 + self.dy;
+                self.vertex += 1;
+                PATH_CMD_LINE_TO
+            }
+            _ => PATH_CMD_STOP,
+        }
+    }
+}
+
+struct DashedWedge {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    xt2: f64,
+    yt2: f64,
+    xt3: f64,
+    yt3: f64,
+    xd: [f64; 4],
+    yd: [f64; 4],
+    thickness: f64,
+    num_dashes: u32,
+    vertex: u32,
+}
+
+impl DashedWedge {
+    fn new() -> Self {
+        Self {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 0.0,
+            xt2: 0.0,
+            yt2: 0.0,
+            xt3: 0.0,
+            yt3: 0.0,
+            xd: [0.0; 4],
+            yd: [0.0; 4],
+            thickness: 0.1,
+            num_dashes: 8,
+            vertex: 0,
+        }
+    }
+
+    fn init(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
+        // Matches C++: dashed wedge is reversed.
+        self.x1 = x2;
+        self.y1 = y2;
+        self.x2 = x1;
+        self.y2 = y1;
+    }
+
+    fn thickness(&mut self, th: f64) {
+        self.thickness = th;
+    }
+}
+
+impl VertexSource for DashedWedge {
+    fn rewind(&mut self, _path_id: u32) {
+        let (dx, dy) = calc_orthogonal(
+            self.thickness * 2.0,
+            self.x1,
+            self.y1,
+            self.x2,
+            self.y2,
+        );
+        self.xt2 = self.x2 - dx;
+        self.yt2 = self.y2 - dy;
+        self.xt3 = self.x2 + dx;
+        self.yt3 = self.y2 + dy;
+        self.vertex = 0;
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        if self.vertex < self.num_dashes * 4 {
+            if (self.vertex % 4) == 0 {
+                let k1 = (self.vertex / 4) as f64 / self.num_dashes as f64;
+                let k2 = k1 + 0.4 / self.num_dashes as f64;
+                self.xd[0] = self.x1 + (self.xt2 - self.x1) * k1;
+                self.yd[0] = self.y1 + (self.yt2 - self.y1) * k1;
+                self.xd[1] = self.x1 + (self.xt2 - self.x1) * k2;
+                self.yd[1] = self.y1 + (self.yt2 - self.y1) * k2;
+                self.xd[2] = self.x1 + (self.xt3 - self.x1) * k2;
+                self.yd[2] = self.y1 + (self.yt3 - self.y1) * k2;
+                self.xd[3] = self.x1 + (self.xt3 - self.x1) * k1;
+                self.yd[3] = self.y1 + (self.yt3 - self.y1) * k1;
+                *x = self.xd[0];
+                *y = self.yd[0];
+                self.vertex += 1;
+                PATH_CMD_MOVE_TO
+            } else {
+                let idx = (self.vertex % 4) as usize;
+                *x = self.xd[idx];
+                *y = self.yd[idx];
+                self.vertex += 1;
+                PATH_CMD_LINE_TO
+            }
+        } else {
+            PATH_CMD_STOP
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BondStyle {
+    Single,
+    WedgedSolid,
+    WedgedDashed,
+    Double,
+    DoubleLeft,
+    DoubleRight,
+    Triple,
+}
+
+struct BondVertexGenerator<'a> {
+    bond: &'a MolBond,
+    thickness: f64,
+    style: BondStyle,
+    line1: BondLine,
+    line2: BondLine,
+    solid_wedge: SolidWedge,
+    dashed_wedge: DashedWedge,
+    status: u32,
+}
+
+impl<'a> BondVertexGenerator<'a> {
+    fn new(bond: &'a MolBond, thickness: f64) -> Self {
+        let mut style = BondStyle::Single;
+        if bond.order == 1 {
+            if bond.stereo == 1 {
+                style = BondStyle::WedgedSolid;
+            }
+            if bond.stereo == 6 {
+                style = BondStyle::WedgedDashed;
+            }
+        }
+        if bond.order == 2 {
+            style = BondStyle::Double;
+            if bond.topology == 1 {
+                style = BondStyle::DoubleLeft;
+            }
+            if bond.topology == 2 {
+                style = BondStyle::DoubleRight;
+            }
+        }
+        if bond.order == 3 {
+            style = BondStyle::Triple;
+        }
+
+        let mut line1 = BondLine::new();
+        let mut line2 = BondLine::new();
+        let mut solid_wedge = SolidWedge::new();
+        let mut dashed_wedge = DashedWedge::new();
+        line1.thickness(thickness);
+        line2.thickness(thickness);
+        solid_wedge.thickness(thickness);
+        dashed_wedge.thickness(thickness);
+
+        Self {
+            bond,
+            thickness,
+            style,
+            line1,
+            line2,
+            solid_wedge,
+            dashed_wedge,
+            status: 0,
+        }
+    }
+}
+
+impl VertexSource for BondVertexGenerator<'_> {
+    fn rewind(&mut self, _path_id: u32) {
+        match self.style {
+            BondStyle::WedgedSolid => {
+                self.solid_wedge
+                    .init(self.bond.x1, self.bond.y1, self.bond.x2, self.bond.y2);
+                self.solid_wedge.rewind(0);
+            }
+            BondStyle::WedgedDashed => {
+                self.dashed_wedge
+                    .init(self.bond.x1, self.bond.y1, self.bond.x2, self.bond.y2);
+                self.dashed_wedge.rewind(0);
+            }
+            BondStyle::Double | BondStyle::DoubleLeft | BondStyle::DoubleRight => {
+                let (dx, dy) = calc_orthogonal(
+                    self.thickness,
+                    self.bond.x1,
+                    self.bond.y1,
+                    self.bond.x2,
+                    self.bond.y2,
+                );
+                let dx1 = dx;
+                let dy1 = dy;
+                let dx2 = dx;
+                let dy2 = dy;
+                self.line1.init(
+                    self.bond.x1 - dx1,
+                    self.bond.y1 - dy1,
+                    self.bond.x2 - dx1,
+                    self.bond.y2 - dy1,
+                );
+                self.line1.rewind(0);
+                self.line2.init(
+                    self.bond.x1 + dx2,
+                    self.bond.y1 + dy2,
+                    self.bond.x2 + dx2,
+                    self.bond.y2 + dy2,
+                );
+                self.line2.rewind(0);
+                self.status = 0;
+            }
+            BondStyle::Triple | BondStyle::Single => {
+                self.line1
+                    .init(self.bond.x1, self.bond.y1, self.bond.x2, self.bond.y2);
+                self.line1.rewind(0);
+            }
+        }
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        match self.style {
+            BondStyle::WedgedSolid => self.solid_wedge.vertex(x, y),
+            BondStyle::WedgedDashed => self.dashed_wedge.vertex(x, y),
+            BondStyle::Double | BondStyle::DoubleLeft | BondStyle::DoubleRight => {
+                let mut flag = PATH_CMD_STOP;
+                if self.status == 0 {
+                    flag = self.line1.vertex(x, y);
+                    if flag == PATH_CMD_STOP {
+                        self.status = 1;
+                    }
+                }
+                if self.status == 1 {
+                    flag = self.line2.vertex(x, y);
+                }
+                flag
+            }
+            BondStyle::Triple | BondStyle::Single => self.line1.vertex(x, y),
+        }
+    }
+}
+
 /// Molecular structure viewer.
-/// Simplified from C++ mol_view.cpp.
+/// Ported from C++ `mol_view.cpp`.
 /// Params: [mol_idx, thickness, text_size, angle, scale, cx, cy]
 pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
-
-    let mol_idx = params.get(0).copied().unwrap_or(0.0) as usize;
-    let thickness = params.get(1).copied().unwrap_or(1.0);
-    let text_size = params.get(2).copied().unwrap_or(1.0);
+    let mol_idx = params.get(0).copied().unwrap_or(0.0).max(0.0) as usize;
+    let thickness_ctrl = params.get(1).copied().unwrap_or(0.5);
+    let text_size_ctrl = params.get(2).copied().unwrap_or(0.5);
     let angle = params.get(3).copied().unwrap_or(0.0);
-    let scale = params.get(4).copied().unwrap_or(1.0).max(0.01);
+    let scale = params.get(4).copied().unwrap_or(1.0);
     let cx = params.get(5).copied().unwrap_or(w / 2.0);
     let cy = params.get(6).copied().unwrap_or(h / 2.0);
 
@@ -1062,186 +1649,114 @@ pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    struct MolAtom { x: f64, y: f64, label: &'static str, color: Rgba8 }
-    struct MolBond { a1: usize, a2: usize, order: u8 }
-
-    let molecules: &[(&str, &[MolAtom], &[MolBond])] = &[
-        ("Caffeine", &[
-            MolAtom { x: 0.0, y: 0.0, label: "N", color: Rgba8::new(0, 0, 160, 255) },
-            MolAtom { x: 1.2, y: 0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 2.4, y: 0.0, label: "N", color: Rgba8::new(0, 0, 160, 255) },
-            MolAtom { x: 2.4, y: -1.4, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 1.2, y: -2.1, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 0.0, y: -1.4, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 3.6, y: 0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 3.6, y: -2.1, label: "N", color: Rgba8::new(0, 0, 160, 255) },
-            MolAtom { x: 4.3, y: -0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: -1.2, y: 0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 0.0, y: -2.4, label: "O", color: Rgba8::new(200, 0, 0, 255) },
-            MolAtom { x: 3.6, y: 1.9, label: "O", color: Rgba8::new(200, 0, 0, 255) },
-            MolAtom { x: 1.2, y: -3.5, label: "N", color: Rgba8::new(0, 0, 160, 255) },
-            MolAtom { x: 5.5, y: -0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-        ], &[
-            MolBond { a1: 0, a2: 1, order: 1 }, MolBond { a1: 1, a2: 2, order: 2 },
-            MolBond { a1: 2, a2: 3, order: 1 }, MolBond { a1: 3, a2: 4, order: 1 },
-            MolBond { a1: 4, a2: 5, order: 2 }, MolBond { a1: 5, a2: 0, order: 1 },
-            MolBond { a1: 2, a2: 6, order: 1 }, MolBond { a1: 3, a2: 7, order: 1 },
-            MolBond { a1: 7, a2: 8, order: 1 }, MolBond { a1: 8, a2: 6, order: 2 },
-            MolBond { a1: 0, a2: 9, order: 1 }, MolBond { a1: 5, a2: 10, order: 2 },
-            MolBond { a1: 6, a2: 11, order: 2 }, MolBond { a1: 4, a2: 12, order: 1 },
-            MolBond { a1: 7, a2: 13, order: 1 },
-        ]),
-        ("Aspirin", &[
-            MolAtom { x: 0.0, y: 0.0, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 1.2, y: 0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 2.4, y: 0.0, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 2.4, y: -1.4, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 1.2, y: -2.1, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 0.0, y: -1.4, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: -1.2, y: 0.7, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: -1.2, y: 2.1, label: "O", color: Rgba8::new(200, 0, 0, 255) },
-            MolAtom { x: -2.4, y: 0.0, label: "O", color: Rgba8::new(200, 0, 0, 255) },
-            MolAtom { x: 1.2, y: 2.1, label: "O", color: Rgba8::new(200, 0, 0, 255) },
-            MolAtom { x: 2.4, y: 2.8, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 2.4, y: 4.2, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 3.6, y: 2.1, label: "O", color: Rgba8::new(200, 0, 0, 255) },
-        ], &[
-            MolBond { a1: 0, a2: 1, order: 2 }, MolBond { a1: 1, a2: 2, order: 1 },
-            MolBond { a1: 2, a2: 3, order: 2 }, MolBond { a1: 3, a2: 4, order: 1 },
-            MolBond { a1: 4, a2: 5, order: 2 }, MolBond { a1: 5, a2: 0, order: 1 },
-            MolBond { a1: 0, a2: 6, order: 1 }, MolBond { a1: 6, a2: 7, order: 2 },
-            MolBond { a1: 6, a2: 8, order: 1 }, MolBond { a1: 1, a2: 9, order: 1 },
-            MolBond { a1: 9, a2: 10, order: 1 }, MolBond { a1: 10, a2: 11, order: 1 },
-            MolBond { a1: 10, a2: 12, order: 2 },
-        ]),
-        ("Benzene", &[
-            MolAtom { x: 1.0, y: 0.0, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 0.5, y: 0.866, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: -0.5, y: 0.866, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: -1.0, y: 0.0, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: -0.5, y: -0.866, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-            MolAtom { x: 0.5, y: -0.866, label: "C", color: Rgba8::new(0, 0, 0, 255) },
-        ], &[
-            MolBond { a1: 0, a2: 1, order: 2 }, MolBond { a1: 1, a2: 2, order: 1 },
-            MolBond { a1: 2, a2: 3, order: 2 }, MolBond { a1: 3, a2: 4, order: 1 },
-            MolBond { a1: 4, a2: 5, order: 2 }, MolBond { a1: 5, a2: 0, order: 1 },
-        ]),
-    ];
-
-    let idx = mol_idx.min(molecules.len() - 1);
-    let (name, atoms, bonds) = molecules[idx];
-
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for a in atoms.iter() {
-        min_x = min_x.min(a.x); min_y = min_y.min(a.y);
-        max_x = max_x.max(a.x); max_y = max_y.max(a.y);
+    let molecules = mol_data();
+    if molecules.is_empty() {
+        return buf;
     }
+    let mol = &molecules[mol_idx.min(molecules.len() - 1)];
 
-    let mut avg_bond_len = 0.0;
-    for b in bonds.iter() {
-        let dx = atoms[b.a2].x - atoms[b.a1].x;
-        let dy = atoms[b.a2].y - atoms[b.a1].y;
-        avg_bond_len += (dx * dx + dy * dy).sqrt();
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = -f64::INFINITY;
+    let mut max_y = -f64::INFINITY;
+    for atom in &mol.atoms {
+        min_x = min_x.min(atom.x);
+        min_y = min_y.min(atom.y);
+        max_x = max_x.max(atom.x);
+        max_y = max_y.max(atom.y);
     }
-    if !bonds.is_empty() { avg_bond_len /= bonds.len() as f64; }
-    if avg_bond_len < 0.001 { avg_bond_len = 1.0; }
-
-    let mol_w = max_x - min_x;
-    let mol_h = max_y - min_y;
-    let fit_scale = (w / (mol_w + 1.0)).min(h / (mol_h + 1.0)) * 0.70;
 
     let mut mtx = TransAffine::new();
-    mtx.multiply(&TransAffine::new_translation(-(min_x + max_x) / 2.0, -(min_y + max_y) / 2.0));
-    mtx.multiply(&TransAffine::new_scaling(fit_scale, fit_scale));
+    mtx.multiply(&TransAffine::new_translation(
+        -(max_x + min_x) * 0.5,
+        -(max_y + min_y) * 0.5,
+    ));
+
+    let mut fit_scale = w / (max_x - min_x);
+    let fit_h = h / (max_y - min_y);
+    if fit_scale > fit_h {
+        fit_scale = fit_h;
+    }
+
+    let mut text_size = mol.avr_len * text_size_ctrl / 4.0;
+    let thickness = mol.avr_len / scale.max(0.0001).sqrt() / 8.0;
+
+    mtx.multiply(&TransAffine::new_scaling(fit_scale * 0.80, fit_scale * 0.80));
     mtx.multiply(&TransAffine::new_rotation(angle));
     mtx.multiply(&TransAffine::new_scaling(scale, scale));
     mtx.multiply(&TransAffine::new_translation(cx, cy));
 
-    let bond_thick = thickness * avg_bond_len * fit_scale / 8.0;
-    let label_sz = text_size * avg_bond_len * fit_scale * 3.0 / 4.0;
-
-    for b in bonds.iter() {
-        let (mut x1, mut y1) = (atoms[b.a1].x, atoms[b.a1].y);
-        let (mut x2, mut y2) = (atoms[b.a2].x, atoms[b.a2].y);
-        mtx.transform(&mut x1, &mut y1);
-        mtx.transform(&mut x2, &mut y2);
-
-        let dx = x2 - x1;
-        let dy = y2 - y1;
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 0.001 { continue; }
-        let nx = -dy / len;
-        let ny = dx / len;
-
-        if b.order == 1 {
-            let mut bp = PathStorage::new();
-            bp.move_to(x1, y1);
-            bp.line_to(x2, y2);
-            let mut bs = ConvStroke::new(&mut bp);
-            bs.set_width(bond_thick);
-            ras.reset();
-            ras.add_path(&mut bs, 0);
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
-        } else {
-            let offset = bond_thick * 1.2;
-            for &dir in &[-1.0_f64, 1.0] {
-                let ox = nx * offset * dir;
-                let oy = ny * offset * dir;
-                let mut bp = PathStorage::new();
-                bp.move_to(x1 + ox, y1 + oy);
-                bp.line_to(x2 + ox, y2 + oy);
-                let mut bs = ConvStroke::new(&mut bp);
-                bs.set_width(bond_thick * 0.6);
-                ras.reset();
-                ras.add_path(&mut bs, 0);
-                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
-            }
-        }
+    let black = Rgba8::new(0, 0, 0, 255);
+    for bond in &mol.bonds {
+        let _ = (bond.idx1, bond.idx2);
+        let mut bond_vs = BondVertexGenerator::new(bond, thickness_ctrl * thickness);
+        let mut tr = ConvTransform::new(&mut bond_vs, mtx);
+        ras.reset();
+        ras.add_path(&mut tr, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &black);
     }
 
-    for atom in atoms.iter() {
-        let (mut ax, mut ay) = (atom.x, atom.y);
-        mtx.transform(&mut ax, &mut ay);
-
+    for atom in &mol.atoms {
         if atom.label != "C" {
-            let r = label_sz * 0.6;
-            let mut ell = Ellipse::new(ax, ay, r, r, 20, false);
+            let _ = atom.charge;
+            let mut ell = Ellipse::new(atom.x, atom.y, text_size * 2.5, text_size * 2.5, 20, false);
+            let mut tr = ConvTransform::new(&mut ell, mtx);
             ras.reset();
-            ras.add_path(&mut ell, 0);
+            ras.add_path(&mut tr, 0);
             render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 255));
-
-            let mut text = GsvText::new();
-            text.size(label_sz, 0.0);
-            text.start_point(ax - label_sz * 0.3, ay - label_sz * 0.4);
-            text.text(atom.label);
-            let mut text_stroke = ConvStroke::new(&mut text);
-            text_stroke.set_width(label_sz * 0.1);
-            ras.reset();
-            ras.add_path(&mut text_stroke, 0);
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &atom.color);
         }
     }
 
-    let mut title = GsvText::new();
-    title.size(12.0, 0.0);
-    title.start_point(10.0, h - 20.0);
-    title.text(name);
-    let mut title_stroke = ConvStroke::new(&mut title);
-    title_stroke.set_width(1.5);
-    ras.reset();
-    ras.add_path(&mut title_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    text_size *= 3.0;
+    let atom_colors = [
+        Rgba8::new(0, 0, 0, 255),
+        Rgba8::new(0, 0, 120, 255),
+        Rgba8::new(200, 0, 0, 255),
+        Rgba8::new(120, 120, 0, 255),
+        Rgba8::new(80, 50, 0, 255),
+        Rgba8::new(0, 200, 0, 255),
+    ];
 
-    let mut sl_thick = SliderCtrl::new(5.0, 5.0, w - 5.0, 12.0);
-    sl_thick.label("Thickness=%.2f");
-    sl_thick.range(0.1, 3.0);
-    sl_thick.set_value(thickness);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut sl_thick);
+    let mut label_stroke = ConvStroke::new(GsvText::new());
+    label_stroke.set_line_join(LineJoin::Round);
+    label_stroke.set_line_cap(LineCap::Round);
+    label_stroke.set_approximation_scale(mtx.get_scale());
+    for atom in &mol.atoms {
+        if atom.label != "C" {
+            label_stroke.set_width(thickness_ctrl * thickness);
+            let label = label_stroke.source_mut();
+            label.text(&atom.label);
+            label.start_point(atom.x - text_size * 0.5, atom.y - text_size * 0.5);
+            label.size(text_size, 0.0);
+
+            let mut tr = ConvTransform::new(&mut label_stroke, mtx);
+            ras.reset();
+            ras.add_path(&mut tr, 0);
+            let color = atom_colors[atom.color_idx.min(ATOM_COLOR_COUNT - 1)];
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
+        }
+    }
+
+    label_stroke.set_approximation_scale(1.0);
+    label_stroke.set_width(1.5);
+    {
+        let label = label_stroke.source_mut();
+        label.text(&mol.name);
+        label.size(10.0, 0.0);
+        label.start_point(10.0, h - 20.0);
+    }
+    ras.reset();
+    ras.add_path(&mut label_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &black);
+
+    let mut sl_thickness = SliderCtrl::new(5.0, 5.0, w - 5.0, 12.0);
+    sl_thickness.label("Thickness=%3.2f");
+    sl_thickness.set_value(thickness_ctrl);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut sl_thickness);
 
     let mut sl_text = SliderCtrl::new(5.0, 20.0, w - 5.0, 27.0);
-    sl_text.label("Text Size=%.2f");
-    sl_text.range(0.1, 3.0);
-    sl_text.set_value(text_size);
+    sl_text.label("Label Size=%3.2f");
+    sl_text.set_value(text_size_ctrl);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut sl_text);
 
     buf
@@ -1565,4 +2080,30 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mol_view_sdf_parses_reference_molecule() {
+        let molecules = parse_molecules_from_sdf(MOL_VIEW_SDF, 100);
+        assert!(!molecules.is_empty());
+        let first = &molecules[0];
+        assert_eq!(first.name, "MFCD00133935");
+        assert_eq!(first.atoms.len(), 89);
+        assert_eq!(first.bonds.len(), 94);
+        assert!(first.avr_len > 0.0);
+    }
+
+    #[test]
+    fn mol_view_renders_non_empty_scene() {
+        let img = mol_view(400, 400, &[0.0, 0.5, 0.5, 0.0, 1.0, 200.0, 200.0]);
+        assert_eq!(img.len(), 400 * 400 * 4);
+        // At least one pixel should differ from the white clear color.
+        assert!(img
+            .chunks_exact(4)
+            .any(|px| px[0] != 255 || px[1] != 255 || px[2] != 255 || px[3] != 255));
+    }
 }

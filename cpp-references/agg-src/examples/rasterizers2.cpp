@@ -207,7 +207,7 @@ public:
 
     void draw_aliased_pix_accuracy(rasterizer_outline& ras, renderer_prim& prim)
     {
-        spiral s1(width()/5, height()/4+50, 5, 70, 16, m_start_angle);
+        spiral s1(width()/5, height()/4+50, 5, 70, 8, m_start_angle);
         roundoff rn;
         agg::conv_transform<spiral, roundoff> trans(s1, rn);
         prim.line_color(agg::rgba(0.4, 0.3, 0.1));
@@ -216,21 +216,21 @@ public:
 
     void draw_aliased_subpix_accuracy(rasterizer_outline& ras, renderer_prim& prim)
     {
-        spiral s2(width()/2, height()/4+50, 5, 70, 16, m_start_angle);
+        spiral s2(width()/2, height()/4+50, 5, 70, 8, m_start_angle);
         prim.line_color(agg::rgba(0.4, 0.3, 0.1));
         ras.add_path(s2);
     }
 
     void draw_anti_aliased_outline(rasterizer_outline_aa& ras, renderer_oaa& ren)
     {
-        spiral s3(width()/5, height() - height()/4 + 20, 5, 70, 16, m_start_angle);
+        spiral s3(width()/5, height() - height()/4 + 20, 5, 70, 8, m_start_angle);
         ren.color(agg::rgba(0.4, 0.3, 0.1));
         ras.add_path(s3);
     }
     
     void draw_anti_aliased_scanline(rasterizer_scanline& ras, scanline& sl, renderer_aa& ren)
     {
-        spiral s4(width()/2, height() - height()/4 + 20, 5, 70, 16, m_start_angle);
+        spiral s4(width()/2, height() - height()/4 + 20, 5, 70, 8, m_start_angle);
         agg::conv_stroke<spiral> stroke(s4);
         stroke.width(m_width.value());
         stroke.line_cap(agg::round_cap);
@@ -241,7 +241,7 @@ public:
 
     void draw_anti_aliased_outline_img(rasterizer_outline_img& ras, renderer_img& ren)
     {
-        spiral s5(width() - width()/5, height() - height()/4 + 20, 5, 70, 16, m_start_angle);
+        spiral s5(width() - width()/5, height() - height()/4 + 20, 5, 70, 8, m_start_angle);
         ras.add_path(s5);
     }
     

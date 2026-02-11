@@ -155,7 +155,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut prim = RendererPrimitives::new(&mut rb);
         prim.set_line_color(Rgba8::new(102, 77, 26, 255));
         let mut ras_al = RasterizerOutline::new(&mut prim);
-        let mut s1 = Spiral::new(w / 5.0, h / 4.0 + 50.0, 5.0, 70.0, 16.0, start_angle);
+        let mut s1 = Spiral::new(w / 5.0, h / 4.0 + 50.0, 5.0, 70.0, 8.0, start_angle);
         let mut px = PathStorage::new();
         s1.rewind(0);
         let (mut vx, mut vy) = (0.0, 0.0);
@@ -180,7 +180,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut prim = RendererPrimitives::new(&mut rb);
         prim.set_line_color(Rgba8::new(102, 77, 26, 255));
         let mut ras_al = RasterizerOutline::new(&mut prim);
-        let mut s2 = Spiral::new(w / 2.0, h / 4.0 + 50.0, 5.0, 70.0, 16.0, start_angle);
+        let mut s2 = Spiral::new(w / 2.0, h / 4.0 + 50.0, 5.0, 70.0, 8.0, start_angle);
         ras_al.add_path(&mut s2, 0);
     }
 
@@ -196,7 +196,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         } else {
             OutlineAaJoin::Round
         });
-        let mut s3 = Spiral::new(w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 16.0, start_angle);
+        let mut s3 = Spiral::new(w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
         ras_oaa.add_path(&mut s3, 0, &mut ren_oaa);
     }
 
@@ -204,7 +204,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     {
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
-        let mut s4 = Spiral::new(w / 2.0, h - h / 4.0 + 20.0, 5.0, 70.0, 16.0, start_angle);
+        let mut s4 = Spiral::new(w / 2.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
         let mut stroke = ConvStroke::new(&mut s4);
         stroke.set_width(line_width);
         stroke.set_line_cap(LineCap::Round);
@@ -230,7 +230,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         let mut ras_img = RasterizerOutlineAa::new();
         let mut s5 = Spiral::new(
-            w - w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 16.0, start_angle,
+            w - w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle,
         );
         ras_img.add_path(&mut s5, 0, &mut ren_img);
     }

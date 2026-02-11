@@ -9,28 +9,52 @@ export interface RenderOptions {
   height: number;
   params: number[];
   timeDisplay?: HTMLElement;
+  /** When true, mirror canvas vertically to emulate AGG bottom-left window coords. */
+  flipY?: boolean;
 }
 
 /**
  * Render a demo to a canvas and display timing.
  */
 export function renderToCanvas(opts: RenderOptions): void {
-  const { demoName, canvas, width, height, params, timeDisplay } = opts;
+  const { demoName, canvas, width, height, params, timeDisplay, flipY = true } = opts;
+  try {
+    const t0 = performance.now();
+    const pixels = renderDemo(demoName, width, height, params);
+    const t1 = performance.now();
 
-  canvas.width = width;
-  canvas.height = height;
-  canvas.style.transform = 'scaleY(-1)';
-  const ctx = canvas.getContext('2d')!;
+    const expectedBytes = width * height * 4;
+    if (pixels.byteLength < expectedBytes) {
+      throw new Error(`Pixel buffer too small: got ${pixels.byteLength}, expected ${expectedBytes}`);
+    }
 
-  const t0 = performance.now();
-  const pixels = renderDemo(demoName, width, height, params);
-  const t1 = performance.now();
+    const clamped = pixels.byteLength === expectedBytes
+      ? new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, expectedBytes)
+      : new Uint8ClampedArray(pixels.slice(0, expectedBytes));
 
-  const imageData = new ImageData(new Uint8ClampedArray(pixels.buffer), width, height);
-  ctx.putImageData(imageData, 0, 0);
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    const expectedTransform = flipY ? 'scaleY(-1)' : 'none';
+    if (canvas.style.transform !== expectedTransform) {
+      canvas.style.transform = expectedTransform;
+    }
 
-  if (timeDisplay) {
-    timeDisplay.textContent = `${(t1 - t0).toFixed(1)} ms`;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('2D canvas context not available');
+    }
+
+    const imageData = new ImageData(clamped, width, height);
+    ctx.putImageData(imageData, 0, 0);
+
+    if (timeDisplay) {
+      timeDisplay.textContent = `${(t1 - t0).toFixed(1)} ms`;
+    }
+  } catch (err) {
+    console.error(`[renderToCanvas] Failed to render ${demoName}:`, err);
+    if (timeDisplay) {
+      timeDisplay.textContent = 'render failed';
+    }
   }
 }
 

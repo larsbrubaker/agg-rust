@@ -17,6 +17,11 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Optio
         "lion_outline" => lion_outline::render(width, height, params),
         "image_filters" => image_filters::render(width, height, params),
         "rasterizers2" => rasterizers2::render(width, height, params),
+        "compositing" => agg_wasm::render_demo("compositing", width, height, params),
+        "compositing2" => agg_wasm::render_demo("compositing2", width, height, params),
+        "flash_rasterizer" => agg_wasm::render_demo("flash_rasterizer", width, height, params),
+        "flash_rasterizer2" => agg_wasm::render_demo("flash_rasterizer2", width, height, params),
+        "truetype_test" => agg_wasm::render_demo("truetype_test", width, height, params),
         "simple_line" => render_simple_line(width, height, params),
         _ => return None,
     };
@@ -25,7 +30,17 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Optio
 
 /// List all available demo names.
 pub fn available_demos() -> &'static [&'static str] {
-    &["lion_outline", "image_filters", "rasterizers2", "simple_line"]
+    &[
+        "lion_outline",
+        "image_filters",
+        "rasterizers2",
+        "compositing",
+        "compositing2",
+        "flash_rasterizer",
+        "flash_rasterizer2",
+        "truetype_test",
+        "simple_line",
+    ]
 }
 
 /// Render a simple line test for comparison debugging.
@@ -148,6 +163,31 @@ pub fn parse_lion() -> (PathStorage, Vec<Rgba8>, Vec<usize>) {
 
     path.arrange_orientations_all_paths(PATH_FLAGS_CW);
     (path, colors, path_idx)
+}
+
+#[cfg(test)]
+mod demo_smoke_tests {
+    use super::{available_demos, render_demo};
+
+    #[test]
+    fn compositing_section_demos_render() {
+        for name in ["compositing", "compositing2", "flash_rasterizer", "flash_rasterizer2"] {
+            let out = render_demo(name, 64, 48, &[]);
+            assert!(out.is_some(), "missing renderer for {name}");
+            let out = out.unwrap();
+            assert_eq!(out.width, 64);
+            assert_eq!(out.height, 48);
+            assert_eq!(out.data.len(), 64 * 48 * 4);
+        }
+    }
+
+    #[test]
+    fn demos_list_includes_compositing_section() {
+        let demos = available_demos();
+        for name in ["compositing", "compositing2", "flash_rasterizer", "flash_rasterizer2"] {
+            assert!(demos.contains(&name), "available_demos missing {name}");
+        }
+    }
 }
 
 fn parse_path_line(line: &str, path: &mut PathStorage) {

@@ -1,18 +1,18 @@
-//! Basic demo render functions: lion, shapes, gradients, gouraud, conv_stroke,
+//! Basic demo render functions: lion, gradients, gouraud, conv_stroke,
 //! bezier_div, circles, rounded_rect, aa_demo, gamma_correction, line_thickness,
-//! rasterizers, conv_contour, conv_dash, gsv_text, perspective.
+//! rasterizers, conv_contour, conv_dash, perspective.
 
 use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
+use agg_rust::bspline::Bspline;
 use agg_rust::bounding_rect::bounding_rect;
 use agg_rust::color::Rgba8;
 use agg_rust::conv_contour::ConvContour;
-use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl};
+use agg_rust::ctrl::{render_ctrl, CboxCtrl, GammaCtrl, RboxCtrl, ScaleCtrl, SliderCtrl, SplineCtrl};
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ellipse::Ellipse;
-use agg_rust::gradient_lut::GradientLut;
 use agg_rust::gsv_text::GsvText;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
@@ -26,7 +26,7 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_gradient::{
-    GradientConic, GradientDiamond, GradientRadial,
+    GradientConic, GradientDiamond, GradientRadial, GradientReflectAdaptor,
     GradientSqrtXY, GradientX, GradientXY,
     SpanGradient,
 };
@@ -105,114 +105,75 @@ pub fn lion(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 }
 
 // ============================================================================
-// Shapes
-// ============================================================================
-
-/// Render various anti-aliased shapes.
-///
-/// params[0] = number of shapes (default 12)
-pub fn shapes(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let count = params.first().copied().unwrap_or(12.0) as usize;
-
-    let mut buf = Vec::new();
-    let mut ra = RowAccessor::new();
-    setup_renderer(&mut buf, &mut ra, width, height);
-    let pf = PixfmtRgba32::new(&mut ra);
-    let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 255, 255));
-
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-
-    let w = width as f64;
-    let h = height as f64;
-
-    // Row 1: Circles with different sizes
-    let row1_y = h * 0.2;
-    let cols = count.min(8);
-    for i in 0..cols {
-        let t = i as f64 / cols as f64;
-        let cx = w * (0.1 + t * 0.8);
-        let r = 10.0 + t * 40.0;
-        let mut ell = Ellipse::new(cx, row1_y, r, r, 64, false);
-        ras.reset();
-        ras.add_path(&mut ell, 0);
-        let color = Rgba8::new(
-            (255.0 * (1.0 - t)) as u32,
-            (100.0 + 155.0 * t) as u32,
-            (200.0 * t) as u32,
-            200,
-        );
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
-    }
-
-    // Row 2: Rounded rectangles
-    let row2_y = h * 0.5;
-    for i in 0..cols.min(6) {
-        let t = i as f64 / 6.0;
-        let x1 = w * (0.05 + t * 0.85);
-        let rr_w = 40.0 + t * 30.0;
-        let rr_h = 30.0 + t * 20.0;
-        let radius = 2.0 + t * 15.0;
-        let mut rrect = RoundedRect::new(x1, row2_y - rr_h / 2.0, x1 + rr_w, row2_y + rr_h / 2.0, radius);
-        ras.reset();
-        ras.add_path(&mut rrect, 0);
-        let color = Rgba8::new(
-            (50.0 + 150.0 * t) as u32,
-            (200.0 * (1.0 - t)) as u32,
-            (100.0 + 155.0 * t) as u32,
-            220,
-        );
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
-    }
-
-    // Row 3: Stroked ellipses
-    let row3_y = h * 0.8;
-    for i in 0..cols.min(6) {
-        let t = i as f64 / 6.0;
-        let cx = w * (0.1 + t * 0.8);
-        let rx = 20.0 + t * 30.0;
-        let ry = 10.0 + t * 20.0;
-        let ell = Ellipse::new(cx, row3_y, rx, ry, 64, false);
-        let mut stroke = ConvStroke::new(ell);
-        stroke.set_width(1.0 + t * 4.0);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        let color = Rgba8::new(
-            (200.0 * t) as u32,
-            (50.0 + 100.0 * t) as u32,
-            (255.0 * (1.0 - t)) as u32,
-            255,
-        );
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
-    }
-
-    buf
-}
-
-// ============================================================================
 // Gradients
 // ============================================================================
 
 /// Render gradient sphere — 6 gradient types, matching C++ gradients.cpp.
 ///
-/// params[0] = center_x (default width/2)
-/// params[1] = center_y (default height/2)
+/// params[0] = center_x (default 350, matching C++ `center_x`)
+/// params[1] = center_y (default 280, matching C++ `center_y`)
 /// params[2] = angle in radians (default 0)
 /// params[3] = scale (default 1.0)
 /// params[4] = gradient type (0=radial, 1=diamond, 2=linear, 3=xy, 4=sqrt_xy, 5=conic)
 /// params[5] = scale_x (default 1.0)
 /// params[6] = scale_y (default 1.0)
+/// params[7..10] = gamma spline values (kx1, ky1, kx2, ky2), default 1.0 each
+/// params[11..22] = spline_r points x0,y0..x5,y5 (defaults to C++ ramp)
+/// params[23..34] = spline_g points x0,y0..x5,y5 (defaults to C++ ramp)
+/// params[35..46] = spline_b points x0,y0..x5,y5 (defaults to C++ ramp)
+/// params[47..58] = spline_a points x0,y0..x5,y5 (defaults to C++ alpha ramp)
 pub fn gradients(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let w = width as f64;
-    let h = height as f64;
-    let cx = params.get(0).copied().unwrap_or(w / 2.0);
-    let cy = params.get(1).copied().unwrap_or(h / 2.0);
+    struct ColorFunctionProfile {
+        colors: [Rgba8; 256],
+        profile: [u8; 256],
+    }
+
+    impl agg_rust::gradient_lut::ColorFunction for ColorFunctionProfile {
+        type Color = Rgba8;
+
+        fn size(&self) -> usize {
+            256
+        }
+
+        fn get(&self, index: usize) -> Rgba8 {
+            self.colors[self.profile[index] as usize]
+        }
+    }
+
+    const CENTER_X: f64 = 350.0;
+    const CENTER_Y: f64 = 280.0;
+    const INI_SCALE: f64 = 1.0;
+    const SPHERE_RADIUS: f64 = 110.0;
+    const SPLINE_R_BASE: usize = 11;
+    const SPLINE_G_BASE: usize = 23;
+    const SPLINE_B_BASE: usize = 35;
+    const SPLINE_A_BASE: usize = 47;
+
+    let read_spline_point = |base: usize, idx: usize, default_x: f64, default_y: f64| -> (f64, f64) {
+        let x = params
+            .get(base + idx * 2)
+            .copied()
+            .unwrap_or(default_x)
+            .clamp(0.0, 1.0);
+        let y = params
+            .get(base + idx * 2 + 1)
+            .copied()
+            .unwrap_or(default_y)
+            .clamp(0.0, 1.0);
+        (x, y)
+    };
+
+    let cx = params.get(0).copied().unwrap_or(CENTER_X);
+    let cy = params.get(1).copied().unwrap_or(CENTER_Y);
     let angle = params.get(2).copied().unwrap_or(0.0);
     let scale = params.get(3).copied().unwrap_or(1.0).max(0.01);
     let grad_type = params.get(4).copied().unwrap_or(0.0) as i32;
     let scale_x = params.get(5).copied().unwrap_or(1.0).max(0.01);
     let scale_y = params.get(6).copied().unwrap_or(1.0).max(0.01);
+    let gamma_kx1 = params.get(7).copied().unwrap_or(1.0);
+    let gamma_ky1 = params.get(8).copied().unwrap_or(1.0);
+    let gamma_kx2 = params.get(9).copied().unwrap_or(1.0);
+    let gamma_ky2 = params.get(10).copied().unwrap_or(1.0);
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -225,30 +186,92 @@ pub fn gradients(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut sl = ScanlineU8::new();
     let mut alloc: SpanAllocator<Rgba8> = SpanAllocator::new();
 
-    // Rainbow color LUT (matching C++ spline default appearance)
-    let mut lut = GradientLut::new(256);
-    lut.add_color(0.0, Rgba8::new(255, 0, 0, 255));
-    lut.add_color(0.15, Rgba8::new(255, 200, 0, 255));
-    lut.add_color(0.3, Rgba8::new(0, 255, 0, 255));
-    lut.add_color(0.5, Rgba8::new(0, 200, 255, 255));
-    lut.add_color(0.65, Rgba8::new(0, 0, 255, 255));
-    lut.add_color(0.8, Rgba8::new(200, 0, 255, 255));
-    lut.add_color(1.0, Rgba8::new(255, 0, 100, 255));
-    lut.build_lut();
+    // Full C++ controls setup: gamma control, 4 spline controls, and gradient type rbox.
+    let mut gamma_ctrl = GammaCtrl::new(10.0, 10.0, 200.0, 165.0);
+    gamma_ctrl.border_width(2.0, 2.0);
+    gamma_ctrl.text_size(8.0, 0.0);
+    gamma_ctrl.set_values(gamma_kx1, gamma_ky1, gamma_kx2, gamma_ky2);
 
-    // Full-screen ellipse shape (centered, matching C++ ellipse of r=110 but scaled)
-    let shape_r = w.min(h) * 0.45;
-    let mut ell = Ellipse::new(cx, cy, shape_r, shape_r, 128, false);
+    let mut spline_r = SplineCtrl::new(210.0, 10.0, 460.0, 45.0, 6);
+    let mut spline_g = SplineCtrl::new(210.0, 50.0, 460.0, 85.0, 6);
+    let mut spline_b = SplineCtrl::new(210.0, 90.0, 460.0, 125.0, 6);
+    let mut spline_a = SplineCtrl::new(210.0, 130.0, 460.0, 165.0, 6);
+    spline_r.background_color(Rgba8::new(255, 204, 204, 255));
+    spline_g.background_color(Rgba8::new(204, 255, 204, 255));
+    spline_b.background_color(Rgba8::new(204, 204, 255, 255));
+    spline_a.background_color(Rgba8::new(255, 255, 255, 255));
+    spline_r.border_width(1.0, 2.0);
+    spline_g.border_width(1.0, 2.0);
+    spline_b.border_width(1.0, 2.0);
+    spline_a.border_width(1.0, 2.0);
+    for i in 0..6 {
+        let x = i as f64 / 5.0;
+        let y = 1.0 - x;
+        let (xr, yr) = read_spline_point(SPLINE_R_BASE, i, x, y);
+        let (xg, yg) = read_spline_point(SPLINE_G_BASE, i, x, y);
+        let (xb, yb) = read_spline_point(SPLINE_B_BASE, i, x, y);
+        let (xa, ya) = read_spline_point(SPLINE_A_BASE, i, x, 1.0);
+        spline_r.point(i, xr, yr);
+        spline_g.point(i, xg, yg);
+        spline_b.point(i, xb, yb);
+        spline_a.point(i, xa, ya);
+    }
+    spline_r.update_spline();
+    spline_g.update_spline();
+    spline_b.update_spline();
+    spline_a.update_spline();
+
+    let mut rbox = RboxCtrl::new(10.0, 180.0, 200.0, 300.0);
+    rbox.border_width(2.0, 2.0);
+    rbox.add_item("Circular");
+    rbox.add_item("Diamond");
+    rbox.add_item("Linear");
+    rbox.add_item("XY");
+    rbox.add_item("sqrt(XY)");
+    rbox.add_item("Conic");
+    rbox.set_cur_item(grad_type.clamp(0, 5));
+
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut gamma_ctrl);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut spline_r);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut spline_g);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut spline_b);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut spline_a);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut rbox);
+
+    let mut color_profile = [Rgba8::default(); 256];
+    let gamma_profile = *gamma_ctrl.gamma();
+    for (i, c) in color_profile.iter_mut().enumerate() {
+        *c = Rgba8::new(
+            (spline_r.spline()[i].clamp(0.0, 1.0) * 255.0 + 0.5) as u32,
+            (spline_g.spline()[i].clamp(0.0, 1.0) * 255.0 + 0.5) as u32,
+            (spline_b.spline()[i].clamp(0.0, 1.0) * 255.0 + 0.5) as u32,
+            (spline_a.spline()[i].clamp(0.0, 1.0) * 255.0 + 0.5) as u32,
+        );
+    }
+    let colors = ColorFunctionProfile {
+        colors: color_profile,
+        profile: gamma_profile,
+    };
+
+    // Shape transform: ellipse(0,0,110,110) translated to C++ default center.
+    let mut shape_mtx = TransAffine::new();
+    shape_mtx.multiply(&TransAffine::new_scaling(INI_SCALE, INI_SCALE));
+    shape_mtx.multiply(&TransAffine::new_rotation(0.0));
+    shape_mtx.multiply(&TransAffine::new_translation(CENTER_X, CENTER_Y));
+
+    let mut ell = Ellipse::new(0.0, 0.0, SPHERE_RADIUS, SPHERE_RADIUS, 64, false);
+    let mut transformed_ellipse = ConvTransform::new(&mut ell, shape_mtx);
     ras.reset();
-    ras.add_path(&mut ell, 0);
+    ras.add_path(&mut transformed_ellipse, 0);
 
-    // Gradient transform (inverted for sampling) — matches C++ gradients.cpp
-    let mut mtx = TransAffine::new();
-    mtx.multiply(&TransAffine::new_scaling(scale, scale));
-    mtx.multiply(&TransAffine::new_scaling(scale_x, scale_y));
-    mtx.multiply(&TransAffine::new_rotation(angle));
-    mtx.multiply(&TransAffine::new_translation(cx, cy));
-    mtx.invert();
+    // Gradient transform (inverted) matching C++ transform order.
+    let mut gradient_mtx = TransAffine::new();
+    gradient_mtx.multiply(&TransAffine::new_scaling(INI_SCALE, INI_SCALE));
+    gradient_mtx.multiply(&TransAffine::new_scaling(scale, scale));
+    gradient_mtx.multiply(&TransAffine::new_scaling(scale_x, scale_y));
+    gradient_mtx.multiply(&TransAffine::new_rotation(angle));
+    gradient_mtx.multiply(&TransAffine::new_translation(cx, cy));
+    gradient_mtx.invert();
 
     let d1 = 0.0;
     let d2 = 150.0; // Gradient extent, matching C++
@@ -256,8 +279,9 @@ pub fn gradients(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Dispatch on gradient type using macro to avoid lifetime issues
     macro_rules! do_render {
         ($gf:expr) => {{
-            let interp = SpanInterpolatorLinear::new(mtx);
-            let mut grad = SpanGradient::new(interp, $gf, &lut, d1, d2);
+            let interp = SpanInterpolatorLinear::new(gradient_mtx);
+            let grad_reflect = GradientReflectAdaptor::new($gf);
+            let mut grad = SpanGradient::new(interp, grad_reflect, &colors, d1, d2);
             render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut grad);
         }};
     }
@@ -273,6 +297,34 @@ pub fn gradients(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     buf
+}
+
+#[cfg(test)]
+mod gradients_tests {
+    use super::gradients;
+
+    fn pixel_at(buf: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+        let i = (y * width + x) * 4;
+        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+    }
+
+    #[test]
+    fn gradients_uses_cpp_sphere_radius() {
+        // C++ gradients.cpp draws a fixed ellipse radius of 110, not a scaled fullscreen disc.
+        let w = 600usize;
+        let h = 600usize;
+        let cx = 300.0;
+        let cy = 300.0;
+        let img = gradients(w as u32, h as u32, &[cx, cy, 0.0, 1.0, 0.0, 1.0, 1.0]);
+
+        // Clearly inside the C++ sphere (r=110) should be non-background.
+        let inside = pixel_at(&img, w, cx as usize + 80, cy as usize);
+        assert_ne!(inside[..3], [0, 0, 0], "inside sphere should not be black");
+
+        // Outside r=110 should be untouched background black.
+        let outside = pixel_at(&img, w, 580, 20);
+        assert_eq!(outside, [0, 0, 0, 255], "outside sphere should be background");
+    }
 }
 
 // ============================================================================
@@ -667,15 +719,48 @@ pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
 /// Render random anti-aliased circles.
 ///
-/// params[0] = number of circles (default 200)
-/// params[1] = min radius (default 3)
-/// params[2] = max radius (default 30)
-/// params[3] = seed (default 12345)
+/// params[0] = z_min (default 0.0)
+/// params[1] = z_max (default 1.0)
+/// params[2] = size (default 0.5)
+/// params[3] = selectivity (default 0.5)
+/// params[4] = seed (default 1)
 pub fn circles(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let n = params.get(0).copied().unwrap_or(200.0) as usize;
-    let min_r = params.get(1).copied().unwrap_or(3.0);
-    let max_r = params.get(2).copied().unwrap_or(30.0);
-    let seed = params.get(3).copied().unwrap_or(12345.0) as u64;
+    #[derive(Clone, Copy)]
+    struct ScatterPoint {
+        x: f64,
+        y: f64,
+        z: f64,
+        r: f64,
+        g: f64,
+        b: f64,
+    }
+
+    fn msvc_rand15(state: &mut u32) -> u32 {
+        // Match MSVC's rand() sequence used by AGG demos.
+        *state = state.wrapping_mul(214013).wrapping_add(2531011);
+        (*state >> 16) & 0x7FFF
+    }
+
+    fn random_dbl(state: &mut u32, start: f64, end: f64) -> f64 {
+        let r = msvc_rand15(state) as f64;
+        r * (end - start) / 32768.0 + start
+    }
+
+    fn build_spline(x: &[f64; 6], y: &[f64; 6]) -> Bspline {
+        let mut s = Bspline::new();
+        s.init(x, y);
+        s
+    }
+
+    let mut z_min = params.first().copied().unwrap_or(0.3).clamp(0.0, 1.0);
+    let mut z_max = params.get(1).copied().unwrap_or(0.7).clamp(0.0, 1.0);
+    let size = params.get(2).copied().unwrap_or(0.5).clamp(0.0, 1.0);
+    let selectivity = params.get(3).copied().unwrap_or(0.5).clamp(0.0, 1.0);
+    let seed = params.get(4).copied().unwrap_or(1.0) as u32;
+    if z_min > z_max {
+        std::mem::swap(&mut z_min, &mut z_max);
+    }
+    let num_points = 10_000usize;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -689,31 +774,135 @@ pub fn circles(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     let w = width as f64;
     let h = height as f64;
+    let rx = w / 3.5;
+    let ry = h / 3.5;
+    let circle_radius = size * 5.0;
 
-    // Simple LCG RNG for reproducible results
+    let spline_r_x = [0.0, 0.2, 0.4, 0.910484, 0.957258, 1.0];
+    let spline_r_y = [1.0, 0.8, 0.6, 0.066667, 0.169697, 0.6];
+    let spline_g_x = [0.0, 0.292244, 0.485655, 0.564859, 0.795607, 1.0];
+    let spline_g_y = [0.0, 0.607260, 0.964065, 0.892558, 0.435571, 0.0];
+    let spline_b_x = [0.0, 0.055045, 0.143034, 0.433082, 0.764859, 1.0];
+    let spline_b_y = [0.385480, 0.128493, 0.021416, 0.271507, 0.713974, 1.0];
+    let spline_r = build_spline(&spline_r_x, &spline_r_y);
+    let spline_g = build_spline(&spline_g_x, &spline_g_y);
+    let spline_b = build_spline(&spline_b_x, &spline_b_y);
+
     let mut rng = seed;
-    let next = |state: &mut u64| -> f64 {
-        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        (*state >> 33) as f64 / (1u64 << 31) as f64
-    };
+    let mut points = Vec::with_capacity(num_points);
+    for _ in 0..num_points {
+        let z = random_dbl(&mut rng, 0.0, 1.0);
+        let x = (z * std::f64::consts::PI * 2.0).cos() * rx;
+        let y = (z * std::f64::consts::PI * 2.0).sin() * ry;
+        let dist = random_dbl(&mut rng, 0.0, rx / 2.0);
+        let angle = random_dbl(&mut rng, 0.0, std::f64::consts::PI * 2.0);
 
-    for _ in 0..n {
-        let x = next(&mut rng) * w;
-        let y = next(&mut rng) * h;
-        let r = min_r + next(&mut rng) * (max_r - min_r);
-        let cr = (next(&mut rng) * 255.0) as u32;
-        let cg = (next(&mut rng) * 255.0) as u32;
-        let cb = (next(&mut rng) * 255.0) as u32;
-        let ca = (next(&mut rng) * 180.0 + 75.0) as u32;
-
-        let steps = (r * 4.0).max(8.0).min(64.0) as u32;
-        let mut ell = Ellipse::new(x, y, r, r, steps, false);
-        ras.reset();
-        ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(cr, cg, cb, ca));
+        points.push(ScatterPoint {
+            x: w / 2.0 + x + angle.cos() * dist,
+            y: h / 2.0 + y + angle.sin() * dist,
+            z,
+            r: spline_r.get(z) * 0.8,
+            g: spline_g.get(z) * 0.8,
+            b: spline_b.get(z) * 0.8,
+        });
     }
 
+    let mut n_drawn = 0u32;
+    for p in &points {
+        let mut alpha = 1.0;
+        if p.z < z_min {
+            alpha = 1.0 - (z_min - p.z) * selectivity * 100.0;
+        }
+        if p.z > z_max {
+            alpha = 1.0 - (p.z - z_max) * selectivity * 100.0;
+        }
+        alpha = alpha.clamp(0.0, 1.0);
+        if alpha <= 0.0 {
+            continue;
+        }
+
+        let mut ell = Ellipse::new(p.x, p.y, circle_radius, circle_radius, 8, false);
+        ras.reset();
+        ras.add_path(&mut ell, 0);
+        render_scanlines_aa_solid(
+            &mut ras,
+            &mut sl,
+            &mut rb,
+            &Rgba8::new(
+                ((p.r.clamp(0.0, 1.0) * 255.0) + 0.5) as u32,
+                ((p.g.clamp(0.0, 1.0) * 255.0) + 0.5) as u32,
+                ((p.b.clamp(0.0, 1.0) * 255.0) + 0.5) as u32,
+                ((alpha * 255.0) + 0.5) as u32,
+            ),
+        );
+        n_drawn += 1;
+    }
+
+    // Render draw count text in the bottom-left, matching C++ circles.cpp.
+    let mut txt = GsvText::new();
+    txt.size(15.0, 0.0);
+    txt.text(&format!("{:08}", n_drawn));
+    txt.start_point(10.0, h - 20.0);
+    let mut txt_stroke = ConvStroke::new(txt);
+    txt_stroke.set_width(1.0);
+    ras.reset();
+    ras.add_path(&mut txt_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    // On-canvas controls: match C++ circles.cpp layout at the bottom.
+    let x1 = 5.0;
+    let x2 = w - 5.0;
+
+    let mut s_size = SliderCtrl::new(x1, 35.0, x2, 42.0);
+    s_size.label("Size");
+    s_size.range(0.0, 1.0);
+    s_size.set_value(size);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_size);
+
+    let mut s_sel = SliderCtrl::new(x1, 20.0, x2, 27.0);
+    s_sel.label("Selectivity");
+    s_sel.range(0.0, 1.0);
+    s_sel.set_value(selectivity);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_sel);
+
+    let mut s_z = ScaleCtrl::new(x1, 5.0, x2, 12.0);
+    s_z.set_value1(z_min);
+    s_z.set_value2(z_max);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_z);
+
     buf
+}
+
+#[cfg(test)]
+mod circles_tests {
+    use super::circles;
+
+    fn non_white_pixels(buf: &[u8]) -> usize {
+        buf.chunks_exact(4)
+            .filter(|px| px[0] != 255 || px[1] != 255 || px[2] != 255)
+            .count()
+    }
+
+    #[test]
+    fn circles_uses_z_range_params_not_circle_count() {
+        // Regression check: C++ circles.cpp uses z-range controls in [0,1].
+        // A full range should still render many scatter points.
+        let full = circles(400, 400, &[0.0, 1.0, 0.5, 0.5, 1.0]);
+        assert!(
+            non_white_pixels(&full) > 1_000,
+            "expected substantial scatter rendering for full z-range"
+        );
+    }
+
+    #[test]
+    fn circles_narrow_z_range_draws_fewer_points() {
+        let full = circles(400, 400, &[0.0, 1.0, 0.5, 0.5, 1.0]);
+        let narrow = circles(400, 400, &[0.45, 0.55, 0.5, 0.5, 1.0]);
+        assert!(
+            non_white_pixels(&narrow) < non_white_pixels(&full),
+            "narrow z-range should reduce drawn pixels"
+        );
+    }
 }
 
 // ============================================================================
@@ -1494,128 +1683,6 @@ pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut c_eo = CboxCtrl::new(300.0, 30.0, "Even-Odd Fill");
     c_eo.set_status(even_odd);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_eo);
-
-    buf
-}
-
-// ============================================================================
-// GSV Text — text rendering demo
-// ============================================================================
-
-/// Render text using the built-in GSV text engine.
-///
-/// params[0] = text size (default 24)
-/// params[1] = stroke width (default 1.0)
-/// params[2] = x offset (default 20)
-/// params[3] = y offset (default 40)
-pub fn gsv_text_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let text_size = params.get(0).copied().unwrap_or(24.0).max(4.0);
-    let stroke_w = params.get(1).copied().unwrap_or(1.0).max(0.1);
-    let x_off = params.get(2).copied().unwrap_or(20.0);
-    let y_off = params.get(3).copied().unwrap_or(40.0);
-
-    let mut buf = Vec::new();
-    let mut ra = RowAccessor::new();
-    setup_renderer(&mut buf, &mut ra, width, height);
-    let pf = PixfmtRgba32::new(&mut ra);
-    let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 255, 255));
-
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-
-    let w = width as f64;
-    let h = height as f64;
-
-    // Title
-    {
-        let mut txt = GsvText::new();
-        txt.size(text_size * 1.5, 0.0);
-        txt.start_point(x_off, y_off);
-        txt.text("AGG for Rust - GSV Text");
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(stroke_w * 1.5);
-        stroke.set_line_cap(LineCap::Round);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 50, 120, 255));
-    }
-
-    // Subtitle
-    {
-        let mut txt = GsvText::new();
-        txt.size(text_size * 0.7, 0.0);
-        txt.start_point(x_off, y_off + text_size * 2.0);
-        txt.text("Built-in vector font — no dependencies");
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(stroke_w * 0.7);
-        stroke.set_line_cap(LineCap::Round);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(100, 100, 100, 255));
-    }
-
-    // Sample text lines at different sizes
-    let samples = [
-        ("ABCDEFGHIJKLM", Rgba8::new(200, 0, 0, 255)),
-        ("NOPQRSTUVWXYZ", Rgba8::new(0, 150, 0, 255)),
-        ("abcdefghijklm", Rgba8::new(0, 0, 200, 255)),
-        ("nopqrstuvwxyz", Rgba8::new(150, 100, 0, 255)),
-        ("0123456789 !@#$%", Rgba8::new(0, 100, 150, 255)),
-    ];
-
-    let base_y = y_off + text_size * 4.0;
-    for (i, (text, color)) in samples.iter().enumerate() {
-        let y = base_y + i as f64 * (text_size * 1.5);
-        if y + text_size > h {
-            break;
-        }
-        let mut txt = GsvText::new();
-        txt.size(text_size, 0.0);
-        txt.start_point(x_off, y);
-        txt.text(text);
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(stroke_w);
-        stroke.set_line_cap(LineCap::Round);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
-    }
-
-    // Paragraph at bottom — large text
-    let large_y = base_y + samples.len() as f64 * (text_size * 1.5) + text_size;
-    if large_y + text_size * 3.0 < h {
-        let mut txt = GsvText::new();
-        txt.size(text_size * 2.5, 0.0);
-        txt.start_point(x_off, large_y);
-        txt.text("Aa Bb Cc");
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(stroke_w * 2.0);
-        stroke.set_line_cap(LineCap::Round);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(30, 30, 30, 255));
-    }
-
-    // Size label at top-right
-    {
-        let label = format!("Size: {:.0}px  Stroke: {:.1}", text_size, stroke_w);
-        let mut txt = GsvText::new();
-        txt.size(12.0, 0.0);
-        txt.start_point(w - 200.0, 20.0);
-        txt.text(&label);
-        let mut stroke = ConvStroke::new(txt);
-        stroke.set_width(0.8);
-        stroke.set_line_cap(LineCap::Round);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(140, 140, 140, 200));
-    }
 
     buf
 }

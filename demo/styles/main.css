@@ -259,6 +259,10 @@ body {
   width: 24px;
   height: 18px;
   object-fit: cover;
+  object-position: center;
+  /* Force smooth downscaling for tiny sidebar previews. */
+  image-rendering: auto;
+  image-rendering: smooth;
   border-radius: 3px;
   flex-shrink: 0;
   background: var(--surface-alt);
@@ -360,6 +364,10 @@ body {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
+  object-position: center;
+  /* Keep home-page cards from using nearest-neighbor sampling. */
+  image-rendering: auto;
+  image-rendering: smooth;
   border-radius: var(--radius-sm);
   margin-bottom: 12px;
   background: var(--surface-alt);

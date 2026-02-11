@@ -6,14 +6,24 @@
 // Uses pointer events with setPointerCapture so slider drags work even when
 // the cursor leaves the canvas.
 
-/** Get pointer position in AGG coordinates (origin bottom-left). */
-function aggPos(canvas: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
+export interface CanvasControlOptions {
+  /** Coordinate origin used by control bounds. Defaults to AGG bottom-left. */
+  origin?: 'bottom-left' | 'top-left';
+}
+
+/** Get pointer position in control coordinate space. */
+function aggPos(
+  canvas: HTMLCanvasElement,
+  e: PointerEvent,
+  options: CanvasControlOptions,
+): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
+  const yTop = (e.clientY - rect.top) * scaleY;
   return {
     x: (e.clientX - rect.left) * scaleX,
-    y: canvas.height - (e.clientY - rect.top) * scaleY,
+    y: options.origin === 'top-left' ? yTop : (canvas.height - yTop),
   };
 }
 
@@ -29,6 +39,16 @@ export interface CanvasSlider {
   sidebarEl: HTMLInputElement;
   /** Called with the new value when changed via canvas. */
   onChange: (v: number) => void;
+}
+
+export interface CanvasScale {
+  type: 'scale';
+  x1: number; y1: number; x2: number; y2: number;
+  min: number; max: number;
+  minDelta?: number;
+  /** Sidebar sliders for value1/value2. */
+  sidebarEl1: HTMLInputElement;
+  sidebarEl2: HTMLInputElement;
 }
 
 export interface CanvasCheckbox {
@@ -55,7 +75,7 @@ export interface CanvasButton {
   onClick: () => void;
 }
 
-export type CanvasControl = CanvasSlider | CanvasCheckbox | CanvasRadio | CanvasButton;
+export type CanvasControl = CanvasSlider | CanvasScale | CanvasCheckbox | CanvasRadio | CanvasButton;
 
 // ============================================================================
 // Pointer handler — attach to a canvas, process all registered controls
@@ -65,13 +85,17 @@ export function setupCanvasControls(
   canvas: HTMLCanvasElement,
   controls: CanvasControl[],
   redraw: () => void,
+  options: CanvasControlOptions = {},
 ): () => void {
   let activeSlider: CanvasSlider | null = null;
+  let activeScale: CanvasScale | null = null;
+  let activeScaleMode: 'value1' | 'value2' | 'slider' | null = null;
+  let scaleDragOffset = 0;
 
   function hitTest(x: number, y: number): CanvasControl | null {
     // AGG slider has border_extra = (y2-y1)/2 expanding the hit area
     for (const c of controls) {
-      const extra = c.type === 'slider' ? (c.y2 - c.y1) / 2 : 0;
+      const extra = (c.type === 'slider' || c.type === 'scale') ? (c.y2 - c.y1) / 2 : 0;
       if (x >= c.x1 - extra && x <= c.x2 + extra &&
           y >= c.y1 - extra && y <= c.y2 + extra) {
         return c;
@@ -89,6 +113,41 @@ export function setupCanvasControls(
     return slider.min + t * (slider.max - slider.min);
   }
 
+  function scaleInner(scale: CanvasScale): { xs1: number; xs2: number; isHorizontal: boolean; extra: number } {
+    const isHorizontal = Math.abs(scale.x2 - scale.x1) > Math.abs(scale.y2 - scale.y1);
+    return { xs1: scale.x1 + 1, xs2: scale.x2 - 1, isHorizontal, extra: (scale.y2 - scale.y1) / 2 };
+  }
+
+  function scaleRangeValues(scale: CanvasScale): { v1: number; v2: number } {
+    const v1 = parseFloat(scale.sidebarEl1.value);
+    const v2 = parseFloat(scale.sidebarEl2.value);
+    return { v1, v2 };
+  }
+
+  function clampScalePair(scale: CanvasScale, v1: number, v2: number): { v1: number; v2: number } {
+    const minD = scale.minDelta ?? 0.01;
+    const lo = scale.min;
+    const hi = scale.max;
+    v1 = Math.max(lo, Math.min(v1, hi));
+    v2 = Math.max(lo, Math.min(v2, hi));
+    if (v2 - v1 < minD) {
+      const mid = (v1 + v2) / 2;
+      v1 = mid - minD / 2;
+      v2 = mid + minD / 2;
+      if (v1 < lo) { v1 = lo; v2 = lo + minD; }
+      if (v2 > hi) { v2 = hi; v1 = hi - minD; }
+    }
+    return { v1, v2 };
+  }
+
+  function updateScale(scale: CanvasScale, v1: number, v2: number) {
+    const pair = clampScalePair(scale, v1, v2);
+    scale.sidebarEl1.value = String(pair.v1);
+    scale.sidebarEl2.value = String(pair.v2);
+    scale.sidebarEl1.dispatchEvent(new Event('input'));
+    scale.sidebarEl2.dispatchEvent(new Event('input'));
+  }
+
   function updateSlider(slider: CanvasSlider, value: number) {
     slider.sidebarEl.value = String(value);
     slider.sidebarEl.dispatchEvent(new Event('input'));
@@ -96,7 +155,7 @@ export function setupCanvasControls(
 
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
-    const pos = aggPos(canvas, e);
+    const pos = aggPos(canvas, e, options);
     const ctrl = hitTest(pos.x, pos.y);
     if (!ctrl) return;
 
@@ -107,6 +166,36 @@ export function setupCanvasControls(
       updateSlider(ctrl, v);
       e.stopPropagation();
       e.preventDefault();
+    } else if (ctrl.type === 'scale') {
+      const { xs1, xs2, isHorizontal, extra } = scaleInner(ctrl);
+      const { v1, v2 } = scaleRangeValues(ctrl);
+      const p1 = isHorizontal ? xs1 + (xs2 - xs1) * ((v1 - ctrl.min) / (ctrl.max - ctrl.min)) : 0;
+      const p2 = isHorizontal ? xs1 + (xs2 - xs1) * ((v2 - ctrl.min) / (ctrl.max - ctrl.min)) : 0;
+      const py = isHorizontal ? (ctrl.y1 + ctrl.y2) / 2 : 0;
+      const pr = isHorizontal ? (ctrl.y2 - ctrl.y1) : (ctrl.x2 - ctrl.x1);
+      const ys1 = ctrl.y1 - extra / 2;
+      const ys2 = ctrl.y2 + extra / 2;
+      const d1 = isHorizontal ? Math.hypot(pos.x - p1, pos.y - py) : Number.POSITIVE_INFINITY;
+      const d2 = isHorizontal ? Math.hypot(pos.x - p2, pos.y - py) : Number.POSITIVE_INFINITY;
+
+      if (isHorizontal && pos.x > p1 && pos.x < p2 && pos.y > ys1 && pos.y < ys2) {
+        activeScaleMode = 'slider';
+        scaleDragOffset = p1 - pos.x;
+      } else if (d1 <= pr) {
+        activeScaleMode = 'value1';
+        scaleDragOffset = p1 - pos.x;
+      } else if (d2 <= pr) {
+        activeScaleMode = 'value2';
+        scaleDragOffset = p2 - pos.x;
+      } else {
+        activeScaleMode = null;
+      }
+      if (activeScaleMode) {
+        activeScale = ctrl;
+        canvas.setPointerCapture(e.pointerId);
+        e.stopPropagation();
+        e.preventDefault();
+      }
     } else if (ctrl.type === 'checkbox') {
       const newVal = !ctrl.sidebarEl.checked;
       ctrl.sidebarEl.checked = newVal;
@@ -133,26 +222,56 @@ export function setupCanvasControls(
 
   function onPointerMove(e: PointerEvent) {
     if (!activeSlider) return;
-    const pos = aggPos(canvas, e);
+    const pos = aggPos(canvas, e, options);
     const v = sliderValue(activeSlider, pos.x);
     updateSlider(activeSlider, v);
     e.stopPropagation();
     e.preventDefault();
   }
 
+  function onPointerMoveScale(e: PointerEvent) {
+    if (!activeScale || !activeScaleMode) return;
+    const pos = aggPos(canvas, e, options);
+    const scale = activeScale;
+    const { xs1, xs2, isHorizontal } = scaleInner(scale);
+    if (!isHorizontal) return;
+    const { v1, v2 } = scaleRangeValues(scale);
+    const dv = v2 - v1;
+    const toValue = (x: number) => {
+      let t = (x - xs1) / (xs2 - xs1);
+      t = Math.max(0, Math.min(1, t));
+      return scale.min + t * (scale.max - scale.min);
+    };
+    const x = pos.x + scaleDragOffset;
+    if (activeScaleMode === 'value1') {
+      updateScale(scale, toValue(x), v2);
+    } else if (activeScaleMode === 'value2') {
+      updateScale(scale, v1, toValue(x));
+    } else {
+      const nextV1 = toValue(x);
+      updateScale(scale, nextV1, nextV1 + dv);
+    }
+    e.stopPropagation();
+    e.preventDefault();
+  }
+
   function onPointerUp() {
     activeSlider = null;
+    activeScale = null;
+    activeScaleMode = null;
   }
 
   // Use capture phase so we can intercept before vertex drag handlers
   canvas.addEventListener('pointerdown', onPointerDown, true);
   canvas.addEventListener('pointermove', onPointerMove, true);
+  canvas.addEventListener('pointermove', onPointerMoveScale, true);
   canvas.addEventListener('pointerup', onPointerUp, true);
   canvas.addEventListener('pointercancel', onPointerUp, true);
 
   return () => {
     canvas.removeEventListener('pointerdown', onPointerDown, true);
     canvas.removeEventListener('pointermove', onPointerMove, true);
+    canvas.removeEventListener('pointermove', onPointerMoveScale, true);
     canvas.removeEventListener('pointerup', onPointerUp, true);
     canvas.removeEventListener('pointercancel', onPointerUp, true);
   };

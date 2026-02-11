@@ -222,11 +222,10 @@ fn cmd_verify(args: &[String]) {
         process::exit(1);
     }
 
-    let mut cpp_buf = load_image(Path::new(&cpp_raw_path)).expect("Failed to load C++ output");
+    let cpp_buf = load_image(Path::new(&cpp_raw_path)).expect("Failed to load C++ output");
 
-    // The C++ renderer outputs with flip_y=true (negative stride), so the
-    // buffer rows are in reverse order. Flip to match Rust's top-down layout.
-    cpp_buf.flip_vertical();
+    // The headless C++ renderer writes top-down buffers (positive stride),
+    // matching Rust's layout, so no row flip is needed here.
 
     // Save C++ output as BMP for inspection
     let cpp_bmp_path = format!("{}_cpp_{}x{}.bmp", demo, width, height);

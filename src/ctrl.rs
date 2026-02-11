@@ -12,11 +12,13 @@
 use crate::basics::{
     is_stop, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP,
 };
+use crate::bspline::Bspline;
 use crate::color::Rgba8;
 use crate::conv_stroke::ConvStroke;
 use crate::ellipse::Ellipse;
 use crate::gsv_text::GsvText;
 use crate::math_stroke::{LineCap, LineJoin};
+use crate::path_storage::PathStorage;
 use crate::pixfmt_rgba::PixfmtRgba32;
 use crate::rasterizer_scanline_aa::RasterizerScanlineAa;
 use crate::renderer_base::RendererBase;
@@ -444,6 +446,198 @@ impl VertexSource for SliderCtrl {
 }
 
 // ============================================================================
+// ScaleCtrl — dual-handle range slider
+// ============================================================================
+
+/// Two-handle range slider (min/max selector).
+///
+/// Renders 5 paths: background, border, selected range, left handle, right handle.
+pub struct ScaleCtrl {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    xs1: f64,
+    ys1: f64,
+    xs2: f64,
+    ys2: f64,
+    border_width: f64,
+    border_extra: f64,
+    value1: f64,
+    value2: f64,
+    min_delta: f64,
+    colors: [Rgba8; 5],
+    vertices: Vec<(f64, f64, u32)>,
+    vertex_idx: usize,
+}
+
+impl ScaleCtrl {
+    pub fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
+        let mut s = Self {
+            x1,
+            y1,
+            x2,
+            y2,
+            xs1: 0.0,
+            ys1: 0.0,
+            xs2: 0.0,
+            ys2: 0.0,
+            border_width: 1.0,
+            border_extra: (y2 - y1) * 0.5,
+            value1: 0.3,
+            value2: 0.7,
+            min_delta: 0.01,
+            colors: [
+                Rgba8::new(255, 230, 204, 255), // background
+                Rgba8::new(0, 0, 0, 255),       // border
+                Rgba8::new(180, 120, 120, 180), // selected range
+                Rgba8::new(204, 0, 0, 180),     // left handle
+                Rgba8::new(204, 0, 0, 180),     // right handle
+            ],
+            vertices: Vec::new(),
+            vertex_idx: 0,
+        };
+        s.calc_box();
+        s
+    }
+
+    fn calc_box(&mut self) {
+        self.xs1 = self.x1 + self.border_width;
+        self.ys1 = self.y1 + self.border_width;
+        self.xs2 = self.x2 - self.border_width;
+        self.ys2 = self.y2 - self.border_width;
+    }
+
+    pub fn set_min_delta(&mut self, d: f64) {
+        self.min_delta = d.clamp(0.0, 1.0);
+        self.set_value1(self.value1);
+        self.set_value2(self.value2);
+    }
+
+    pub fn value1(&self) -> f64 {
+        self.value1
+    }
+
+    pub fn value2(&self) -> f64 {
+        self.value2
+    }
+
+    pub fn set_value1(&mut self, v: f64) {
+        let max_v1 = (self.value2 - self.min_delta).clamp(0.0, 1.0);
+        self.value1 = v.clamp(0.0, max_v1);
+    }
+
+    pub fn set_value2(&mut self, v: f64) {
+        let min_v2 = (self.value1 + self.min_delta).clamp(0.0, 1.0);
+        self.value2 = v.clamp(min_v2, 1.0);
+    }
+
+    fn calc_background(&mut self) {
+        self.vertices.clear();
+        let be = self.border_extra;
+        self.vertices
+            .push((self.x1 - be, self.y1 - be, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y1 - be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y2 + be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 - be, self.y2 + be, PATH_CMD_LINE_TO));
+    }
+
+    fn calc_border(&mut self) {
+        self.vertices.clear();
+        self.vertices.push((self.x1, self.y1, PATH_CMD_MOVE_TO));
+        self.vertices.push((self.x2, self.y1, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x2, self.y2, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x1, self.y2, PATH_CMD_LINE_TO));
+        self.vertices.push((
+            self.x1 + self.border_width,
+            self.y1 + self.border_width,
+            PATH_CMD_MOVE_TO,
+        ));
+        self.vertices.push((
+            self.x1 + self.border_width,
+            self.y2 - self.border_width,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices.push((
+            self.x2 - self.border_width,
+            self.y2 - self.border_width,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices.push((
+            self.x2 - self.border_width,
+            self.y1 + self.border_width,
+            PATH_CMD_LINE_TO,
+        ));
+    }
+
+    fn calc_selected_range(&mut self) {
+        self.vertices.clear();
+        let x1 = self.xs1 + (self.xs2 - self.xs1) * self.value1;
+        let x2 = self.xs1 + (self.xs2 - self.xs1) * self.value2;
+        self.vertices.push((x1, self.ys1, PATH_CMD_MOVE_TO));
+        self.vertices.push((x2, self.ys1, PATH_CMD_LINE_TO));
+        self.vertices.push((x2, self.ys2, PATH_CMD_LINE_TO));
+        self.vertices.push((x1, self.ys2, PATH_CMD_LINE_TO));
+    }
+
+    fn calc_handle(&mut self, v: f64) {
+        self.vertices.clear();
+        let cx = self.xs1 + (self.xs2 - self.xs1) * v;
+        let cy = (self.ys1 + self.ys2) * 0.5;
+        let r = (self.y2 - self.y1).max(1.0);
+        let mut ell = Ellipse::new(cx, cy, r, r, 32, false);
+        ell.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = ell.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+}
+
+impl Ctrl for ScaleCtrl {
+    fn num_paths(&self) -> u32 {
+        5
+    }
+
+    fn color(&self, path_id: u32) -> Rgba8 {
+        self.colors[path_id.min(4) as usize]
+    }
+}
+
+impl VertexSource for ScaleCtrl {
+    fn rewind(&mut self, path_id: u32) {
+        self.vertex_idx = 0;
+        match path_id {
+            0 => self.calc_background(),
+            1 => self.calc_border(),
+            2 => self.calc_selected_range(),
+            3 => self.calc_handle(self.value1),
+            4 => self.calc_handle(self.value2),
+            _ => self.vertices.clear(),
+        }
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        if self.vertex_idx < self.vertices.len() {
+            let (vx, vy, cmd) = self.vertices[self.vertex_idx];
+            *x = vx;
+            *y = vy;
+            self.vertex_idx += 1;
+            cmd
+        } else {
+            PATH_CMD_STOP
+        }
+    }
+}
+
+// ============================================================================
 // CboxCtrl — checkbox
 // ============================================================================
 
@@ -832,6 +1026,351 @@ impl VertexSource for RboxCtrl {
             _ => {
                 self.vertices.clear();
             }
+        }
+    }
+
+    fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+        if self.vertex_idx < self.vertices.len() {
+            let (vx, vy, cmd) = self.vertices[self.vertex_idx];
+            *x = vx;
+            *y = vy;
+            self.vertex_idx += 1;
+            cmd
+        } else {
+            PATH_CMD_STOP
+        }
+    }
+}
+
+// ============================================================================
+// SplineCtrl — spline editor/control
+// ============================================================================
+
+/// Spline control rendered via AGG.
+///
+/// Renders 5 paths: background, border, curve, inactive points, active point.
+///
+/// Port of C++ `spline_ctrl_impl` / `spline_ctrl<ColorT>`.
+pub struct SplineCtrl {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    num_pnt: usize,
+    xp: [f64; 32],
+    yp: [f64; 32],
+    spline_values: [f64; 256],
+    spline_values8: [u8; 256],
+    border_width: f64,
+    border_extra: f64,
+    curve_width: f64,
+    point_size: f64,
+    xs1: f64,
+    ys1: f64,
+    xs2: f64,
+    ys2: f64,
+    active_pnt: i32,
+    colors: [Rgba8; 5],
+    vertices: Vec<(f64, f64, u32)>,
+    vertex_idx: usize,
+}
+
+impl SplineCtrl {
+    pub fn new(x1: f64, y1: f64, x2: f64, y2: f64, num_pnt: usize) -> Self {
+        let n = num_pnt.clamp(4, 32);
+        let mut s = Self {
+            x1,
+            y1,
+            x2,
+            y2,
+            num_pnt: n,
+            xp: [0.0; 32],
+            yp: [0.0; 32],
+            spline_values: [0.0; 256],
+            spline_values8: [0; 256],
+            border_width: 1.0,
+            border_extra: 0.0,
+            curve_width: 1.0,
+            point_size: 3.0,
+            xs1: 0.0,
+            ys1: 0.0,
+            xs2: 0.0,
+            ys2: 0.0,
+            active_pnt: -1,
+            colors: [
+                Rgba8::new(255, 255, 230, 255), // background
+                Rgba8::new(0, 0, 0, 255),       // border
+                Rgba8::new(0, 0, 0, 255),       // curve
+                Rgba8::new(0, 0, 0, 255),       // inactive points
+                Rgba8::new(255, 0, 0, 255),     // active point
+            ],
+            vertices: Vec::new(),
+            vertex_idx: 0,
+        };
+        for i in 0..s.num_pnt {
+            s.xp[i] = i as f64 / (s.num_pnt - 1) as f64;
+            s.yp[i] = 0.5;
+        }
+        s.calc_spline_box();
+        s.update_spline();
+        s
+    }
+
+    pub fn border_width(&mut self, t: f64, extra: f64) {
+        self.border_width = t;
+        self.border_extra = extra;
+        self.calc_spline_box();
+    }
+
+    pub fn curve_width(&mut self, t: f64) {
+        self.curve_width = t;
+    }
+
+    pub fn point_size(&mut self, s: f64) {
+        self.point_size = s;
+    }
+
+    pub fn active_point(&mut self, i: i32) {
+        self.active_pnt = i;
+    }
+
+    pub fn background_color(&mut self, c: Rgba8) {
+        self.colors[0] = c;
+    }
+
+    pub fn border_color(&mut self, c: Rgba8) {
+        self.colors[1] = c;
+    }
+
+    pub fn curve_color(&mut self, c: Rgba8) {
+        self.colors[2] = c;
+    }
+
+    pub fn inactive_pnt_color(&mut self, c: Rgba8) {
+        self.colors[3] = c;
+    }
+
+    pub fn active_pnt_color(&mut self, c: Rgba8) {
+        self.colors[4] = c;
+    }
+
+    fn calc_spline_box(&mut self) {
+        self.xs1 = self.x1 + self.border_width;
+        self.ys1 = self.y1 + self.border_width;
+        self.xs2 = self.x2 - self.border_width;
+        self.ys2 = self.y2 - self.border_width;
+    }
+
+    fn set_xp(&mut self, idx: usize, mut val: f64) {
+        val = val.clamp(0.0, 1.0);
+        if idx == 0 {
+            val = 0.0;
+        } else if idx == self.num_pnt - 1 {
+            val = 1.0;
+        } else {
+            if val < self.xp[idx - 1] + 0.001 {
+                val = self.xp[idx - 1] + 0.001;
+            }
+            if val > self.xp[idx + 1] - 0.001 {
+                val = self.xp[idx + 1] - 0.001;
+            }
+        }
+        self.xp[idx] = val;
+    }
+
+    fn set_yp(&mut self, idx: usize, val: f64) {
+        self.yp[idx] = val.clamp(0.0, 1.0);
+    }
+
+    pub fn point(&mut self, idx: usize, x: f64, y: f64) {
+        if idx < self.num_pnt {
+            self.set_xp(idx, x);
+            self.set_yp(idx, y);
+        }
+    }
+
+    pub fn value(&self, x: f64) -> f64 {
+        let mut s = Bspline::new();
+        s.init(&self.xp[..self.num_pnt], &self.yp[..self.num_pnt]);
+        s.get(x).clamp(0.0, 1.0)
+    }
+
+    pub fn value_at_point(&mut self, idx: usize, y: f64) {
+        if idx < self.num_pnt {
+            self.set_yp(idx, y);
+        }
+    }
+
+    pub fn x(&self, idx: usize) -> f64 {
+        self.xp[idx]
+    }
+
+    pub fn y(&self, idx: usize) -> f64 {
+        self.yp[idx]
+    }
+
+    pub fn update_spline(&mut self) {
+        let mut spline = Bspline::new();
+        spline.init(&self.xp[..self.num_pnt], &self.yp[..self.num_pnt]);
+        for i in 0..256 {
+            let v = spline.get(i as f64 / 255.0).clamp(0.0, 1.0);
+            self.spline_values[i] = v;
+            self.spline_values8[i] = (v * 255.0) as u8;
+        }
+    }
+
+    pub fn spline(&self) -> &[f64; 256] {
+        &self.spline_values
+    }
+
+    pub fn spline8(&self) -> &[u8; 256] {
+        &self.spline_values8
+    }
+
+    fn calc_xp(&self, idx: usize) -> f64 {
+        self.xs1 + (self.xs2 - self.xs1) * self.xp[idx]
+    }
+
+    fn calc_yp(&self, idx: usize) -> f64 {
+        self.ys1 + (self.ys2 - self.ys1) * self.yp[idx]
+    }
+
+    fn calc_background(&mut self) {
+        self.vertices.clear();
+        let be = self.border_extra;
+        self.vertices
+            .push((self.x1 - be, self.y1 - be, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y1 - be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y2 + be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 - be, self.y2 + be, PATH_CMD_LINE_TO));
+    }
+
+    fn calc_border(&mut self) {
+        self.vertices.clear();
+        self.vertices.push((self.x1, self.y1, PATH_CMD_MOVE_TO));
+        self.vertices.push((self.x2, self.y1, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x2, self.y2, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x1, self.y2, PATH_CMD_LINE_TO));
+        self.vertices.push((
+            self.x1 + self.border_width,
+            self.y1 + self.border_width,
+            PATH_CMD_MOVE_TO,
+        ));
+        self.vertices.push((
+            self.x1 + self.border_width,
+            self.y2 - self.border_width,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices.push((
+            self.x2 - self.border_width,
+            self.y2 - self.border_width,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices.push((
+            self.x2 - self.border_width,
+            self.y1 + self.border_width,
+            PATH_CMD_LINE_TO,
+        ));
+    }
+
+    fn calc_curve(&mut self) {
+        self.vertices.clear();
+        let mut path = PathStorage::new();
+        path.move_to(self.xs1, self.ys1 + (self.ys2 - self.ys1) * self.spline_values[0]);
+        for i in 1..256 {
+            path.line_to(
+                self.xs1 + (self.xs2 - self.xs1) * i as f64 / 255.0,
+                self.ys1 + (self.ys2 - self.ys1) * self.spline_values[i],
+            );
+        }
+        let mut stroke = ConvStroke::new(&mut path);
+        stroke.set_width(self.curve_width);
+        stroke.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = stroke.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+
+    fn calc_inactive_points(&mut self) {
+        self.vertices.clear();
+        for i in 0..self.num_pnt {
+            if i as i32 == self.active_pnt {
+                continue;
+            }
+            let mut ell = Ellipse::new(
+                self.calc_xp(i),
+                self.calc_yp(i),
+                self.point_size,
+                self.point_size,
+                32,
+                false,
+            );
+            ell.rewind(0);
+            loop {
+                let (mut x, mut y) = (0.0, 0.0);
+                let cmd = ell.vertex(&mut x, &mut y);
+                if is_stop(cmd) {
+                    break;
+                }
+                self.vertices.push((x, y, cmd));
+            }
+        }
+    }
+
+    fn calc_active_point(&mut self) {
+        self.vertices.clear();
+        if self.active_pnt < 0 || self.active_pnt as usize >= self.num_pnt {
+            return;
+        }
+        let i = self.active_pnt as usize;
+        let mut ell = Ellipse::new(
+            self.calc_xp(i),
+            self.calc_yp(i),
+            self.point_size,
+            self.point_size,
+            32,
+            false,
+        );
+        ell.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = ell.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            self.vertices.push((x, y, cmd));
+        }
+    }
+}
+
+impl Ctrl for SplineCtrl {
+    fn num_paths(&self) -> u32 {
+        5
+    }
+
+    fn color(&self, path_id: u32) -> Rgba8 {
+        self.colors[path_id.min(4) as usize]
+    }
+}
+
+impl VertexSource for SplineCtrl {
+    fn rewind(&mut self, path_id: u32) {
+        self.vertex_idx = 0;
+        match path_id {
+            0 => self.calc_background(),
+            1 => self.calc_border(),
+            2 => self.calc_curve(),
+            3 => self.calc_inactive_points(),
+            4 => self.calc_active_point(),
+            _ => self.vertices.clear(),
         }
     }
 
@@ -1514,6 +2053,42 @@ mod tests {
     fn test_slider_ctrl_num_paths() {
         let s = SliderCtrl::new(5.0, 5.0, 300.0, 12.0);
         assert_eq!(s.num_paths(), 6);
+    }
+
+    #[test]
+    fn test_scale_ctrl_defaults() {
+        let s = ScaleCtrl::new(5.0, 5.0, 395.0, 12.0);
+        assert!((s.value1() - 0.3).abs() < 1e-10);
+        assert!((s.value2() - 0.7).abs() < 1e-10);
+        assert_eq!(s.num_paths(), 5);
+    }
+
+    #[test]
+    fn test_scale_ctrl_setters_clamp_and_gap() {
+        let mut s = ScaleCtrl::new(5.0, 5.0, 395.0, 12.0);
+        s.set_min_delta(0.1);
+        s.set_value1(0.95);
+        assert!(s.value1() <= s.value2() - 0.1 + 1e-10);
+        s.set_value2(-1.0);
+        assert!(s.value2() >= s.value1() + 0.1 - 1e-10);
+    }
+
+    #[test]
+    fn test_scale_ctrl_paths_emit_vertices() {
+        let mut s = ScaleCtrl::new(5.0, 5.0, 395.0, 12.0);
+        for path_id in 0..5 {
+            s.rewind(path_id);
+            let mut seen = 0;
+            loop {
+                let (mut x, mut y) = (0.0, 0.0);
+                let cmd = s.vertex(&mut x, &mut y);
+                if is_stop(cmd) {
+                    break;
+                }
+                seen += 1;
+            }
+            assert!(seen > 0, "expected vertices for path {}", path_id);
+        }
     }
 
     #[test]

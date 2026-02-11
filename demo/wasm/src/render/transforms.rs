@@ -13,10 +13,12 @@ use agg_rust::ctrl::{render_ctrl, SliderCtrl, RboxCtrl, GammaCtrl, CboxCtrl, Ctr
 use agg_rust::ellipse::Ellipse;
 use agg_rust::embedded_raster_fonts;
 use agg_rust::font_cache::FontCacheManager;
-use agg_rust::glyph_raster_bin::GlyphRasterBin;
+use agg_rust::glyph_raster_bin::{GlyphRasterBin, GlyphRect};
+use agg_rust::gradient_lut::GradientLinearColor;
 use agg_rust::gsv_text::GsvText;
+use agg_rust::math::fast_sqrt;
 use agg_rust::path_storage::PathStorage;
-use agg_rust::pixfmt_rgba::PixfmtRgba32;
+use agg_rust::pixfmt_rgba::{PixelFormat, PixfmtRgba32};
 use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
 use agg_rust::renderer_base::RendererBase;
 use agg_rust::renderer_raster_text::render_raster_htext_solid;
@@ -24,6 +26,7 @@ use agg_rust::rasterizer_compound_aa::RasterizerCompoundAa;
 use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid, SpanGenerator};
 use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::scanline_u::ScanlineU8;
+use agg_rust::span_gradient::GradientFunction;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
@@ -37,12 +40,16 @@ use super::setup_renderer;
 /// Embedded Liberation Serif Italic font (SIL OFL license).
 /// Metrically compatible with Times New Roman Italic (timesi.ttf) used by the C++ demo.
 static LIBERATION_SERIF_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSerif-Italic.ttf");
-/// Embedded Liberation Serif Regular font.
-static LIBERATION_SERIF_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationSerif-Regular.ttf");
-/// Embedded Liberation Sans Regular font.
-static LIBERATION_SANS_REGULAR: &[u8] = include_bytes!("../../fonts/LiberationSans-Regular.ttf");
-/// Embedded Liberation Sans Italic font.
-static LIBERATION_SANS_ITALIC: &[u8] = include_bytes!("../../fonts/LiberationSans-Italic.ttf");
+/// Embedded C++-matching typefaces used by truetype_lcd.cpp.
+static ARIAL_REGULAR: &[u8] = include_bytes!("../../fonts/Arial-Regular.ttf");
+static ARIAL_ITALIC: &[u8] = include_bytes!("../../fonts/Arial-Italic.ttf");
+static TAHOMA_REGULAR: &[u8] = include_bytes!("../../fonts/Tahoma-Regular.ttf");
+static VERDANA_REGULAR: &[u8] = include_bytes!("../../fonts/Verdana-Regular.ttf");
+static VERDANA_ITALIC: &[u8] = include_bytes!("../../fonts/Verdana-Italic.ttf");
+static TIMES_REGULAR: &[u8] = include_bytes!("../../fonts/TimesNewRoman-Regular.ttf");
+static TIMES_ITALIC: &[u8] = include_bytes!("../../fonts/TimesNewRoman-Italic.ttf");
+static GEORGIA_REGULAR: &[u8] = include_bytes!("../../fonts/Georgia-Regular.ttf");
+static GEORGIA_ITALIC: &[u8] = include_bytes!("../../fonts/Georgia-Italic.ttf");
 
 // ============================================================================
 // Raster Text
@@ -102,25 +109,149 @@ pub fn raster_text(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     for &(font_data, name) in fonts {
         glyph.set_font(font_data);
         let text = format!("A quick brown fox jumps over the lazy dog 0123456789: {}", name);
-        render_raster_htext_solid(&mut rb, &mut glyph, 5.0, y, &text, &black, true);
+        render_raster_htext_solid(&mut rb, &mut glyph, 5.0, y, &text, &black, false);
         y += glyph.height() + 1.0;
     }
 
-    // Render gradient text at the bottom using GsvText + ConvStroke
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-    let mut text = GsvText::new();
-    text.size(12.0, 0.0);
-    text.start_point(5.0, height as f64 - 20.0);
-    text.text("RASTER TEXT: All 34 embedded bitmap fonts displayed above");
-    let mut text_stroke = ConvStroke::new(&mut text);
-    text_stroke.set_width(1.0);
-    ras.reset();
-    ras.add_path(&mut text_stroke, 0);
-    let dark_red = Rgba8::new(128, 0, 0, 255);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &dark_red);
+    // Render gradient raster text matching C++ renderer_raster_htext pipeline.
+    let mut grad_func = GradientSineRepeatAdaptor::new();
+    grad_func.set_periods(5.0);
+    let color_func = GradientLinearColor::new(
+        Rgba8::new(255, 0, 0, 255),
+        Rgba8::new(0, 128, 0, 255),
+        256,
+    );
+    let inter = SpanInterpolatorLinear::new(TransAffine::new());
+    let mut span_gen = RasterTextGradientSpan::new(inter, grad_func, &color_func, 0.0, 150.0);
+    render_raster_htext_span(
+        &mut rb,
+        &mut glyph,
+        5.0,
+        465.0,
+        "RADIAL REPEATING GRADIENT: A quick brown fox jumps over the lazy dog",
+        &mut span_gen,
+        false,
+    );
 
     buf
+}
+
+struct GradientSineRepeatAdaptor {
+    periods: f64,
+}
+
+impl GradientSineRepeatAdaptor {
+    fn new() -> Self {
+        Self {
+            periods: std::f64::consts::PI * 2.0,
+        }
+    }
+
+    fn set_periods(&mut self, periods: f64) {
+        self.periods = periods * std::f64::consts::PI * 2.0;
+    }
+}
+
+impl GradientFunction for GradientSineRepeatAdaptor {
+    fn calculate(&self, x: i32, y: i32, d: i32) -> i32 {
+        let xx = x as i64 * x as i64;
+        let yy = y as i64 * y as i64;
+        let sum = (xx + yy).min(u32::MAX as i64) as u32;
+        let dist = fast_sqrt(sum) as f64;
+        (((1.0 + (dist * self.periods / d as f64).sin()) * d as f64) / 2.0) as i32
+    }
+}
+
+struct RasterTextGradientSpan<'a, G, F> {
+    interpolator: SpanInterpolatorLinear,
+    gradient_function: G,
+    color_function: &'a F,
+    d1: i32,
+    d2: i32,
+}
+
+impl<'a, G: GradientFunction, F: agg_rust::gradient_lut::ColorFunction> RasterTextGradientSpan<'a, G, F> {
+    fn new(
+        interpolator: SpanInterpolatorLinear,
+        gradient_function: G,
+        color_function: &'a F,
+        d1: f64,
+        d2: f64,
+    ) -> Self {
+        Self {
+            interpolator,
+            gradient_function,
+            color_function,
+            d1: (d1 * 16.0).round() as i32,
+            d2: (d2 * 16.0).round() as i32,
+        }
+    }
+}
+
+impl<'a, G, F> SpanGenerator for RasterTextGradientSpan<'a, G, F>
+where
+    G: GradientFunction,
+    F: agg_rust::gradient_lut::ColorFunction,
+    F::Color: Copy,
+{
+    type Color = F::Color;
+
+    fn prepare(&mut self) {}
+
+    fn generate(&mut self, span: &mut [F::Color], x: i32, y: i32, len: u32) {
+        const DOWNSCALE_SHIFT: i32 = 4;
+        let dd = (self.d2 - self.d1).max(1);
+        self.interpolator.begin(x as f64 + 0.5, y as f64 + 0.5, len);
+        let color_size = self.color_function.size() as i32;
+
+        for pixel in span.iter_mut().take(len as usize) {
+            let mut ix = 0i32;
+            let mut iy = 0i32;
+            self.interpolator.coordinates(&mut ix, &mut iy);
+            let d = self.gradient_function.calculate(ix >> DOWNSCALE_SHIFT, iy >> DOWNSCALE_SHIFT, self.d2);
+            let d = (((d - self.d1) * color_size) / dd).clamp(0, color_size - 1);
+            *pixel = self.color_function.get(d as usize);
+            self.interpolator.next();
+        }
+    }
+}
+
+fn render_raster_htext_span<PF, SG>(
+    ren: &mut RendererBase<PF>,
+    glyph: &mut GlyphRasterBin,
+    x: f64,
+    y: f64,
+    text: &str,
+    span_gen: &mut SG,
+    flip: bool,
+) where
+    PF: PixelFormat<ColorType = SG::Color>,
+    SG: SpanGenerator,
+    SG::Color: Default + Clone,
+{
+    let mut x = x;
+    let mut y = y;
+    let mut r = GlyphRect::default();
+
+    for ch in text.bytes() {
+        glyph.prepare(&mut r, x, y, ch as u32, flip);
+        if r.x2 >= r.x1 {
+            span_gen.prepare();
+            let row_len = (r.x2 - r.x1 + 1) as usize;
+            for i in r.y1..=r.y2 {
+                let covers = if flip {
+                    glyph.span((r.y2 - i) as u32)
+                } else {
+                    glyph.span((i - r.y1) as u32)
+                };
+                let mut colors = vec![SG::Color::default(); row_len];
+                span_gen.generate(&mut colors, r.x1, i, row_len as u32);
+                ren.blend_color_hspan(r.x1, i, row_len as i32, &colors, covers, 0);
+            }
+        }
+        x += r.dx;
+        y += r.dy;
+    }
 }
 
 // ============================================================================
@@ -1550,34 +1681,33 @@ fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
     width_val: f64,
     interval: f64,
 ) -> f64 {
+    const SCALE_X: f64 = 16.0;
     let color = if invert {
         Rgba8::new(255, 255, 255, 255)
     } else {
         Rgba8::new(0, 0, 0, 255)
     };
 
-    // Our buffer uses top-down coordinates (y=0 at top), unlike C++ which uses
-    // flip_y (y=0 at bottom). We set flip_y on the font engine so glyph outlines
-    // match our coordinate system. We track pen_x in subpixel space (3x for LCD,
-    // 1x for grayscale). Without the C++ 16x hinting trick, our coordinate math
-    // is simpler: pen_x directly represents the subpixel position.
     let sp_scale = subpixel_scale as f64;
 
-    // Set font parameters — scale_x stretches outlines horizontally
+    // Match C++ truetype_lcd.cpp exactly:
+    //   m_feng.scale_x(16 * subpixel_scale)
+    //   x is tracked in this scaled space and converted back by /16 in transform.
     fman.engine_mut().set_height(height);
-    fman.engine_mut().set_scale_x(sp_scale);
+    fman.engine_mut().set_scale_x(SCALE_X * sp_scale);
     fman.engine_mut().set_hinting(hinting);
-    fman.engine_mut().set_flip_y(true); // top-down screen coords
+    // Match C++ truetype_lcd.cpp: app uses flip_y at platform level,
+    // while draw_text itself keeps the font engine in non-flipped mode.
+    fman.engine_mut().set_flip_y(false);
     fman.reset_cache();
 
-    // pen_x tracks relative advance from start_x, in subpixel space
     let start_x = x * sp_scale;
-    let mut pen_x = 0.0_f64;
+    let mut pen_x = start_x;
 
     for ch in text.chars() {
         if ch == '\n' {
-            pen_x = 0.0;
-            y += height * 1.25; // top-down: move DOWN for next line
+            pen_x = start_x;
+            y -= height * 1.25;
             continue;
         }
 
@@ -1589,7 +1719,7 @@ fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
         let (adv_x, adv_y, data_type) = glyph_info;
 
         if kerning {
-            fman.add_kerning(char_code, &mut pen_x, &mut y);
+            let _ = fman.add_kerning(char_code, &mut pen_x, &mut y);
         }
 
         fman.init_embedded_adaptors(char_code, 0.0, 0.0);
@@ -1597,11 +1727,11 @@ fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
         if data_type == agg_rust::font_engine::GlyphDataType::Outline {
             let ty = if hinting { (y + 0.5).floor() } else { y };
 
-            // Build transform: scale(width, 1) * skew(faux_italic, 0) * translate(pos)
-            // pen_x is in subpixel space; start_x + pen_x gives absolute position
-            let mut mtx = TransAffine::new_scaling(width_val, 1.0);
+            // C++ transform order:
+            //   scale(width/16, 1) * skew(faux_italic*subpixel/3, 0) * translate(start_x + x/16, y)
+            let mut mtx = TransAffine::new_scaling(width_val / SCALE_X, 1.0);
             mtx *= TransAffine::new_skewing(faux_italic * sp_scale / 3.0, 0.0);
-            mtx *= TransAffine::new_translation(start_x + pen_x, ty);
+            mtx *= TransAffine::new_translation(start_x + pen_x / SCALE_X, ty);
 
             let adaptor = fman.path_adaptor_mut();
             let mut curves = ConvCurve::new(adaptor);
@@ -1639,8 +1769,7 @@ fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
             render_scanlines_aa_solid(ras, sl, rb, &color);
         }
 
-        // Advance pen position
-        pen_x += adv_x + interval * sp_scale;
+        pen_x += adv_x + interval * SCALE_X * sp_scale;
         y += adv_y;
     }
 
@@ -1651,7 +1780,7 @@ fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
 ///
 /// Port of C++ truetype_lcd.cpp (truetype_test_02_win).
 /// Parameters:
-///   [0] typeface_idx: 0=Liberation Serif, 1=Liberation Sans
+///   [0] typeface_idx: 0=Arial, 1=Tahoma, 2=Verdana, 3=Times, 4=Georgia
 ///   [1] font_scale: 0.5..2.0 (default 1.0)
 ///   [2] faux_italic: -1..1 (default 0.0)
 ///   [3] faux_weight: -1..1 (default 0.0)
@@ -1681,10 +1810,14 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let kerning = params.get(10).copied().unwrap_or(1.0) > 0.5;
     let invert = params.get(11).copied().unwrap_or(0.0) > 0.5;
 
-    // Select font data based on typeface
+    // Select font data based on C++ typeface order.
+    // Tahoma italic isn't present on this system image; use regular for both.
     let (font_regular, font_italic): (&[u8], &[u8]) = match typeface_idx {
-        1 => (LIBERATION_SANS_REGULAR, LIBERATION_SANS_ITALIC),
-        _ => (LIBERATION_SERIF_REGULAR, LIBERATION_SERIF_ITALIC),
+        0 => (ARIAL_REGULAR, ARIAL_ITALIC),
+        1 => (TAHOMA_REGULAR, TAHOMA_REGULAR),
+        2 => (VERDANA_REGULAR, VERDANA_ITALIC),
+        3 => (TIMES_REGULAR, TIMES_ITALIC),
+        _ => (GEORGIA_REGULAR, GEORGIA_ITALIC),
     };
 
     // Step 1: Setup RGBA32 buffer and clear to white
@@ -1698,15 +1831,8 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut rb = RendererBase::new(pf);
         rb.clear(&Rgba8::new(255, 255, 255, 255));
         if invert {
-            // Fill the entire canvas with black (controls are in HTML sidebar)
-            rb.blend_bar(
-                0,
-                0,
-                width as i32,
-                height as i32,
-                &Rgba8::new(0, 0, 0, 255),
-                255,
-            );
+            // Match C++: invert only the text area below controls.
+            rb.blend_bar(0, 120, width as i32, height as i32, &Rgba8::new(0, 0, 0, 255), 255);
         }
     }
 
@@ -1723,14 +1849,11 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ];
 
     if grayscale {
-        // Grayscale rendering: standard RGBA32 pipeline at 1x scale
+        // Grayscale rendering: standard RGBA32 pipeline at 1x scale.
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
-        // Clip to full canvas (controls are in HTML sidebar, not on canvas)
-        ras.clip_box(0.0, 0.0, width as f64, height as f64);
-
-        // Top-down coords: start near top of canvas
-        let mut y = 20.0;
+        ras.clip_box(0.0, 120.0, (width * 3) as f64, height as f64);
+        let mut y = height as f64 - 20.0;
         for &(text, italic) in &texts {
             let font_data = if italic { font_italic } else { font_regular };
             let mut fman = FontCacheManager::from_data(font_data.to_vec())
@@ -1754,7 +1877,7 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 width_val,
                 interval,
             );
-            y += 7.0 + text_height; // top-down: move DOWN for next paragraph
+            y -= 7.0 + text_height;
         }
     } else {
         // LCD subpixel rendering: 3x horizontal resolution
@@ -1762,11 +1885,8 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let pf_lcd = PixfmtRgba32Lcd::new(&mut ra, &lut);
         let mut rb_lcd = RendererBase::new(pf_lcd);
 
-        // Clip box in 3x subpixel space, full canvas height
-        ras.clip_box(0.0, 0.0, (width * 3) as f64, height as f64);
-
-        // Top-down coords: start near top of canvas
-        let mut y = 20.0;
+        ras.clip_box(0.0, 120.0, (width * 3) as f64, height as f64);
+        let mut y = height as f64 - 20.0;
         for &(text, italic) in &texts {
             let font_data = if italic { font_italic } else { font_regular };
             let mut fman = FontCacheManager::from_data(font_data.to_vec())
@@ -1790,18 +1910,260 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 width_val,
                 interval,
             );
-            y += 7.0 + text_height; // top-down: move DOWN for next paragraph
+            y -= 7.0 + text_height;
         }
     }
 
-    // Step 3: Apply inverse gamma correction
-    // C++: pf.apply_gamma_inv(m_gamma_lut)
-    if (gamma_val - 1.0).abs() > 0.01 {
+    // Step 3: Apply inverse gamma correction to full buffer (C++ behavior).
+    {
         let gamma_lut = GammaLut::new_with_gamma(gamma_val);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.apply_gamma_inv(&gamma_lut);
     }
 
+    // Step 4: Render C++-style controls over the gamma-corrected image.
+    // The sidebar UI remains functional; this paints the same control visuals
+    // into the canvas so the output matches the C++ demo layout.
+    {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        ras.clip_box(0.0, 0.0, width as f64, height as f64);
+
+        let mut typeface = RboxCtrl::new(5.0, 5.0, 155.0, 110.0);
+        typeface.add_item("Arial");
+        typeface.add_item("Tahoma");
+        typeface.add_item("Verdana");
+        typeface.add_item("Times");
+        typeface.add_item("Georgia");
+        typeface.set_cur_item(typeface_idx.min(4) as i32);
+
+        let mut s_height = SliderCtrl::new(160.0, 10.0, 635.0, 17.0);
+        s_height.label("Font Scale=%.2f");
+        s_height.range(0.5, 2.0);
+        s_height.set_value(font_scale);
+
+        let mut s_faux_italic = SliderCtrl::new(160.0, 25.0, 635.0, 32.0);
+        s_faux_italic.label("Faux Italic=%.2f");
+        s_faux_italic.range(-1.0, 1.0);
+        s_faux_italic.set_value(faux_italic);
+
+        let mut s_faux_weight = SliderCtrl::new(160.0, 40.0, 635.0, 47.0);
+        s_faux_weight.label("Faux Weight=%.2f");
+        s_faux_weight.range(-1.0, 1.0);
+        s_faux_weight.set_value(faux_weight);
+
+        let mut s_interval = SliderCtrl::new(260.0, 55.0, 635.0, 62.0);
+        s_interval.label("Interval=%.3f");
+        s_interval.range(-0.2, 0.2);
+        s_interval.set_value(interval);
+
+        let mut s_width = SliderCtrl::new(260.0, 70.0, 635.0, 77.0);
+        s_width.label("Width=%.2f");
+        s_width.range(0.75, 1.25);
+        s_width.set_value(width_val);
+
+        let mut s_gamma = SliderCtrl::new(260.0, 85.0, 635.0, 92.0);
+        s_gamma.label("Gamma=%.2f");
+        s_gamma.range(0.5, 2.5);
+        s_gamma.set_value(gamma_val);
+
+        let mut s_primary = SliderCtrl::new(260.0, 100.0, 635.0, 107.0);
+        s_primary.label("Primary Weight=%.2f");
+        s_primary.range(0.0, 1.0);
+        s_primary.set_value(primary_weight);
+
+        let mut c_grayscale = CboxCtrl::new(160.0, 50.0, "Grayscale");
+        c_grayscale.set_status(grayscale);
+        let mut c_hinting = CboxCtrl::new(160.0, 65.0, "Hinting");
+        c_hinting.set_status(hinting);
+        let mut c_kerning = CboxCtrl::new(160.0, 80.0, "Kerning");
+        c_kerning.set_status(kerning);
+        let mut c_invert = CboxCtrl::new(160.0, 95.0, "Invert");
+        c_invert.set_status(invert);
+
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut typeface);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_height);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_faux_italic);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_faux_weight);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_interval);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_primary);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_hinting);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_kerning);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_invert);
+        render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_grayscale);
+    }
+
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{raster_text, truetype_test};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    #[test]
+    fn raster_text_contains_red_to_green_gradient_banner() {
+        let buf = raster_text(640, 480, &[]);
+        let mut has_red = false;
+        let mut has_green = false;
+
+        for px in buf.chunks_exact(4) {
+            let r = px[0];
+            let g = px[1];
+            let b = px[2];
+            let a = px[3];
+            if a == 0 {
+                continue;
+            }
+            if r > 170 && g < 90 && b < 90 {
+                has_red = true;
+            }
+            if g > 100 && r < 130 && b < 90 {
+                has_green = true;
+            }
+            if has_red && has_green {
+                break;
+            }
+        }
+
+        assert!(has_red, "expected vivid red pixels in gradient banner");
+        assert!(has_green, "expected green pixels in gradient banner");
+    }
+
+    #[test]
+    fn truetype_test_invert_only_affects_text_region() {
+        let w = 640u32;
+        let h = 560u32;
+        // [0..11]: default values with invert enabled.
+        let params = [4.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 / 3.0, 0.0, 1.0, 1.0, 1.0];
+        let buf = truetype_test(w, h, &params);
+
+        // Pick a pixel inside the control area (y < 120): should not be pure black.
+        let ctrl_i = ((20 * w + 20) * 4) as usize;
+        let ctrl_rgb = (buf[ctrl_i], buf[ctrl_i + 1], buf[ctrl_i + 2]);
+        assert_ne!(ctrl_rgb, (0, 0, 0), "control region should not be inverted");
+
+        // Pick a background pixel in the text area with no text: should be black after invert.
+        let text_i = ((150 * w + 630) * 4) as usize;
+        let text_rgb = (buf[text_i], buf[text_i + 1], buf[text_i + 2]);
+        assert_eq!(text_rgb, (0, 0, 0), "text region background should be inverted");
+    }
+
+    #[test]
+    fn truetype_test_renders_controls_in_top_panel() {
+        let w = 640u32;
+        let h = 560u32;
+        let params = [4.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 / 3.0, 0.0, 1.0, 1.0, 0.0];
+        let buf = truetype_test(w, h, &params);
+
+        // Sample the top panel and ensure not all pixels are white.
+        let mut non_white = 0usize;
+        for y in 0..120u32 {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                if !(buf[i] == 255 && buf[i + 1] == 255 && buf[i + 2] == 255) {
+                    non_white += 1;
+                }
+            }
+        }
+        assert!(non_white > 1000, "expected many control pixels in top panel, got {}", non_white);
+    }
+
+    fn load_raw_rgba(path: &Path) -> (u32, u32, Vec<u8>) {
+        let bytes = fs::read(path).expect("failed to read raw image");
+        assert!(bytes.len() >= 8, "raw image too small");
+        let width = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let height = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let expected = 8usize + (width as usize) * (height as usize) * 4usize;
+        assert!(
+            bytes.len() >= expected,
+            "raw image size mismatch: got {}, expected at least {}",
+            bytes.len(),
+            expected
+        );
+        (width, height, bytes[8..expected].to_vec())
+    }
+
+    #[test]
+    #[ignore = "requires local C++ renderer binary"]
+    fn raster_text_matches_cpp_reference() {
+        let width = 640u32;
+        let height = 480u32;
+        let rust = raster_text(width, height, &[]);
+
+        let default_cpp_exe = {
+            let manifest_dir =
+                PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()));
+            manifest_dir
+                .join("../../tools/cpp-renderer/build/Release/agg-render.exe")
+                .to_string_lossy()
+                .into_owned()
+        };
+        let cpp_exe = std::env::var("AGG_CPP_RENDERER").unwrap_or(default_cpp_exe);
+        assert!(
+            Path::new(&cpp_exe).exists(),
+            "C++ renderer not found at {} (set AGG_CPP_RENDERER to override)",
+            cpp_exe
+        );
+
+        let out_path: PathBuf = std::env::temp_dir().join("agg_raster_text_cpp.raw");
+        if out_path.exists() {
+            fs::remove_file(&out_path).expect("failed to remove old temp raw output");
+        }
+
+        let status = Command::new(&cpp_exe)
+            .args([
+                "raster_text",
+                &width.to_string(),
+                &height.to_string(),
+                out_path
+                    .to_str()
+                    .expect("temp path must be valid UTF-8"),
+            ])
+            .status()
+            .expect("failed to run C++ renderer");
+        assert!(status.success(), "C++ renderer exited with {}", status);
+
+        let (cpp_w, cpp_h, cpp) = load_raw_rgba(&out_path);
+        assert_eq!(cpp_w, width);
+        assert_eq!(cpp_h, height);
+
+        let mut different_pixels = 0usize;
+        let mut max_channel_diff = 0u8;
+        let mut first_diff: Option<(usize, usize, [u8; 4], [u8; 4])> = None;
+
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let i = (y * width as usize + x) * 4;
+                let a = [rust[i], rust[i + 1], rust[i + 2], rust[i + 3]];
+                let b = [cpp[i], cpp[i + 1], cpp[i + 2], cpp[i + 3]];
+                if a != b {
+                    different_pixels += 1;
+                    for c in 0..4 {
+                        let d = (a[c] as i16 - b[c] as i16).unsigned_abs() as u8;
+                        if d > max_channel_diff {
+                            max_channel_diff = d;
+                        }
+                    }
+                    if first_diff.is_none() {
+                        first_diff = Some((x, y, a, b));
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            different_pixels,
+            0,
+            "raster_text mismatch: {} differing pixels, max_channel_diff={}, first_diff={:?}",
+            different_pixels,
+            max_channel_diff,
+            first_diff
+        );
+    }
 }
 

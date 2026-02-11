@@ -215,7 +215,8 @@ impl FontEngine {
             for subtable in kern.subtables {
                 if subtable.horizontal && !subtable.has_cross_stream {
                     if let Some(value) = subtable.glyphs_kerning(first, second) {
-                        return value as f64 * scale;
+                        // Keep kerning in the same horizontal space as glyph advances.
+                        return value as f64 * scale * self.scale_x;
                     }
                 }
             }
@@ -357,5 +358,35 @@ mod tests {
         assert_eq!(c.vertices[5].2, PATH_CMD_CURVE4);
         assert_eq!(c.vertices[6].2, PATH_CMD_CURVE4);
         assert_eq!(c.vertices[7].2, PATH_CMD_END_POLY | PATH_FLAGS_CLOSE);
+    }
+
+    #[test]
+    fn test_kerning_scales_with_scale_x() {
+        let font = include_bytes!("../demo/wasm/fonts/LiberationSerif-Regular.ttf").to_vec();
+        let mut eng = FontEngine::from_data(font, 0).expect("font should parse");
+        eng.set_height(24.0);
+
+        let candidates = [('A', 'V'), ('T', 'o'), ('Y', 'o'), ('L', 'T')];
+        let mut found = None;
+
+        for (l, r) in candidates {
+            let left = eng.prepare_glyph(l as u32).expect("left glyph");
+            let right = eng.prepare_glyph(r as u32).expect("right glyph");
+            let k = eng.kerning(left.glyph_index, right.glyph_index);
+            if k.abs() > 1e-10 {
+                found = Some((left.glyph_index, right.glyph_index, k));
+                break;
+            }
+        }
+
+        let (left_idx, right_idx, k1) = found.expect("expected at least one non-zero kerning pair");
+        eng.set_scale_x(3.0);
+        let k3 = eng.kerning(left_idx, right_idx);
+        assert!(
+            (k3 - k1 * 3.0).abs() < 1e-8,
+            "expected kerning to scale with scale_x: k1={}, k3={}",
+            k1,
+            k3
+        );
     }
 }

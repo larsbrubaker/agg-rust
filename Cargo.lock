@@ -279,6 +279,7 @@ name = "pixel-compare"
 version = "0.1.0"
 dependencies = [
  "agg-rust",
+ "agg-wasm",
 ]
 
 [[package]]

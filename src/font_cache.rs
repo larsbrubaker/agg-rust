@@ -94,8 +94,13 @@ impl VertexSource for GlyphPathAdaptor {
 pub struct FontCacheManager {
     engine: FontEngine,
     cache: HashMap<u32, GlyphData>,
-    /// Glyph index of the previously accessed glyph (for kerning).
+    /// Glyph index used as the left-side glyph for the next kerning lookup.
     prev_glyph_index: Option<u16>,
+    /// Glyph index of the most recently requested glyph via `glyph()`.
+    ///
+    /// C++ `font_cache_manager` keeps "last glyph" separate from "previous glyph":
+    /// callers do `glyph(ch)` first, then `add_kerning(...)`.
+    last_glyph_index: Option<u16>,
     /// Path adaptor for the current glyph.
     path_adaptor: GlyphPathAdaptor,
 }
@@ -108,6 +113,7 @@ impl FontCacheManager {
             engine,
             cache: HashMap::new(),
             prev_glyph_index: None,
+            last_glyph_index: None,
             path_adaptor: GlyphPathAdaptor::new(),
         })
     }
@@ -127,17 +133,19 @@ impl FontCacheManager {
     pub fn reset_cache(&mut self) {
         self.cache.clear();
         self.prev_glyph_index = None;
+        self.last_glyph_index = None;
     }
 
     /// Reset the kerning state (call at the start of a new text run).
     pub fn reset_last_glyph(&mut self) {
         self.prev_glyph_index = None;
+        self.last_glyph_index = None;
     }
 
     /// Get a cached glyph, preparing it if not already cached.
     ///
     /// Returns `None` if the character has no glyph in this font.
-    /// Updates the internal state for subsequent `add_kerning()` calls.
+    /// Updates the "current glyph" state for a subsequent `add_kerning()` call.
     pub fn glyph(&mut self, char_code: u32) -> Option<&GlyphData> {
         // Ensure the glyph is in the cache
         if !self.cache.contains_key(&char_code) {
@@ -147,31 +155,38 @@ impl FontCacheManager {
 
         let glyph = self.cache.get(&char_code)?;
 
-        // Track glyph index for kerning
-        self.prev_glyph_index = Some(glyph.glyph_index);
+        // Track "last glyph" (current glyph), not "previous glyph".
+        // Kerning is applied later in add_kerning(), matching C++ call order.
+        self.last_glyph_index = Some(glyph.glyph_index);
 
         Some(glyph)
     }
 
-    /// Apply kerning between the previous glyph and the current glyph.
+    /// Apply kerning between the previous and current glyphs.
     ///
-    /// Adjusts `x` and `y` by the kerning offset. Must be called BEFORE
-    /// `glyph()` for the current character (uses the glyph_index stored
-    /// from the previous `glyph()` call and the char_code for the current one).
+    /// C++ call order is: `glyph(current)` then `add_kerning(...)`.
+    /// This method follows that behavior by using the most recent `glyph()`
+    /// result as the right-side glyph and the previously committed glyph as
+    /// the left-side glyph.
     ///
     /// Returns `true` if kerning was applied.
-    pub fn add_kerning(&self, char_code: u32, x: &mut f64, _y: &mut f64) -> bool {
-        if let Some(prev_idx) = self.prev_glyph_index {
-            // Look up glyph index for the current character
-            if let Some(glyph) = self.cache.get(&char_code) {
-                let kern = self.engine.kerning(prev_idx, glyph.glyph_index);
-                if kern.abs() > 1e-10 {
-                    *x += kern;
-                    return true;
-                }
+    pub fn add_kerning(&mut self, char_code: u32, x: &mut f64, _y: &mut f64) -> bool {
+        // Keep char_code in the API for compatibility with existing call sites
+        // and to mirror C++ usage where the current glyph is identified by code.
+        let _ = char_code;
+
+        let mut applied = false;
+        if let (Some(prev_idx), Some(last_idx)) = (self.prev_glyph_index, self.last_glyph_index) {
+            let kern = self.engine.kerning(prev_idx, last_idx);
+            if kern.abs() > 1e-10 {
+                *x += kern;
+                applied = true;
             }
         }
-        false
+
+        // Advance kerning chain for the next glyph pair.
+        self.prev_glyph_index = self.last_glyph_index;
+        applied
     }
 
     /// Initialize the path adaptor for a glyph at position (x, y).
@@ -253,5 +268,67 @@ mod tests {
         let cmd = adaptor.vertex(&mut x, &mut y);
         assert!(is_vertex(cmd));
         assert!((x - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_add_kerning_uses_previous_and_current_glyph() {
+        // Use the same embedded font as the demo code.
+        let mut fman = FontCacheManager::from_data(
+            include_bytes!("../demo/wasm/fonts/LiberationSerif-Regular.ttf").to_vec(),
+        )
+        .expect("font should load");
+        fman.engine_mut().set_height(24.0);
+        fman.reset_cache();
+
+        // Find a pair with non-zero kerning in this font to ensure the test
+        // actually verifies pairwise kerning semantics.
+        let candidates = [
+            ('A', 'V'),
+            ('A', 'W'),
+            ('T', 'o'),
+            ('T', 'a'),
+            ('Y', 'o'),
+            ('L', 'T'),
+        ];
+
+        let mut chosen: Option<(u32, u32, f64)> = None;
+        for (left, right) in candidates {
+            let left_code = left as u32;
+            let right_code = right as u32;
+
+            let left_idx = fman.glyph(left_code).expect("left glyph").glyph_index;
+            let right_idx = fman.glyph(right_code).expect("right glyph").glyph_index;
+            let k = fman.engine().kerning(left_idx, right_idx);
+            if k.abs() > 1e-10 {
+                chosen = Some((left_code, right_code, k));
+                break;
+            }
+        }
+
+        let (left_code, right_code, expected_kern) =
+            chosen.expect("expected at least one non-zero kerning pair");
+
+        // Reproduce C++/demo call order:
+        //   glyph(left); add_kerning(left)  -> no kerning (first glyph)
+        //   glyph(right); add_kerning(right)-> applies kerning(left,right)
+        fman.reset_last_glyph();
+        let left_advance = fman.glyph(left_code).expect("left glyph").advance_x;
+        let mut x = 0.0;
+        let mut y = 0.0;
+        assert!(
+            !fman.add_kerning(left_code, &mut x, &mut y),
+            "first glyph should not apply kerning",
+        );
+        x += left_advance;
+
+        fman.glyph(right_code).expect("right glyph");
+        let applied = fman.add_kerning(right_code, &mut x, &mut y);
+        assert!(applied, "expected kerning to be applied for the pair");
+        assert!(
+            (x - (left_advance + expected_kern)).abs() < 1e-8,
+            "x={} expected={}",
+            x,
+            left_advance + expected_kern
+        );
     }
 }

@@ -6,7 +6,6 @@ import { initWasm } from './wasm.ts';
 type DemoInit = (container: HTMLElement) => (() => void) | void;
 const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'lion': () => import('./demos/lion.ts'),
-  'shapes': () => import('./demos/shapes.ts'),
   'gradients': () => import('./demos/gradients.ts'),
   'gouraud': () => import('./demos/gouraud.ts'),
   'conv_stroke': () => import('./demos/conv_stroke.ts'),
@@ -19,7 +18,6 @@ const demoModules: Record<string, () => Promise<{ init: DemoInit }>> = {
   'rasterizers': () => import('./demos/rasterizers.ts'),
   'conv_contour': () => import('./demos/conv_contour.ts'),
   'conv_dash': () => import('./demos/conv_dash.ts'),
-  'gsv_text': () => import('./demos/gsv_text.ts'),
   'perspective': () => import('./demos/perspective.ts'),
   'image_fltr_graph': () => import('./demos/image_fltr_graph.ts'),
   'image1': () => import('./demos/image1.ts'),
@@ -103,7 +101,6 @@ const thumbnails: Record<string, string> = {
   'gradient_focal': 'gradient_focal.png',
   'gradients': 'gradients.png',
   'graph_test': 'graph_test.gif',
-  'gsv_text': 'raster_text.gif',
   'idea': 'idea.gif',
   'image_alpha': 'image_alpha.png',
   'image_filters': 'image_filters.jpg',
@@ -133,7 +130,6 @@ const thumbnails: Record<string, string> = {
   'rounded_rect': 'rounded_rect.gif',
   'scanline_boolean': 'scanline_boolean.gif',
   'scanline_boolean2': 'scanline_boolean2.gif',
-  'shapes': 'circles.gif',
   'simple_blur': 'simple_blur.gif',
   'trans_curve1': 'trans_curve1.gif',
   'trans_curve2': 'trans_curve2.gif',
@@ -184,7 +180,6 @@ function updateNav(route: string) {
 // Demo card definitions for the home page grid
 const demoCards: Array<{ route: string; title: string; desc: string }> = [
   { route: 'lion', title: 'Lion', desc: 'The classic AGG lion &mdash; a complex vector graphic with rotation and scaling controls.' },
-  { route: 'shapes', title: 'Shapes', desc: 'Anti-aliased circles, ellipses, and rounded rectangles at various sizes and colors.' },
   { route: 'gradients', title: 'Gradients', desc: 'Linear and radial gradient fills with multi-stop color interpolation.' },
   { route: 'gouraud', title: 'Gouraud Shading', desc: 'Smooth color interpolation across triangles using Gouraud shading.' },
   { route: 'conv_stroke', title: 'Conv Stroke', desc: 'Line joins (miter, round, bevel), caps, and dashed overlay with draggable vertices.' },
@@ -197,7 +192,6 @@ const demoCards: Array<{ route: string; title: string; desc: string }> = [
   { route: 'rasterizers', title: 'Rasterizers', desc: 'Filled and stroked triangle with alpha control.' },
   { route: 'conv_contour', title: 'Conv Contour', desc: 'Letter "A" with adjustable contour width and orientation control.' },
   { route: 'conv_dash', title: 'Conv Dash', desc: 'Dashed stroke patterns with cap styles on a draggable triangle.' },
-  { route: 'gsv_text', title: 'GSV Text', desc: 'Built-in vector text engine with adjustable size and stroke width.' },
   { route: 'perspective', title: 'Perspective', desc: 'Lion with bilinear/perspective quad transform &mdash; drag corners to warp.' },
   { route: 'image_fltr_graph', title: 'Filter Graph', desc: 'Image filter kernel weight function visualization &mdash; 16 filters.' },
   { route: 'image1', title: 'Image Transforms', desc: 'Procedural sphere image with affine rotation/scaling through a bilinear filter.' },

@@ -45,7 +45,7 @@ Left-drag translates center, right-drag computes angle+scale via atan2/distance.
 ### A3. Update sidebar to categorized sections
 ```
 Anti-Aliasing: aa_demo, aa_test, rasterizers, gamma_correction, gamma_tuner
-Rendering: lion, perspective, circles, shapes
+Rendering: lion, perspective, circles
 Gradients: gradients, gradient_focal, alpha_gradient
 Gouraud: gouraud
 Paths & Strokes: conv_stroke, conv_dash_marker, conv_contour, line_thickness
@@ -81,7 +81,7 @@ Advanced: graph_test
 - Params: `[x1,y1, x2,y2, x3,y3, x4,y4, width, show_pts, show_outline]`
 - TS: Pattern 1 (4 vertices), width slider, show_pts + show_outline checkboxes
 
-### B6. `shapes` — keep as-is (custom demo, not a C++ original)
+### B6. `shapes` — removed (custom demo, not a C++ original)
 
 ## Phase C: New Demos (batched by similarity)
 
