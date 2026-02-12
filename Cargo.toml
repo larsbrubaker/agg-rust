@@ -1,6 +1,6 @@
 [package]
 name = "agg-rust"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 rust-version = "1.70"
 license = "BSD-3-Clause"
