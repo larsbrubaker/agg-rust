@@ -1,8 +1,8 @@
 //! Basic demo render functions: lion, gradients, gouraud, conv_stroke,
 //! bezier_div, circles, rounded_rect, aa_demo, gamma_correction, line_thickness,
-//! rasterizers, conv_contour, conv_dash, perspective.
+//! rasterizers, conv_contour, perspective.
 
-use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
+use agg_rust::basics::{deg2rad, is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
 use agg_rust::bspline::Bspline;
 use agg_rust::bounding_rect::bounding_rect;
 use agg_rust::color::Rgba8;
@@ -12,12 +12,15 @@ use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
+use agg_rust::curves::{Curve4, CurveApproximationMethod};
 use agg_rust::ellipse::Ellipse;
+use agg_rust::gamma::{srgb_to_linear, GammaFunction, GammaPower, GammaThreshold};
 use agg_rust::gsv_text::GsvText;
-use agg_rust::math_stroke::{LineCap, LineJoin};
+use agg_rust::math::{calc_distance, calc_line_point_distance};
+use agg_rust::math_stroke::{InnerJoin, LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
-use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
+use agg_rust::rasterizer_scanline_aa::{RasterizerScanlineAa, Scanline};
 use agg_rust::renderer_base::RendererBase;
 use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid, SpanGenerator};
 use agg_rust::rendering_buffer::RowAccessor;
@@ -543,17 +546,11 @@ pub fn conv_stroke(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 51));
     }
 
-    // Draw vertex markers
-    let vertices = [(vx0, vy0), (vx1, vy1), (vx2, vy2)];
-    for (vx, vy) in &vertices {
-        let mut ell = Ellipse::new(*vx, *vy, 5.0, 5.0, 20, false);
-        ras.reset();
-        ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
-    }
-
     // AGG controls matching C++ conv_stroke.cpp
     let mut r_join = RboxCtrl::new(10.0, 10.0, 133.0, 80.0);
+    // Match C++ conv_stroke.cpp: shrink join label text so 4 items fit the box.
+    r_join.text_size(7.5, 0.0);
+    r_join.text_thickness(1.0);
     r_join.add_item("Miter Join");
     r_join.add_item("Miter Join Revert");
     r_join.add_item("Round Join");
@@ -587,14 +584,21 @@ pub fn conv_stroke(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Bezier Div (replaces old "curves" demo — matches C++ bezier_div.cpp)
 // ============================================================================
 
-/// Render a cubic Bezier with draggable control points, matching C++ bezier_div.cpp.
+/// Render a cubic Bezier with full C++ bezier_div controls and diagnostics.
 ///
-/// params[0..8] = x1,y1, x2,y2, x3,y3, x4,y4 (4 control points, absolute coords)
-/// params[8] = stroke width (default 50.0)
-/// params[9] = show_points (0 or 1, default 1)
-/// params[10] = show_outline (0 or 1, default 1)
+/// params[0..8]   = x1,y1, x2,y2, x3,y3, x4,y4 (4 control points)
+/// params[8]      = stroke width
+/// params[9]      = show_points (0/1)
+/// params[10]     = show_outline (0/1)
+/// params[11]     = angle_tolerance_deg
+/// params[12]     = approximation_scale
+/// params[13]     = cusp_limit_deg
+/// params[14]     = curve_type (0=Incremental, 1=Subdiv)
+/// params[15]     = case_type (0..8), display-only in renderer
+/// params[16]     = inner_join (0=Bevel,1=Miter,2=Jag,3=Round)
+/// params[17]     = line_join (0=Miter,1=MiterRevert,2=Round,3=Bevel,4=MiterRound)
+/// params[18]     = line_cap (0=Butt,1=Square,2=Round)
 pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    // Default control points from C++ bezier_div.cpp
     let p1x = params.get(0).copied().unwrap_or(170.0);
     let p1y = params.get(1).copied().unwrap_or(424.0);
     let p2x = params.get(2).copied().unwrap_or(13.0);
@@ -606,6 +610,262 @@ pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let sw = params.get(8).copied().unwrap_or(50.0);
     let show_points = params.get(9).copied().unwrap_or(1.0) > 0.5;
     let show_outline = params.get(10).copied().unwrap_or(1.0) > 0.5;
+    let angle_tolerance_deg = params.get(11).copied().unwrap_or(15.0).clamp(0.0, 90.0);
+    let approximation_scale = params.get(12).copied().unwrap_or(1.0).clamp(0.1, 5.0);
+    let cusp_limit_deg = params.get(13).copied().unwrap_or(0.0).clamp(0.0, 90.0);
+    let curve_type_idx = (params.get(14).copied().unwrap_or(1.0) as i32).clamp(0, 1);
+    let case_type_idx = (params.get(15).copied().unwrap_or(0.0) as i32).clamp(0, 8);
+    let inner_join_idx = (params.get(16).copied().unwrap_or(3.0) as i32).clamp(0, 3);
+    let line_join_idx = (params.get(17).copied().unwrap_or(1.0) as i32).clamp(0, 4);
+    let line_cap_idx = (params.get(18).copied().unwrap_or(0.0) as i32).clamp(0, 2);
+
+    let line_join = match line_join_idx {
+        0 => LineJoin::Miter,
+        1 => LineJoin::MiterRevert,
+        2 => LineJoin::Round,
+        3 => LineJoin::Bevel,
+        _ => LineJoin::MiterRound,
+    };
+    let line_cap = match line_cap_idx {
+        0 => LineCap::Butt,
+        1 => LineCap::Square,
+        _ => LineCap::Round,
+    };
+    let inner_join = match inner_join_idx {
+        0 => InnerJoin::Bevel,
+        1 => InnerJoin::Miter,
+        2 => InnerJoin::Jag,
+        _ => InnerJoin::Round,
+    };
+
+    #[derive(Clone, Copy)]
+    struct CurvePoint {
+        x: f64,
+        y: f64,
+        dist: f64,
+    }
+
+    fn bezier4_point(cp: [f64; 8], mu: f64) -> (f64, f64) {
+        let mum1 = 1.0 - mu;
+        let mum13 = mum1 * mum1 * mum1;
+        let mu3 = mu * mu * mu;
+        let x = mum13 * cp[0]
+            + 3.0 * mu * mum1 * mum1 * cp[2]
+            + 3.0 * mu * mu * mum1 * cp[4]
+            + mu3 * cp[6];
+        let y = mum13 * cp[1]
+            + 3.0 * mu * mum1 * mum1 * cp[3]
+            + 3.0 * mu * mu * mum1 * cp[5]
+            + mu3 * cp[7];
+        (x, y)
+    }
+
+    fn find_segment(path: &[CurvePoint], dist: f64) -> (usize, usize) {
+        if path.len() < 2 {
+            return (0, 0);
+        }
+        let mut i = 0usize;
+        let mut j = path.len() - 1;
+        while (j - i) > 1 {
+            let k = (i + j) >> 1;
+            if dist < path[k].dist {
+                j = k;
+            } else {
+                i = k;
+            }
+        }
+        (i, j)
+    }
+
+    fn build_curve(
+        cp: [f64; 8],
+        curve_type_idx: i32,
+        approx_scale: f64,
+        angle_tolerance_deg: f64,
+        cusp_limit_deg: f64,
+    ) -> Curve4 {
+        let mut curve = Curve4::new();
+        let method = if curve_type_idx == 0 {
+            CurveApproximationMethod::Inc
+        } else {
+            CurveApproximationMethod::Div
+        };
+        curve.set_approximation_method(method);
+        curve.set_approximation_scale(approx_scale);
+        curve.set_angle_tolerance(deg2rad(angle_tolerance_deg));
+        curve.set_cusp_limit(deg2rad(cusp_limit_deg));
+        curve.init(cp[0], cp[1], cp[2], cp[3], cp[4], cp[5], cp[6], cp[7]);
+        curve
+    }
+
+    fn collect_curve_points(curve: &mut Curve4) -> Vec<CurvePoint> {
+        let mut out = Vec::new();
+        curve.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = curve.vertex(&mut x, &mut y);
+            if is_stop(cmd) {
+                break;
+            }
+            if is_vertex(cmd) {
+                out.push(CurvePoint { x, y, dist: 0.0 });
+            }
+        }
+        if out.is_empty() {
+            return out;
+        }
+        let mut d = 0.0;
+        for i in 1..out.len() {
+            out[i - 1].dist = d;
+            d += calc_distance(out[i - 1].x, out[i - 1].y, out[i].x, out[i].y);
+        }
+        let last = out.len() - 1;
+        out[last].dist = d;
+        out
+    }
+
+    fn calc_max_error(
+        cp: [f64; 8],
+        curve_type_idx: i32,
+        approximation_scale: f64,
+        angle_tolerance_deg: f64,
+        cusp_limit_deg: f64,
+        scale: f64,
+    ) -> (f64, f64) {
+        let mut curve = build_curve(
+            cp,
+            curve_type_idx,
+            approximation_scale * scale,
+            angle_tolerance_deg,
+            cusp_limit_deg,
+        );
+        let curve_points = collect_curve_points(&mut curve);
+        if curve_points.len() < 2 {
+            return (0.0, 0.0);
+        }
+
+        let mut ref_points = Vec::with_capacity(4096);
+        for i in 0..4096 {
+            let mu = i as f64 / 4095.0;
+            let (x, y) = bezier4_point(cp, mu);
+            ref_points.push(CurvePoint { x, y, dist: 0.0 });
+        }
+        let mut ref_dist = 0.0;
+        for i in 1..ref_points.len() {
+            ref_points[i - 1].dist = ref_dist;
+            ref_dist += calc_distance(
+                ref_points[i - 1].x,
+                ref_points[i - 1].y,
+                ref_points[i].x,
+                ref_points[i].y,
+            );
+        }
+        let last = ref_points.len() - 1;
+        ref_points[last].dist = ref_dist;
+
+        let mut max_error = 0.0;
+        for p in &ref_points {
+            let (i, j) = find_segment(&curve_points, p.dist);
+            if i == j {
+                continue;
+            }
+            let err = calc_line_point_distance(
+                curve_points[i].x,
+                curve_points[i].y,
+                curve_points[j].x,
+                curve_points[j].y,
+                p.x,
+                p.y,
+            )
+            .abs();
+            if err > max_error {
+                max_error = err;
+            }
+        }
+
+        let mut max_angle = 0.0;
+        for i in 2..curve_points.len() {
+            let a1 = (curve_points[i - 1].y - curve_points[i - 2].y)
+                .atan2(curve_points[i - 1].x - curve_points[i - 2].x);
+            let a2 = (curve_points[i].y - curve_points[i - 1].y)
+                .atan2(curve_points[i].x - curve_points[i - 1].x);
+            let mut da = (a1 - a2).abs();
+            if da >= std::f64::consts::PI {
+                da = 2.0 * std::f64::consts::PI - da;
+            }
+            if da > max_angle {
+                max_angle = da;
+            }
+        }
+
+        (max_error * scale, max_angle * 180.0 / std::f64::consts::PI)
+    }
+
+    let cp = [p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y];
+    let (max_error_01, max_angle_error_01) = calc_max_error(
+        cp,
+        curve_type_idx,
+        approximation_scale,
+        angle_tolerance_deg,
+        cusp_limit_deg,
+        0.01,
+    );
+    let (max_error_1, max_angle_error_1) = calc_max_error(
+        cp,
+        curve_type_idx,
+        approximation_scale,
+        angle_tolerance_deg,
+        cusp_limit_deg,
+        0.1,
+    );
+    let (max_error1, max_angle_error1) = calc_max_error(
+        cp,
+        curve_type_idx,
+        approximation_scale,
+        angle_tolerance_deg,
+        cusp_limit_deg,
+        1.0,
+    );
+    let (max_error_10, max_angle_error_10) = calc_max_error(
+        cp,
+        curve_type_idx,
+        approximation_scale,
+        angle_tolerance_deg,
+        cusp_limit_deg,
+        10.0,
+    );
+    let (max_error_100, max_angle_error_100) = calc_max_error(
+        cp,
+        curve_type_idx,
+        approximation_scale,
+        angle_tolerance_deg,
+        cusp_limit_deg,
+        100.0,
+    );
+
+    #[cfg(target_arch = "wasm32")]
+    let curve_time_mks = 0.0;
+    #[cfg(not(target_arch = "wasm32"))]
+    let curve_time_mks = {
+        let t0 = std::time::Instant::now();
+        for _ in 0..100 {
+            let mut curve = build_curve(
+                cp,
+                curve_type_idx,
+                approximation_scale,
+                angle_tolerance_deg,
+                cusp_limit_deg,
+            );
+            curve.rewind(0);
+            loop {
+                let (mut x, mut y) = (0.0, 0.0);
+                if is_stop(curve.vertex(&mut x, &mut y)) {
+                    break;
+                }
+            }
+        }
+        (t0.elapsed().as_secs_f64() * 1_000_000.0) / 100.0
+    };
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -617,85 +877,165 @@ pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    // Render filled stroke (green, semi-transparent) — matching C++ color rgba(0, 0.5, 0, 0.5)
+    // Build curve polyline using C++-matching approximation settings.
+    let mut path = PathStorage::new();
+    let mut curve = build_curve(
+        cp,
+        curve_type_idx,
+        approximation_scale,
+        angle_tolerance_deg,
+        cusp_limit_deg,
+    );
+    path.concat_path(&mut curve, 0);
+
     {
-        let mut path = PathStorage::new();
-        path.move_to(p1x, p1y);
-        path.curve4(p2x, p2y, p3x, p3y, p4x, p4y);
-        let curve = ConvCurve::new(&mut path);
-        let mut stroke = ConvStroke::new(curve);
+        let mut stroke = ConvStroke::new(&mut path);
         stroke.set_width(sw);
+        stroke.set_line_join(line_join);
+        stroke.set_line_cap(line_cap);
+        stroke.set_inner_join(inner_join);
+        stroke.set_inner_miter_limit(1.01);
         ras.reset();
         ras.add_path(&mut stroke, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 128, 0, 128));
     }
 
-    // Show curve vertex dots if enabled
-    if show_points {
-        let mut path = PathStorage::new();
-        path.move_to(p1x, p1y);
-        path.curve4(p2x, p2y, p3x, p3y, p4x, p4y);
-        let mut curve = ConvCurve::new(&mut path);
-        curve.rewind(0);
+    let mut num_points = 0u32;
+    {
+        path.rewind(0);
         loop {
             let (mut x, mut y) = (0.0, 0.0);
-            let cmd = curve.vertex(&mut x, &mut y);
+            let cmd = path.vertex(&mut x, &mut y);
             if is_stop(cmd) {
                 break;
             }
             if is_vertex(cmd) {
-                let mut ell = Ellipse::new(x, y, 1.5, 1.5, 8, false);
-                ras.reset();
-                ras.add_path(&mut ell, 0);
-                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 128));
+                num_points += 1;
+                if show_points {
+                    let mut ell = Ellipse::new(x, y, 1.5, 1.5, 8, false);
+                    ras.reset();
+                    ras.add_path(&mut ell, 0);
+                    render_scanlines_aa_solid(
+                        &mut ras,
+                        &mut sl,
+                        &mut rb,
+                        &Rgba8::new(0, 0, 0, 128),
+                    );
+                }
             }
         }
     }
 
-    // Show stroke outline if enabled
     if show_outline {
-        let mut path = PathStorage::new();
-        path.move_to(p1x, p1y);
-        path.curve4(p2x, p2y, p3x, p3y, p4x, p4y);
-        let curve = ConvCurve::new(&mut path);
-        let stroke = ConvStroke::new(curve);
-        let mut outline = ConvStroke::new(stroke);
-        outline.set_width(1.0);
+        let mut stroke = ConvStroke::new(&mut path);
+        stroke.set_width(sw);
+        stroke.set_line_join(line_join);
+        stroke.set_line_cap(line_cap);
+        stroke.set_inner_join(inner_join);
+        stroke.set_inner_miter_limit(1.01);
+        let mut stroke2 = ConvStroke::new(stroke);
         ras.reset();
-        ras.add_path(&mut outline, 0);
+        ras.add_path(&mut stroke2, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 128));
     }
 
-    // Draw control polygon (thin lines)
+    // Match C++ bezier_ctrl rendering: control handles, thin curve overlay,
+    // and 4 draggable control points in the same control color.
+    let ctrl_color = Rgba8::new(0, 77, 128, 204); // rgba(0, 0.3, 0.5, 0.8)
+
+    // Control handle line 1: p1 -> p2
     {
-        let mut poly = PathStorage::new();
-        poly.move_to(p1x, p1y);
-        poly.line_to(p2x, p2y);
-        poly.line_to(p3x, p3y);
-        poly.line_to(p4x, p4y);
-        let mut stroke = ConvStroke::new(&mut poly);
+        let mut handle1 = PathStorage::new();
+        handle1.move_to(p1x, p1y);
+        handle1.line_to(p2x, p2y);
+        let mut stroke = ConvStroke::new(&mut handle1);
         stroke.set_width(1.0);
         ras.reset();
         ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(150, 150, 150, 200));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
     }
 
-    // Draw control points as circles
-    let points = [(p1x, p1y), (p2x, p2y), (p3x, p3y), (p4x, p4y)];
-    let colors = [
-        Rgba8::new(255, 0, 0, 255),
-        Rgba8::new(0, 180, 0, 255),
-        Rgba8::new(0, 180, 0, 255),
-        Rgba8::new(255, 0, 0, 255),
-    ];
-    for (pt, color) in points.iter().zip(colors.iter()) {
-        let mut ell = Ellipse::new(pt.0, pt.1, 6.0, 6.0, 20, false);
+    // Control handle line 2: p3 -> p4
+    {
+        let mut handle2 = PathStorage::new();
+        handle2.move_to(p3x, p3y);
+        handle2.line_to(p4x, p4y);
+        let mut stroke = ConvStroke::new(&mut handle2);
+        stroke.set_width(1.0);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
+    }
+
+    // Thin curve overlay shown by bezier_ctrl itself.
+    {
+        let mut ctrl_curve = build_curve(
+            cp,
+            curve_type_idx,
+            approximation_scale,
+            angle_tolerance_deg,
+            cusp_limit_deg,
+        );
+        let mut stroke = ConvStroke::new(&mut ctrl_curve);
+        stroke.set_width(1.0);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
+    }
+
+    // Draggable control points.
+    for (x, y) in [(p1x, p1y), (p2x, p2y), (p3x, p3y), (p4x, p4y)] {
+        let mut ell = Ellipse::new(x, y, 5.0, 5.0, 20, false);
         ras.reset();
         ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, color);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &ctrl_color);
     }
 
-    // Render AGG controls — matching C++ bezier_div.cpp
+    let stats = format!(
+        "Num Points={} Time={:.2}mks\n\n Dist Error: x0.01={:.5} x0.1={:.5} x1={:.5} x10={:.5} x100={:.5}\n\nAngle Error: x0.01={:.1} x0.1={:.1} x1={:.1} x10={:.1} x100={:.1}",
+        num_points,
+        curve_time_mks,
+        max_error_01,
+        max_error_1,
+        max_error1,
+        max_error_10,
+        max_error_100,
+        max_angle_error_01,
+        max_angle_error_1,
+        max_angle_error1,
+        max_angle_error_10,
+        max_angle_error_100
+    );
+    let mut txt = GsvText::new();
+    txt.size(8.0, 0.0);
+    txt.start_point(10.0, 85.0);
+    txt.text(&stats);
+    let mut txt_stroke = ConvStroke::new(&mut txt);
+    txt_stroke.set_line_cap(LineCap::Round);
+    txt_stroke.set_line_join(LineJoin::Round);
+    txt_stroke.set_width(1.5);
+    ras.reset();
+    ras.add_path(&mut txt_stroke, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+
+    let mut s_angle = SliderCtrl::new(5.0, 5.0, 240.0, 12.0);
+    s_angle.label("Angle Tolerance=%.0f deg");
+    s_angle.range(0.0, 90.0);
+    s_angle.set_value(angle_tolerance_deg);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_angle);
+
+    let mut s_approx = SliderCtrl::new(5.0, 22.0, 240.0, 29.0);
+    s_approx.label("Approximation Scale=%.3f");
+    s_approx.range(0.1, 5.0);
+    s_approx.set_value(approximation_scale);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_approx);
+
+    let mut s_cusp = SliderCtrl::new(5.0, 39.0, 240.0, 46.0);
+    s_cusp.label("Cusp Limit=%.0f deg");
+    s_cusp.range(0.0, 90.0);
+    s_cusp.set_value(cusp_limit_deg);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_cusp);
+
     let mut s_width = SliderCtrl::new(245.0, 5.0, 495.0, 12.0);
     s_width.label("Width=%.2f");
     s_width.range(-50.0, 100.0);
@@ -709,6 +1049,54 @@ pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut c_outline = CboxCtrl::new(250.0, 35.0, "Show Stroke Outline");
     c_outline.set_status(show_outline);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_outline);
+
+    let mut r_curve_type = RboxCtrl::new(535.0, 5.0, 650.0, 55.0);
+    r_curve_type.add_item("Incremental");
+    r_curve_type.add_item("Subdiv");
+    r_curve_type.set_cur_item(curve_type_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_curve_type);
+
+    let mut r_case = RboxCtrl::new(535.0, 60.0, 650.0, 195.0);
+    r_case.text_size(7.0, 0.0);
+    r_case.text_thickness(1.0);
+    r_case.add_item("Random");
+    r_case.add_item("13---24");
+    r_case.add_item("Smooth Cusp 1");
+    r_case.add_item("Smooth Cusp 2");
+    r_case.add_item("Real Cusp 1");
+    r_case.add_item("Real Cusp 2");
+    r_case.add_item("Fancy Stroke");
+    r_case.add_item("Jaw");
+    r_case.add_item("Ugly Jaw");
+    r_case.set_cur_item(case_type_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_case);
+
+    let mut r_inner = RboxCtrl::new(535.0, 200.0, 650.0, 290.0);
+    r_inner.text_size(8.0, 0.0);
+    r_inner.add_item("Inner Bevel");
+    r_inner.add_item("Inner Miter");
+    r_inner.add_item("Inner Jag");
+    r_inner.add_item("Inner Round");
+    r_inner.set_cur_item(inner_join_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_inner);
+
+    let mut r_join = RboxCtrl::new(535.0, 295.0, 650.0, 385.0);
+    r_join.text_size(8.0, 0.0);
+    r_join.add_item("Miter Join");
+    r_join.add_item("Miter Revert");
+    r_join.add_item("Round Join");
+    r_join.add_item("Bevel Join");
+    r_join.add_item("Miter Round");
+    r_join.set_cur_item(line_join_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_join);
+
+    let mut r_cap = RboxCtrl::new(535.0, 395.0, 650.0, 455.0);
+    r_cap.text_size(8.0, 0.0);
+    r_cap.add_item("Butt Cap");
+    r_cap.add_item("Square Cap");
+    r_cap.add_item("Round Cap");
+    r_cap.set_cur_item(line_cap_idx);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_cap);
 
     buf
 }
@@ -1159,17 +1547,29 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[0] = thickness (default 1.0)
 /// params[1] = contrast (default 1.0)
 /// params[2] = gamma (default 1.0)
+/// params[3] = ellipse radius x (default width/3.0)
+/// params[4] = ellipse radius y (default height/3.0)
 pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let thickness = params.get(0).copied().unwrap_or(1.0).max(0.1);
-    let _contrast = params.get(1).copied().unwrap_or(1.0);
-    let gamma_val = params.get(2).copied().unwrap_or(1.0).max(0.1);
+    let thickness = params.get(0).copied().unwrap_or(1.0).clamp(0.0, 3.0);
+    let contrast = params.get(1).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+    let gamma_val = params.get(2).copied().unwrap_or(1.0).clamp(0.5, 3.0);
+    let rx = params
+        .get(3)
+        .copied()
+        .unwrap_or(width as f64 / 3.0)
+        .max(0.0);
+    let ry = params
+        .get(4)
+        .copied()
+        .unwrap_or(height as f64 / 3.0)
+        .max(0.0);
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
     setup_renderer(&mut buf, &mut ra, width, height);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(20, 20, 20, 255));
+    rb.clear(&Rgba8::new(255, 255, 255, 255));
 
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
@@ -1177,79 +1577,83 @@ pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
 
-    // Concentric stroked ellipses with different colors
-    let cx = w * 0.5;
-    let cy = h * 0.45;
-    let colors: [(u32, u32, u32); 5] = [
-        (255, 0, 0),
-        (0, 255, 0),
-        (0, 0, 255),
-        (255, 255, 255),
-        (0, 0, 0),
-    ];
+    let dark = 1.0 - contrast;
+    let light = contrast;
+    let to_u8 = |v: f64| -> u32 { (v.clamp(0.0, 1.0) * 255.0).round() as u32 };
 
-    for (i, (cr, cg, cb)) in colors.iter().enumerate() {
-        let t = i as f64 / colors.len() as f64;
-        let rx = (w * 0.4) * (1.0 - t * 0.6);
-        let ry = (h * 0.35) * (1.0 - t * 0.6);
-        let ell = Ellipse::new(cx, cy, rx, ry, 64, false);
-        let mut stroke = ConvStroke::new(ell);
-        stroke.set_width(thickness + (1.0 - t) * 3.0);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(*cr, *cg, *cb, 255));
-    }
-
-    // Gamma curve graph at bottom
-    let gx = w * 0.05;
-    let gy = h * 0.7;
-    let gw = w * 0.9;
-    let gh = h * 0.25;
-
-    // Graph background
-    {
+    let mut fill_rect = |x1: f64, y1: f64, x2: f64, y2: f64, color: Rgba8| {
         let mut rect = PathStorage::new();
-        rect.move_to(gx, gy);
-        rect.line_to(gx + gw, gy);
-        rect.line_to(gx + gw, gy + gh);
-        rect.line_to(gx, gy + gh);
+        rect.move_to(x1, y1);
+        rect.line_to(x2, y1);
+        rect.line_to(x2, y2);
+        rect.line_to(x1, y2);
         rect.close_polygon(0);
         ras.reset();
         ras.add_path(&mut rect, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(40, 40, 40, 255));
-    }
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
+    };
 
-    // Gamma curve: y = x^gamma
+    // Background bars exactly as C++ copy_bar() sequence.
+    fill_rect(
+        0.0,
+        0.0,
+        (width / 2) as f64,
+        h,
+        Rgba8::new(to_u8(dark), to_u8(dark), to_u8(dark), 255),
+    );
+    fill_rect(
+        (width / 2 + 1) as f64,
+        0.0,
+        w,
+        h,
+        Rgba8::new(to_u8(light), to_u8(light), to_u8(light), 255),
+    );
+    // Gamma curve polyline: dy = gamma_power(v) * 255.
     {
+        let gp = GammaPower::new(gamma_val);
+        let x = (w - 256.0) * 0.5;
+        let y = 50.0;
         let mut curve = PathStorage::new();
-        for i in 0..=256 {
-            let t = i as f64 / 256.0;
-            let gv = t.powf(gamma_val);
-            let x = gx + t * gw;
-            let y = gy + gh - gv * gh;
+        for i in 0..256 {
+            let v = i as f64 / 255.0;
+            let dy = gp.call(v) * 255.0;
             if i == 0 {
-                curve.move_to(x, y);
+                curve.move_to(x + i as f64, y + dy);
             } else {
-                curve.line_to(x, y);
+                curve.line_to(x + i as f64, y + dy);
             }
         }
         let mut stroke = ConvStroke::new(&mut curve);
         stroke.set_width(2.0);
         ras.reset();
         ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 200, 50, 255));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(80, 127, 80, 255));
     }
 
-    // Linear reference line
+    // Concentric ellipses with fixed 5px radius decrements.
     {
-        let mut line = PathStorage::new();
-        line.move_to(gx, gy + gh);
-        line.line_to(gx + gw, gy);
-        let mut stroke = ConvStroke::new(&mut line);
-        stroke.set_width(0.5);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(100, 100, 100, 200));
+        let cx = w * 0.5;
+        let cy = h * 0.5;
+        let rings = [
+            (0.0, Rgba8::new(255, 0, 0, 255)),
+            (5.0, Rgba8::new(0, 255, 0, 255)),
+            (10.0, Rgba8::new(0, 0, 255, 255)),
+            (15.0, Rgba8::new(0, 0, 0, 255)),
+            (20.0, Rgba8::new(255, 255, 255, 255)),
+        ];
+        for (dec, color) in rings {
+            let rrx = rx - dec;
+            let rry = ry - dec;
+            if rrx <= 0.0 || rry <= 0.0 {
+                continue;
+            }
+            let ell = Ellipse::new(cx, cy, rrx, rry, 150, false);
+            let mut stroke = ConvStroke::new(ell);
+            stroke.set_width(thickness);
+            ras.reset();
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
+        }
     }
 
     // Render AGG slider controls — matching C++ gamma_correction.cpp
@@ -1259,17 +1663,17 @@ pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     s_thick.set_value(thickness);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_thick);
 
-    let mut s_contrast = SliderCtrl::new(5.0, 20.0, 395.0, 26.0);
-    s_contrast.label("Contrast");
-    s_contrast.range(0.0, 1.0);
-    s_contrast.set_value(_contrast);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_contrast);
-
-    let mut s_gamma = SliderCtrl::new(5.0, 35.0, 395.0, 41.0);
+    let mut s_gamma = SliderCtrl::new(5.0, 20.0, 395.0, 26.0);
     s_gamma.label("Gamma=%3.2f");
     s_gamma.range(0.5, 3.0);
     s_gamma.set_value(gamma_val);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
+
+    let mut s_contrast = SliderCtrl::new(5.0, 35.0, 395.0, 41.0);
+    s_contrast.label("Contrast");
+    s_contrast.range(0.0, 1.0);
+    s_contrast.set_value(contrast);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_contrast);
 
     buf
 }
@@ -1368,19 +1772,22 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 // Rasterizers — triangle rendering, based on C++ rasterizers.cpp
 // ============================================================================
 
-/// Render a filled and stroked triangle.
+/// Render aliased and anti-aliased triangles, matching C++ rasterizers.cpp.
 ///
-/// params[0..6] = x0,y0, x1,y1, x2,y2
-/// params[6] = gamma (unused), params[7] = alpha 0-1
+/// params[0..6] = x0,y0, x1,y1, x2,y2 (shared geometry)
+/// params[6] = gamma (0..1)
+/// params[7] = alpha (0..1)
+/// params[8] = test_performance checkbox status (0/1, visual only in WASM)
 pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(157.0);
+    let vx0 = params.get(0).copied().unwrap_or(220.0);
     let vy0 = params.get(1).copied().unwrap_or(60.0);
-    let vx1 = params.get(2).copied().unwrap_or(369.0);
+    let vx1 = params.get(2).copied().unwrap_or(489.0);
     let vy1 = params.get(3).copied().unwrap_or(170.0);
-    let vx2 = params.get(4).copied().unwrap_or(243.0);
+    let vx2 = params.get(4).copied().unwrap_or(263.0);
     let vy2 = params.get(5).copied().unwrap_or(310.0);
-    let _gamma = params.get(6).copied().unwrap_or(0.5);
+    let gamma = params.get(6).copied().unwrap_or(0.5).clamp(0.0, 1.0);
     let alpha = params.get(7).copied().unwrap_or(1.0);
+    let test_performance = params.get(8).copied().unwrap_or(0.0) > 0.5;
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -1389,50 +1796,72 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
+    let mut render_with_gamma = |path: &mut PathStorage, color: Rgba8, map_cover: &dyn Fn(u8) -> u8| {
+        let mut ras = RasterizerScanlineAa::new();
+        let mut sl = ScanlineU8::new();
+        ras.add_path(path, 0);
+        if !ras.rewind_scanlines() {
+            return;
+        }
+        sl.reset(ras.min_x(), ras.max_x());
+        while ras.sweep_scanline(&mut sl) {
+            let y = sl.y();
+            let spans = sl.begin();
+            let covers = sl.covers();
+            for span in spans {
+                if span.len <= 0 {
+                    continue;
+                }
+                let len = span.len as usize;
+                let mut mapped = Vec::with_capacity(len);
+                for cov in &covers[span.cover_offset..span.cover_offset + len] {
+                    mapped.push(map_cover(*cov));
+                }
+                rb.blend_solid_hspan(span.x, y, span.len, &color, &mapped);
+            }
+        }
+    };
 
     let a = (alpha.clamp(0.0, 1.0) * 255.0) as u32;
 
-    // Filled triangle
+    // Right triangle: anti-aliased with gamma_power(gamma * 2.0).
     {
         let mut path = PathStorage::new();
         path.move_to(vx0, vy0);
         path.line_to(vx1, vy1);
         path.line_to(vx2, vy2);
         path.close_polygon(0);
-        ras.reset();
-        ras.add_path(&mut path, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 220, 255, a));
+        let gp = GammaPower::new(gamma * 2.0);
+        render_with_gamma(
+            &mut path,
+            Rgba8::new(179, 128, 26, a),
+            &|cov: u8| ((gp.call(cov as f64 / 255.0) * 255.0) + 0.5) as u8,
+        );
     }
 
-    // Stroked outline
+    // Left triangle: aliased with gamma_threshold(gamma), shifted by -200.
     {
         let mut path = PathStorage::new();
-        path.move_to(vx0, vy0);
-        path.line_to(vx1, vy1);
-        path.line_to(vx2, vy2);
+        path.move_to(vx0 - 200.0, vy0);
+        path.line_to(vx1 - 200.0, vy1);
+        path.line_to(vx2 - 200.0, vy2);
         path.close_polygon(0);
-        let mut stroke = ConvStroke::new(&mut path);
-        stroke.set_width(3.0);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 80, a));
+        let gt = GammaThreshold::new(gamma);
+        render_with_gamma(
+            &mut path,
+            Rgba8::new(26, 128, 179, a),
+            &|cov: u8| if gt.call(cov as f64 / 255.0) >= 0.5 { 255 } else { 0 },
+        );
     }
 
-    // Vertex markers
-    for (vx, vy) in &[(vx0, vy0), (vx1, vy1), (vx2, vy2)] {
-        let mut ell = Ellipse::new(*vx, *vy, 5.0, 5.0, 16, false);
-        ras.reset();
-        ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
-    }
+    let mut ras = RasterizerScanlineAa::new();
+    let mut sl = ScanlineU8::new();
 
     // AGG controls matching C++ rasterizers.cpp
     let mut s_gamma = SliderCtrl::new(140.0, 14.0, 280.0, 22.0);
     s_gamma.label("Gamma=%1.2f");
     s_gamma.range(0.0, 1.0);
-    s_gamma.set_value(_gamma);
+    s_gamma.set_value(gamma);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_gamma);
 
     let mut s_alpha = SliderCtrl::new(290.0, 14.0, 490.0, 22.0);
@@ -1441,7 +1870,37 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     s_alpha.set_value(alpha);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_alpha);
 
+    let mut c_test = CboxCtrl::new(140.0, 30.0, "Test Performance");
+    c_test.set_status(test_performance);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_test);
+
     buf
+}
+
+#[cfg(test)]
+mod rasterizers_tests {
+    use super::rasterizers;
+
+    fn pixel_at(buf: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+        let i = (y * width + x) * 4;
+        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+    }
+
+    #[test]
+    fn rasterizers_draws_left_and_right_triangles_with_distinct_colors() {
+        let w = 500usize;
+        let img = rasterizers(w as u32, 330, &[]);
+
+        // Centers of default right/left triangles.
+        let right = pixel_at(&img, w, 324, 180);
+        let left = pixel_at(&img, w, 124, 180);
+
+        // Right AA triangle is warm (R > B), left aliased triangle is cool (B > R).
+        assert!(right[0] > right[2], "right triangle should be warm-toned");
+        assert!(left[2] > left[0], "left triangle should be cool-toned");
+        assert_ne!(right, [255, 255, 255, 255], "right triangle should not be white");
+        assert_ne!(left, [255, 255, 255, 255], "left triangle should not be white");
+    }
 }
 
 // ============================================================================
@@ -1562,132 +2021,6 @@ pub fn conv_contour_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 }
 
 // ============================================================================
-// Conv Dash — triangle with dash patterns and cap styles
-// ============================================================================
-
-/// Render a triangle with dashed stroke, matching core of C++ conv_dash_marker.cpp.
-///
-/// params[0..6] = x0,y0, x1,y1, x2,y2 (3 vertex positions)
-/// params[6] = cap type (0=butt, 1=square, 2=round)
-/// params[7] = stroke width (default 3.0)
-/// params[8] = close polygon (0 or 1, default 0)
-/// params[9] = even_odd fill (0 or 1, default 0)
-/// params[10] = smooth value (default 1.0, display only)
-pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(157.0);
-    let vy0 = params.get(1).copied().unwrap_or(60.0);
-    let vx1 = params.get(2).copied().unwrap_or(469.0);
-    let vy1 = params.get(3).copied().unwrap_or(170.0);
-    let vx2 = params.get(4).copied().unwrap_or(243.0);
-    let vy2 = params.get(5).copied().unwrap_or(310.0);
-    let cap_idx = params.get(6).copied().unwrap_or(0.0) as i32;
-    let sw = params.get(7).copied().unwrap_or(3.0).max(0.5);
-    let close = params.get(8).copied().unwrap_or(0.0) > 0.5;
-    let even_odd = params.get(9).copied().unwrap_or(0.0) > 0.5;
-    let smooth = params.get(10).copied().unwrap_or(1.0);
-
-    let cap = match cap_idx {
-        1 => LineCap::Square,
-        2 => LineCap::Round,
-        _ => LineCap::Butt,
-    };
-
-    let mut buf = Vec::new();
-    let mut ra = RowAccessor::new();
-    setup_renderer(&mut buf, &mut ra, width, height);
-    let pf = PixfmtRgba32::new(&mut ra);
-    let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 255, 255));
-
-    let mut ras = RasterizerScanlineAa::new();
-    let mut sl = ScanlineU8::new();
-
-    // Build triangle path
-    let mut path = PathStorage::new();
-    path.move_to(vx0, vy0);
-    path.line_to(vx1, vy1);
-    path.line_to(vx2, vy2);
-    if close {
-        path.close_polygon(0);
-    }
-
-    // Layer 1: Filled triangle (semi-transparent)
-    {
-        ras.reset();
-        if even_odd {
-            ras.filling_rule(agg_rust::basics::FillingRule::EvenOdd);
-        }
-        ras.add_path(&mut path, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(178, 128, 25, 128));
-        ras.filling_rule(agg_rust::basics::FillingRule::NonZero);
-    }
-
-    // Layer 2: Solid stroke outline
-    {
-        let mut stroke = ConvStroke::new(&mut path);
-        stroke.set_width(sw);
-        stroke.set_line_cap(cap);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 204));
-    }
-
-    // Layer 3: Dashed stroke overlay
-    {
-        let mut dash = ConvDash::new(&mut path);
-        dash.add_dash(20.0, 5.0);
-        dash.add_dash(5.0, 5.0);
-        dash.dash_start(10.0);
-        let mut stroke = ConvStroke::new(dash);
-        stroke.set_width(sw);
-        stroke.set_line_cap(cap);
-        stroke.set_line_join(LineJoin::Round);
-        ras.reset();
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
-    }
-
-    // Vertex markers
-    for (vx, vy) in &[(vx0, vy0), (vx1, vy1), (vx2, vy2)] {
-        let mut ell = Ellipse::new(*vx, *vy, 5.0, 5.0, 16, false);
-        ras.reset();
-        ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
-    }
-
-    // Render AGG controls — matching C++ conv_dash_marker.cpp
-    let mut r_cap = RboxCtrl::new(10.0, 10.0, 130.0, 80.0);
-    r_cap.add_item("Butt Cap");
-    r_cap.add_item("Square Cap");
-    r_cap.add_item("Round Cap");
-    r_cap.set_cur_item(cap_idx);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut r_cap);
-
-    let mut s_width = SliderCtrl::new(140.0, 14.0, 280.0, 22.0);
-    s_width.label("Width=%1.2f");
-    s_width.range(0.0, 10.0);
-    s_width.set_value(sw);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
-
-    let mut s_smooth = SliderCtrl::new(290.0, 14.0, 490.0, 22.0);
-    s_smooth.label("Smooth=%1.2f");
-    s_smooth.range(0.0, 2.0);
-    s_smooth.set_value(smooth);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_smooth);
-
-    let mut c_close = CboxCtrl::new(140.0, 30.0, "Close Polygons");
-    c_close.set_status(close);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_close);
-
-    let mut c_eo = CboxCtrl::new(300.0, 30.0, "Even-Odd Fill");
-    c_eo.set_status(even_odd);
-    render_ctrl(&mut ras, &mut sl, &mut rb, &mut c_eo);
-
-    buf
-}
-
-// ============================================================================
 // Perspective — lion with bilinear/perspective quad transform
 // ============================================================================
 
@@ -1699,12 +2032,37 @@ pub fn conv_dash_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let (mut path, colors, path_idx) = crate::lion_data::parse_lion();
     let npaths = colors.len();
+    // C++ perspective.cpp stores lion colors as srgba8 and then passes them into
+    // renderer_solid::color(rgba8), triggering an implicit sRGB->linear conversion.
+    // Mirror that conversion here to match C++ byte-for-byte.
+    let srgb_u8_to_linear_u8 = |v: u8| -> u32 {
+        if v == 0 {
+            0
+        } else {
+            (255.0 * srgb_to_linear(v as f64 / 255.0) + 0.5) as u32
+        }
+    };
+    let linear_colors: Vec<Rgba8> = colors
+        .iter()
+        .map(|c| {
+            Rgba8::new(
+                srgb_u8_to_linear_u8(c.r),
+                srgb_u8_to_linear_u8(c.g),
+                srgb_u8_to_linear_u8(c.b),
+                c.a as u32,
+            )
+        })
+        .collect();
 
     // Compute bounding rect of lion paths
     let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
     let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
         agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
     );
+    // Match C++ perspective.cpp parse_lion(): mirror source lion in both axes
+    // around its bounding box before applying quad transform.
+    path.flip_x(bbox.x1, bbox.x2);
+    path.flip_y(bbox.y1, bbox.y2);
 
     // Default quad = bounding rect corners (possibly offset to center)
     let w = width as f64;
@@ -1756,30 +2114,69 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     };
 
     if valid {
-        // Transform all lion vertices in-place
-        let n_verts = path.total_vertices();
-        for vi in 0..n_verts {
-            let (mut x, mut y) = (0.0, 0.0);
-            let cmd = path.vertex_idx(vi, &mut x, &mut y);
-            if is_vertex(cmd) {
-                match &transform {
-                    TransformKind::Bilinear(tb) => tb.transform(&mut x, &mut y),
-                    TransformKind::Perspective(tp) => tp.transform(&mut x, &mut y),
+        // Render transformed lion paths.
+        match &transform {
+            TransformKind::Bilinear(tb) => {
+                for i in 0..npaths {
+                    let start = path_idx[i] as u32;
+                    let mut trans = ConvTransform::new(&mut path, tb);
+                    ras.reset();
+                    ras.add_path(&mut trans, start);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &linear_colors[i]);
                 }
-                path.modify_vertex(vi, x, y);
+            }
+            TransformKind::Perspective(tp) => {
+                for i in 0..npaths {
+                    let start = path_idx[i] as u32;
+                    let mut trans = ConvTransform::new(&mut path, tp);
+                    ras.reset();
+                    ras.add_path(&mut trans, start);
+                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &linear_colors[i]);
+                }
             }
         }
 
-        // Render each colored lion path
-        for i in 0..npaths {
-            let start = path_idx[i] as u32;
-            ras.reset();
-            ras.add_path(&mut path, start);
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &colors[i]);
+        // Render transformed ellipse and its stroke, matching C++ perspective.cpp.
+        let cx = (bbox.x1 + bbox.x2) * 0.5;
+        let cy = (bbox.y1 + bbox.y2) * 0.5;
+        let rx = (bbox.x2 - bbox.x1) * 0.5;
+        let ry = (bbox.y2 - bbox.y1) * 0.5;
+
+        match &transform {
+            TransformKind::Bilinear(tb) => {
+                let mut ell = Ellipse::new(cx, cy, rx, ry, 200, false);
+                let mut trans_ell = ConvTransform::new(&mut ell, tb);
+                ras.reset();
+                ras.add_path(&mut trans_ell, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(128, 77, 0, 77));
+
+                let mut ell_stroke_src = Ellipse::new(cx, cy, rx, ry, 200, false);
+                let mut ell_stroke = ConvStroke::new(&mut ell_stroke_src);
+                ell_stroke.set_width(3.0);
+                let mut trans_ell_stroke = ConvTransform::new(&mut ell_stroke, tb);
+                ras.reset();
+                ras.add_path(&mut trans_ell_stroke, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 77, 51, 255));
+            }
+            TransformKind::Perspective(tp) => {
+                let mut ell = Ellipse::new(cx, cy, rx, ry, 200, false);
+                let mut trans_ell = ConvTransform::new(&mut ell, tp);
+                ras.reset();
+                ras.add_path(&mut trans_ell, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(128, 77, 0, 77));
+
+                let mut ell_stroke_src = Ellipse::new(cx, cy, rx, ry, 200, false);
+                let mut ell_stroke = ConvStroke::new(&mut ell_stroke_src);
+                ell_stroke.set_width(3.0);
+                let mut trans_ell_stroke = ConvTransform::new(&mut ell_stroke, tp);
+                ras.reset();
+                ras.add_path(&mut trans_ell_stroke, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 77, 51, 255));
+            }
         }
     }
 
-    // Draw quad outline
+    // Draw interactive quad tool visuals: outline + corner circles.
     {
         let mut quad_path = PathStorage::new();
         quad_path.move_to(q0x, q0y);
@@ -1788,18 +2185,18 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         quad_path.line_to(q3x, q3y);
         quad_path.close_polygon(0);
         let mut stroke = ConvStroke::new(&mut quad_path);
-        stroke.set_width(2.0);
+        stroke.set_width(1.0);
         ras.reset();
         ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(50, 50, 200, 200));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 77, 128, 153));
     }
 
-    // Quad corner markers
+    // Quad corner markers (same tint as outline, matching interactive_polygon style)
     for (cx, cy) in &[(q0x, q0y), (q1x, q1y), (q2x, q2y), (q3x, q3y)] {
-        let mut ell = Ellipse::new(*cx, *cy, 6.0, 6.0, 16, false);
+        let mut ell = Ellipse::new(*cx, *cy, 5.0, 5.0, 32, false);
         ras.reset();
         ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(200, 50, 50, 220));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 77, 128, 153));
     }
 
     // AGG control matching C++ perspective.cpp

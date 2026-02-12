@@ -44,6 +44,7 @@ export function init(container: HTMLElement) {
 
   let dragging = false;
   const onPointerDown = (e: PointerEvent) => {
+    if (e.defaultPrevented) return;
     if (e.button === 0) {
       const p = aggMousePos(e);
       mouseX = p.x;
@@ -54,6 +55,7 @@ export function init(container: HTMLElement) {
     }
   };
   const onPointerMove = (e: PointerEvent) => {
+    if (e.defaultPrevented) return;
     if (!dragging || (e.buttons & 1) === 0) return;
     const p = aggMousePos(e);
     mouseX = p.x;
@@ -129,7 +131,7 @@ export function init(container: HTMLElement) {
       },
     },
   ];
-  const cleanupCC = setupCanvasControls(canvas, controls, draw);
+  const cleanupCC = setupCanvasControls(canvas, controls, draw, { origin: 'bottom-left' });
 
   const hint = document.createElement('div');
   hint.className = 'control-hint';

@@ -63,6 +63,8 @@ export interface CanvasRadio {
   type: 'radio';
   x1: number; y1: number; x2: number; y2: number;
   numItems: number;
+  /** AGG rbox text height; affects radio circle hit test. Default 9.0. */
+  textHeight?: number;
   /** Sidebar radio <input> elements (one per option). */
   sidebarEls: HTMLInputElement[];
   onChange: (index: number) => void;
@@ -205,7 +207,7 @@ export function setupCanvasControls(
     } else if (ctrl.type === 'radio') {
       // Match AGG rbox_ctrl hit testing:
       // click only counts when it's inside an item's radio circle.
-      const textHeight = 9.0;
+      const textHeight = ctrl.textHeight ?? 9.0;
       const dy = textHeight * 2.0;
       const xs1 = ctrl.x1 + 1.0;
       const ys1 = ctrl.y1 + 1.0;

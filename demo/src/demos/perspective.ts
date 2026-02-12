@@ -22,6 +22,20 @@ export function init(container: HTMLElement) {
 
   let transType = 0;
 
+  function pointInPolygon(x: number, y: number, verts: Vertex[]): boolean {
+    let inside = false;
+    for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+      const xi = verts[i].x;
+      const yi = verts[i].y;
+      const xj = verts[j].x;
+      const yj = verts[j].y;
+      const intersects = ((yi > y) !== (yj > y)) &&
+        (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  }
+
   function draw() {
     renderToCanvas({
       demoName: 'perspective',
@@ -40,7 +54,11 @@ export function init(container: HTMLElement) {
   const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
-    threshold: 20,
+    threshold: 5,
+    dragEdges: true,
+    edgeThreshold: 5,
+    dragAll: true,
+    dragAllHitTest: pointInPolygon,
     onDrag: draw,
   });
 

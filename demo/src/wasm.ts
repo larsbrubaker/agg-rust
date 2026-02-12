@@ -50,6 +50,18 @@ export function flashScreenToShape(
   return [out[0] ?? x, out[1] ?? y];
 }
 
+export function gouraudMeshPickVertex(
+  width: number,
+  height: number,
+  params: number[],
+  x: number,
+  y: number,
+  radius: number,
+): number {
+  const w = getWasm();
+  return w.gouraud_mesh_pick_vertex(width, height, new Float64Array(params), x, y, radius);
+}
+
 /**
  * Get AGG-Rust version.
  */

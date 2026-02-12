@@ -11,6 +11,7 @@ export function init(container: HTMLElement) {
   const W = 440, H = 330;
   let radius = 15.0;
   let method = 0;
+  const methodLabels = ['Stack blur', 'Recursive blur', 'Channels'];
   let channelR = false;
   let channelG = true;
   let channelB = false;
@@ -18,10 +19,10 @@ export function init(container: HTMLElement) {
   type Vertex = { x: number; y: number };
   type Quad = [Vertex, Vertex, Vertex, Vertex];
   const shadowQuad: Quad = [
-    { x: 174.24, y: 86.28 },
-    { x: 336.76, y: 86.28 },
-    { x: 336.76, y: 274.16 },
-    { x: 174.24, y: 274.16 },
+    { x: 164.24, y: 96.28 },
+    { x: 326.76, y: 96.28 },
+    { x: 326.76, y: 284.16 },
+    { x: 164.24, y: 284.16 },
   ];
 
   function draw() {
@@ -44,17 +45,30 @@ export function init(container: HTMLElement) {
   }
 
   const slRadius = addSlider(sidebar, 'Blur Radius', 0, 40, 15, 0.01, v => { radius = v; draw(); });
-  const methodRadios = addRadioGroup(sidebar, 'Method', ['Stack blur', 'Recursive blur', 'Channels'], method, i => {
-    method = i;
-    draw();
-  });
+  // C++ rbox renders first item at the bottom. Mirror that visual order in sidebar.
+  const methodLabelsUi = [...methodLabels].reverse();
+  const methodInputsUi = addRadioGroup(
+    sidebar,
+    'Method',
+    methodLabelsUi,
+    methodLabels.length - 1 - method,
+    uiIndex => {
+      method = methodLabels.length - 1 - uiIndex;
+      draw();
+    },
+  );
+  const methodInputs: HTMLInputElement[] = new Array(methodLabels.length);
+  for (let uiIndex = 0; uiIndex < methodLabels.length; uiIndex++) {
+    const logicalIndex = methodLabels.length - 1 - uiIndex;
+    methodInputs[logicalIndex] = methodInputsUi[uiIndex];
+  }
   const cbRed = addCheckbox(sidebar, 'Red', channelR, v => { channelR = v; draw(); });
   const cbGreen = addCheckbox(sidebar, 'Green', channelG, v => { channelG = v; draw(); });
   const cbBlue = addCheckbox(sidebar, 'Blue', channelB, v => { channelB = v; draw(); });
 
   const canvasControls: CanvasControl[] = [
     { type: 'slider', x1: 140, y1: 14, x2: 430, y2: 22, min: 0, max: 40, sidebarEl: slRadius, onChange: v => { radius = v; draw(); } },
-    { type: 'radio', x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, sidebarEls: methodRadios, onChange: i => { method = i; draw(); } },
+    { type: 'radio', x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, sidebarEls: methodInputs, onChange: i => { method = i; draw(); } },
     { type: 'checkbox', x1: 10, y1: 80, x2: 95, y2: 92, sidebarEl: cbRed, onChange: v => { channelR = v; draw(); } },
     { type: 'checkbox', x1: 10, y1: 95, x2: 95, y2: 107, sidebarEl: cbGreen, onChange: v => { channelG = v; draw(); } },
     { type: 'checkbox', x1: 10, y1: 110, x2: 95, y2: 122, sidebarEl: cbBlue, onChange: v => { channelB = v; draw(); } },

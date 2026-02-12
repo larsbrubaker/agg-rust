@@ -3,7 +3,7 @@
 //! Parsed from the original C++ `parse_lion.cpp` example. Contains colored
 //! polygon regions that form a stylized lion face.
 
-use agg_rust::basics::PATH_FLAGS_CW;
+use agg_rust::basics::{PATH_FLAGS_CLOSE, PATH_FLAGS_CW};
 use agg_rust::color::Rgba8;
 use agg_rust::gamma::linear_to_srgb;
 use agg_rust::path_storage::PathStorage;
@@ -44,7 +44,7 @@ pub fn parse_lion() -> (PathStorage, Vec<Rgba8>, Vec<usize>) {
             let g = linear_u8_to_srgb_u8((c >> 8) & 0xFF);
             let b = linear_u8_to_srgb_u8(c & 0xFF);
 
-            path.close_polygon(0);
+            path.close_polygon(PATH_FLAGS_CLOSE);
             colors.push(Rgba8::new(r, g, b, 255));
             path_idx.push(path.start_new_path());
         }
@@ -74,7 +74,7 @@ fn parse_path_line(line: &str, path: &mut PathStorage) {
         if let Some(coord_token) = tokens.next() {
             if let Some((x, y)) = parse_coord_pair(coord_token) {
                 if cmd == 'M' {
-                    path.close_polygon(0);
+                    path.close_polygon(PATH_FLAGS_CLOSE);
                     path.move_to(x, y);
                 } else {
                     path.line_to(x, y);

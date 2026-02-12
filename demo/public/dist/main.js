@@ -38,6 +38,10 @@ function flashScreenToShape(demoName, width, height, params, x, y) {
   const out = w.flash_screen_to_shape(demoName, width, height, new Float64Array(params), x, y);
   return [out[0] ?? x, out[1] ?? y];
 }
+function gouraudMeshPickVertex(width, height, params, x, y, radius) {
+  const w = getWasm();
+  return w.gouraud_mesh_pick_vertex(width, height, new Float64Array(params), x, y, radius);
+}
 var wasmModule = null;
 
 // src/render-canvas.ts
@@ -72,7 +76,8 @@ function renderToCanvas(opts) {
   } catch (err) {
     console.error(`[renderToCanvas] Failed to render ${demoName}:`, err);
     if (timeDisplay) {
-      timeDisplay.textContent = "render failed";
+      const message = err instanceof Error ? err.message : String(err);
+      timeDisplay.textContent = `render failed: ${message}`;
     }
   }
 }
@@ -170,8 +175,23 @@ function canvasPos(canvas, e) {
 function setupVertexDrag(opts) {
   const { canvas, vertices, onDrag } = opts;
   const threshold = opts.threshold ?? 10;
+  const edgeThreshold = opts.edgeThreshold ?? threshold;
   let dragIdx = -1;
+  let dragEdge = -1;
   let dx = 0, dy = 0;
+  function distanceToSegment(px, py, x1, y1, x2, y2) {
+    const vx = x2 - x1;
+    const vy = y2 - y1;
+    const len2 = vx * vx + vy * vy;
+    if (len2 <= 0.000000000001) {
+      return { distance: Math.hypot(px - x1, py - y1), t: 0 };
+    }
+    const tRaw = ((px - x1) * vx + (py - y1) * vy) / len2;
+    const t = Math.max(0, Math.min(1, tRaw));
+    const cx = x1 + t * vx;
+    const cy = y1 + t * vy;
+    return { distance: Math.hypot(px - cx, py - cy), t };
+  }
   function onPointerDown(e) {
     if (e.button !== 0)
       return;
@@ -187,23 +207,60 @@ function setupVertexDrag(opts) {
     }
     if (bestIdx >= 0) {
       dragIdx = bestIdx;
+      dragEdge = -1;
       dx = pos.x - vertices[bestIdx].x;
       dy = pos.y - vertices[bestIdx].y;
       canvas.setPointerCapture(e.pointerId);
+    } else if (opts.dragEdges && vertices.length >= 2) {
+      let bestEdgeDist = edgeThreshold;
+      let bestEdge = -1;
+      const n = vertices.length;
+      for (let i = 0;i < n; i++) {
+        const n1 = i;
+        const n2 = (i + n - 1) % n;
+        const hit = distanceToSegment(pos.x, pos.y, vertices[n1].x, vertices[n1].y, vertices[n2].x, vertices[n2].y);
+        if (hit.t > 0 && hit.t < 1 && hit.distance < bestEdgeDist) {
+          bestEdgeDist = hit.distance;
+          bestEdge = i;
+        }
+      }
+      if (bestEdge >= 0) {
+        dragIdx = -1;
+        dragEdge = bestEdge;
+        dx = pos.x;
+        dy = pos.y;
+        canvas.setPointerCapture(e.pointerId);
+      }
     } else if (opts.dragAll && vertices.length >= 3) {
-      dragIdx = vertices.length;
-      dx = pos.x - vertices[0].x;
-      dy = pos.y - vertices[0].y;
-      canvas.setPointerCapture(e.pointerId);
+      const canDragAll = opts.dragAllHitTest ? opts.dragAllHitTest(pos.x, pos.y, vertices) : true;
+      if (canDragAll) {
+        dragIdx = vertices.length;
+        dragEdge = -1;
+        dx = pos.x - vertices[0].x;
+        dy = pos.y - vertices[0].y;
+        canvas.setPointerCapture(e.pointerId);
+      }
     }
   }
   function onPointerMove(e) {
-    if (dragIdx < 0)
+    if (dragIdx < 0 && dragEdge < 0)
       return;
     const pos = canvasPos(canvas, e);
     if (dragIdx < vertices.length) {
       vertices[dragIdx].x = pos.x - dx;
       vertices[dragIdx].y = pos.y - dy;
+    } else if (dragEdge >= 0 && vertices.length >= 2) {
+      const n = vertices.length;
+      const n1 = dragEdge;
+      const n2 = (n1 + n - 1) % n;
+      const ddx = pos.x - dx;
+      const ddy = pos.y - dy;
+      vertices[n1].x += ddx;
+      vertices[n1].y += ddy;
+      vertices[n2].x += ddx;
+      vertices[n2].y += ddy;
+      dx = pos.x;
+      dy = pos.y;
     } else {
       const newX = pos.x - dx;
       const newY = pos.y - dy;
@@ -218,6 +275,7 @@ function setupVertexDrag(opts) {
   }
   function onPointerUp() {
     dragIdx = -1;
+    dragEdge = -1;
   }
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
@@ -392,7 +450,7 @@ function setupCanvasControls(canvas, controls, redraw, options = {}) {
       e.stopPropagation();
       e.preventDefault();
     } else if (ctrl.type === "radio") {
-      const textHeight = 9;
+      const textHeight = ctrl.textHeight ?? 9;
       const dy = textHeight * 2;
       const xs1 = ctrl.x1 + 1;
       const ys1 = ctrl.y1 + 1;
@@ -891,6 +949,15 @@ var exports_conv_stroke = {};
 __export(exports_conv_stroke, {
   init: () => init4
 });
+function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+  const sign = (x1, y1, x2, y2, x3, y3) => (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
+  const d1 = sign(px, py, ax, ay, bx, by);
+  const d2 = sign(px, py, bx, by, cx, cy);
+  const d3 = sign(px, py, cx, cy, ax, ay);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
 function init4(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Conv Stroke", "Stroke joins, caps, and dashed overlay — matching C++ conv_stroke.cpp.");
   const W = 500, H = 330;
@@ -929,26 +996,27 @@ function init4(container) {
     vertices,
     threshold: 20,
     dragAll: true,
+    dragAllHitTest: (x, y, verts) => pointInTriangle(verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y, x, y),
     onDrag: draw
   });
-  const joinEls = addRadioGroup(sidebar, "Line Join", ["Miter", "Miter Revert", "Round", "Bevel"], 2, (v) => {
+  const joinEls = addRadioGroup(sidebar, "Line Join", ["Miter Join", "Miter Join Revert", "Round Join", "Bevel Join"], 2, (v) => {
     joinType = v;
     draw();
   });
-  const capEls = addRadioGroup(sidebar, "Line Cap", ["Butt", "Square", "Round"], 2, (v) => {
+  const capEls = addRadioGroup(sidebar, "Line Cap", ["Butt Cap", "Square Cap", "Round Cap"], 2, (v) => {
     capType = v;
     draw();
   });
-  const slWidth = addSlider(sidebar, "Width", 3, 40, 20, 0.5, (v) => {
+  const slWidth = addSlider(sidebar, "Width", 3, 40, 20, 0.01, (v) => {
     strokeWidth = v;
     draw();
   });
-  const slMiter = addSlider(sidebar, "Miter Limit", 1, 10, 4, 0.1, (v) => {
+  const slMiter = addSlider(sidebar, "Miter Limit", 1, 10, 4, 0.01, (v) => {
     miterLimit = v;
     draw();
   });
   const canvasControls = [
-    { type: "radio", x1: 10, y1: 10, x2: 133, y2: 80, numItems: 4, sidebarEls: joinEls, onChange: (v) => {
+    { type: "radio", x1: 10, y1: 10, x2: 133, y2: 80, numItems: 4, textHeight: 7.5, sidebarEls: joinEls, onChange: (v) => {
       joinType = v;
       draw();
     } },
@@ -965,7 +1033,34 @@ function init4(container) {
       draw();
     } }
   ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: "bottom-left" });
+  function onKeyDown(e) {
+    let dx = 0;
+    let dy = 0;
+    switch (e.key) {
+      case "ArrowLeft":
+        dx = -0.1;
+        break;
+      case "ArrowRight":
+        dx = 0.1;
+        break;
+      case "ArrowUp":
+        dy = 0.1;
+        break;
+      case "ArrowDown":
+        dy = -0.1;
+        break;
+      default:
+        return;
+    }
+    vertices[0].x += dx;
+    vertices[0].y += dy;
+    vertices[1].x += dx;
+    vertices[1].y += dy;
+    draw();
+    e.preventDefault();
+  }
+  window.addEventListener("keydown", onKeyDown);
   const hint = document.createElement("div");
   hint.className = "control-hint";
   hint.textContent = "Drag the 3 vertices or click inside to move all.";
@@ -974,6 +1069,7 @@ function init4(container) {
   return () => {
     cleanupDrag();
     cleanupCC();
+    window.removeEventListener("keydown", onKeyDown);
   };
 }
 var init_conv_stroke = __esm(() => {
@@ -994,9 +1090,65 @@ function init5(container) {
     { x: 488, y: 423 },
     { x: 26, y: 333 }
   ];
+  let angleTolerance = 15;
+  let approximationScale = 1;
+  let cuspLimit = 0;
   let strokeWidth = 50;
   let showPoints = true;
   let showOutline = true;
+  let curveType = 1;
+  let caseType = 0;
+  let innerJoin = 3;
+  let lineJoin = 1;
+  let lineCap = 0;
+  function applyCasePreset(index) {
+    const setCurve = (x1, y1, x2, y2, x3, y3, x4, y4) => {
+      vertices[0].x = x1;
+      vertices[0].y = y1;
+      vertices[1].x = x2;
+      vertices[1].y = y2;
+      vertices[2].x = x3;
+      vertices[2].y = y3;
+      vertices[3].x = x4;
+      vertices[3].y = y4;
+    };
+    switch (index) {
+      case 0: {
+        const rw = W - 120;
+        const rh = H - 80;
+        const r = (n) => Math.floor(Math.random() * n);
+        setCurve(r(rw), r(rh) + 80, r(rw), r(rh) + 80, r(rw), r(rh) + 80, r(rw), r(rh) + 80);
+        break;
+      }
+      case 1:
+        setCurve(150, 150, 350, 150, 150, 150, 350, 150);
+        break;
+      case 2:
+        setCurve(50, 142, 483, 251, 496, 62, 26, 333);
+        break;
+      case 3:
+        setCurve(50, 142, 484, 251, 496, 62, 26, 333);
+        break;
+      case 4:
+        setCurve(100, 100, 300, 200, 200, 200, 200, 100);
+        break;
+      case 5:
+        setCurve(475, 157, 200, 100, 453, 100, 222, 157);
+        break;
+      case 6:
+        setCurve(129, 233, 32, 283, 258, 285, 159, 232);
+        strokeWidth = 100;
+        break;
+      case 7:
+        setCurve(100, 100, 300, 200, 264, 286, 264, 284);
+        break;
+      case 8:
+        setCurve(100, 100, 413, 304, 264, 286, 264, 284);
+        break;
+      default:
+        break;
+    }
+  }
   function draw() {
     renderToCanvas({
       demoName: "bezier_div",
@@ -1014,7 +1166,15 @@ function init5(container) {
         vertices[3].y,
         strokeWidth,
         showPoints ? 1 : 0,
-        showOutline ? 1 : 0
+        showOutline ? 1 : 0,
+        angleTolerance,
+        approximationScale,
+        cuspLimit,
+        curveType,
+        caseType,
+        innerJoin,
+        lineJoin,
+        lineCap
       ],
       timeDisplay: timeEl
     });
@@ -1025,6 +1185,18 @@ function init5(container) {
     threshold: 10,
     onDrag: draw
   });
+  const slAngle = addSlider(sidebar, "Angle Tolerance (deg)", 0, 90, angleTolerance, 1, (v) => {
+    angleTolerance = v;
+    draw();
+  });
+  const slApprox = addSlider(sidebar, "Approximation Scale", 0.1, 5, approximationScale, 0.01, (v) => {
+    approximationScale = v;
+    draw();
+  });
+  const slCusp = addSlider(sidebar, "Cusp Limit (deg)", 0, 90, cuspLimit, 1, (v) => {
+    cuspLimit = v;
+    draw();
+  });
   const slWidth = addSlider(sidebar, "Width", -50, 100, 50, 1, (v) => {
     strokeWidth = v;
     draw();
@@ -1033,28 +1205,111 @@ function init5(container) {
     showPoints = v;
     draw();
   });
-  const cbOutline = addCheckbox(sidebar, "Show Outline", true, (v) => {
+  const cbOutline = addCheckbox(sidebar, "Show Stroke Outline", true, (v) => {
     showOutline = v;
     draw();
   });
+  const curveTypeEls = addRadioGroup(sidebar, "Curve Type", ["Incremental", "Subdiv"], curveType, (v) => {
+    curveType = v;
+    draw();
+  });
+  const caseTypeEls = addRadioGroup(sidebar, "Case", [
+    "Random",
+    "13---24",
+    "Smooth Cusp 1",
+    "Smooth Cusp 2",
+    "Real Cusp 1",
+    "Real Cusp 2",
+    "Fancy Stroke",
+    "Jaw",
+    "Ugly Jaw"
+  ], caseType, (v) => {
+    caseType = v;
+    applyCasePreset(v);
+    if (v === 6) {
+      slWidth.value = String(strokeWidth);
+      slWidth.dispatchEvent(new Event("input"));
+      return;
+    }
+    draw();
+  });
+  const innerJoinEls = addRadioGroup(sidebar, "Inner Join", ["Inner Bevel", "Inner Miter", "Inner Jag", "Inner Round"], innerJoin, (v) => {
+    innerJoin = v;
+    draw();
+  });
+  const lineJoinEls = addRadioGroup(sidebar, "Line Join", ["Miter Join", "Miter Revert", "Round Join", "Bevel Join", "Miter Round"], lineJoin, (v) => {
+    lineJoin = v;
+    draw();
+  });
+  const lineCapEls = addRadioGroup(sidebar, "Line Cap", ["Butt Cap", "Square Cap", "Round Cap"], lineCap, (v) => {
+    lineCap = v;
+    draw();
+  });
   const canvasControls = [
+    { type: "slider", x1: 5, y1: 5, x2: 240, y2: 12, min: 0, max: 90, sidebarEl: slAngle, onChange: (v) => {
+      angleTolerance = v;
+      draw();
+    } },
+    { type: "slider", x1: 5, y1: 22, x2: 240, y2: 29, min: 0.1, max: 5, sidebarEl: slApprox, onChange: (v) => {
+      approximationScale = v;
+      draw();
+    } },
+    { type: "slider", x1: 5, y1: 39, x2: 240, y2: 46, min: 0, max: 90, sidebarEl: slCusp, onChange: (v) => {
+      cuspLimit = v;
+      draw();
+    } },
     { type: "slider", x1: 245, y1: 5, x2: 495, y2: 12, min: -50, max: 100, sidebarEl: slWidth, onChange: (v) => {
       strokeWidth = v;
       draw();
     } },
-    { type: "checkbox", x1: 250, y1: 15, x2: 400, y2: 30, sidebarEl: cbPts, onChange: (v) => {
+    { type: "checkbox", x1: 250, y1: 20, x2: 400, y2: 35, sidebarEl: cbPts, onChange: (v) => {
       showPoints = v;
       draw();
     } },
-    { type: "checkbox", x1: 250, y1: 30, x2: 450, y2: 45, sidebarEl: cbOutline, onChange: (v) => {
+    { type: "checkbox", x1: 250, y1: 35, x2: 450, y2: 50, sidebarEl: cbOutline, onChange: (v) => {
       showOutline = v;
+      draw();
+    } },
+    { type: "radio", x1: 535, y1: 5, x2: 650, y2: 55, numItems: 2, sidebarEls: curveTypeEls, onChange: (v) => {
+      curveType = v;
+      draw();
+    } },
+    {
+      type: "radio",
+      x1: 535,
+      y1: 60,
+      x2: 650,
+      y2: 195,
+      numItems: 9,
+      sidebarEls: caseTypeEls,
+      onChange: (v) => {
+        caseType = v;
+        applyCasePreset(v);
+        if (v === 6) {
+          slWidth.value = String(strokeWidth);
+          slWidth.dispatchEvent(new Event("input"));
+          return;
+        }
+        draw();
+      }
+    },
+    { type: "radio", x1: 535, y1: 200, x2: 650, y2: 290, numItems: 4, sidebarEls: innerJoinEls, onChange: (v) => {
+      innerJoin = v;
+      draw();
+    } },
+    { type: "radio", x1: 535, y1: 295, x2: 650, y2: 385, numItems: 5, sidebarEls: lineJoinEls, onChange: (v) => {
+      lineJoin = v;
+      draw();
+    } },
+    { type: "radio", x1: 535, y1: 395, x2: 650, y2: 455, numItems: 3, sidebarEls: lineCapEls, onChange: (v) => {
+      lineCap = v;
       draw();
     } }
   ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: "bottom-left" });
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Drag the 4 control points. Red = endpoints, green = handles.";
+  hint.textContent = "Drag the 4 control points. Canvas controls match C++ bezier_div.";
   sidebar.appendChild(hint);
   draw();
   return () => {
@@ -1282,13 +1537,15 @@ function init9(container) {
   let thickness = 1;
   let contrast = 1;
   let gamma = 1;
+  let rx = W / 3;
+  let ry = H / 3;
   function draw() {
     renderToCanvas({
       demoName: "gamma_correction",
       canvas,
       width: W,
       height: H,
-      params: [thickness, contrast, gamma],
+      params: [thickness, contrast, gamma, rx, ry],
       timeDisplay: timeEl
     });
   }
@@ -1309,128 +1566,88 @@ function init9(container) {
       thickness = v;
       draw();
     } },
-    { type: "slider", x1: 5, y1: 20, x2: 395, y2: 26, min: 0, max: 1, sidebarEl: slContrast, onChange: (v) => {
-      contrast = v;
-      draw();
-    } },
-    { type: "slider", x1: 5, y1: 35, x2: 395, y2: 41, min: 0.5, max: 3, sidebarEl: slGamma, onChange: (v) => {
+    { type: "slider", x1: 5, y1: 20, x2: 395, y2: 26, min: 0.5, max: 3, sidebarEl: slGamma, onChange: (v) => {
       gamma = v;
       draw();
+    } },
+    { type: "slider", x1: 5, y1: 35, x2: 395, y2: 41, min: 0, max: 1, sidebarEl: slContrast, onChange: (v) => {
+      contrast = v;
+      draw();
     } }
   ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
-  draw();
-  return cleanupCC;
-}
-var init_gamma_correction = __esm(() => {
-  init_render_canvas();
-});
-
-// src/demos/line_thickness.ts
-var exports_line_thickness = {};
-__export(exports_line_thickness, {
-  init: () => init10
-});
-function init10(container) {
-  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Line Thickness", "Lines at varying widths — matching C++ line_thickness.cpp.");
-  const W = 640, H = 480;
-  const vertices = [
-    { x: W * 0.05, y: H * 0.5 },
-    { x: W * 0.95, y: H * 0.5 }
-  ];
-  let thickness = 1;
-  let blur = 1.5;
-  let monochrome = true;
-  let invert = false;
-  function draw() {
-    renderToCanvas({
-      demoName: "line_thickness",
-      canvas,
-      width: W,
-      height: H,
-      params: [
-        vertices[0].x,
-        vertices[0].y,
-        vertices[1].x,
-        vertices[1].y,
-        thickness,
-        blur,
-        monochrome ? 1 : 0,
-        invert ? 1 : 0
-      ],
-      timeDisplay: timeEl
-    });
+  function aggPos2(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = canvas.height - (e.clientY - rect.top) * scaleY;
+    return { x, y };
   }
-  const cleanupDrag = setupVertexDrag({
-    canvas,
-    vertices,
-    threshold: 15,
-    onDrag: draw
-  });
-  const slThick = addSlider(sidebar, "Line thickness", 0, 5, 1, 0.1, (v) => {
-    thickness = v;
+  function updateRadiiFromPointer(e) {
+    const pos = aggPos2(e);
+    rx = Math.abs(W * 0.5 - pos.x);
+    ry = Math.abs(H * 0.5 - pos.y);
     draw();
-  });
-  const slBlur = addSlider(sidebar, "Blur radius", 0, 2, 1.5, 0.1, (v) => {
-    blur = v;
-    draw();
-  });
-  const cbMono = addCheckbox(sidebar, "Monochrome", true, (v) => {
-    monochrome = v;
-    draw();
-  });
-  const cbInvert = addCheckbox(sidebar, "Invert", false, (v) => {
-    invert = v;
-    draw();
-  });
-  const canvasControls = [
-    { type: "slider", x1: 10, y1: 10, x2: 630, y2: 19, min: 0, max: 5, sidebarEl: slThick, onChange: (v) => {
-      thickness = v;
-      draw();
-    } },
-    { type: "slider", x1: 10, y1: 30, x2: 630, y2: 39, min: 0, max: 2, sidebarEl: slBlur, onChange: (v) => {
-      blur = v;
-      draw();
-    } },
-    { type: "checkbox", x1: 10, y1: 45, x2: 200, y2: 60, sidebarEl: cbMono, onChange: (v) => {
-      monochrome = v;
-      draw();
-    } },
-    { type: "checkbox", x1: 10, y1: 65, x2: 200, y2: 80, sidebarEl: cbInvert, onChange: (v) => {
-      invert = v;
-      draw();
-    } }
-  ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
-  const hint = document.createElement("div");
-  hint.className = "control-hint";
-  hint.textContent = "Drag endpoints to tilt lines.";
-  sidebar.appendChild(hint);
+  }
+  function onPointerDown(e) {
+    if (e.button !== 0 || e.defaultPrevented)
+      return;
+    canvas.setPointerCapture(e.pointerId);
+    updateRadiiFromPointer(e);
+  }
+  function onPointerMove(e) {
+    if ((e.buttons & 1) === 0 || e.defaultPrevented)
+      return;
+    updateRadiiFromPointer(e);
+  }
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: "bottom-left" });
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
   draw();
   return () => {
-    cleanupDrag();
     cleanupCC();
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
   };
 }
-var init_line_thickness = __esm(() => {
+var init_gamma_correction = __esm(() => {
   init_render_canvas();
 });
 
 // src/demos/rasterizers.ts
 var exports_rasterizers = {};
 __export(exports_rasterizers, {
-  init: () => init11
+  init: () => init10
 });
-function init11(container) {
-  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Rasterizers", "Filled and stroked triangle with draggable vertices.");
+function pointInTriangle2(ax, ay, bx, by, cx, cy, px, py) {
+  const sign = (x1, y1, x2, y2, x3, y3) => (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
+  const d1 = sign(px, py, ax, ay, bx, by);
+  const d2 = sign(px, py, bx, by, cx, cy);
+  const d3 = sign(px, py, cx, cy, ax, ay);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
+function canvasPos2(canvas, e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: canvas.height - (e.clientY - rect.top) * scaleY
+  };
+}
+function init10(container) {
+  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Rasterizers", "Aliased vs anti-aliased rasterization with gamma and alpha controls.");
   const W = 500, H = 330;
   const vertices = [
-    { x: 157, y: 60 },
-    { x: 369, y: 170 },
-    { x: 243, y: 310 }
+    { x: 220, y: 60 },
+    { x: 489, y: 170 },
+    { x: 263, y: 310 }
   ];
   let gammaVal = 0.5;
   let alpha = 1;
+  let testPerformance = false;
   function draw() {
     renderToCanvas({
       demoName: "rasterizers",
@@ -1445,18 +1662,67 @@ function init11(container) {
         vertices[2].x,
         vertices[2].y,
         gammaVal,
-        alpha
+        alpha,
+        testPerformance ? 1 : 0
       ],
       timeDisplay: timeEl
     });
   }
-  const cleanupDrag = setupVertexDrag({
-    canvas,
-    vertices,
-    threshold: 15,
-    dragAll: true,
-    onDrag: draw
-  });
+  let dragIdx = -1;
+  let dx = 0;
+  let dy = 0;
+  function onPointerDown(e) {
+    if (e.button !== 0)
+      return;
+    const pos = canvasPos2(canvas, e);
+    const threshold = 20;
+    for (let i = 0;i < 3; i++) {
+      const dRight = Math.hypot(pos.x - vertices[i].x, pos.y - vertices[i].y);
+      const dLeft = Math.hypot(pos.x - (vertices[i].x - 200), pos.y - vertices[i].y);
+      if (dRight < threshold || dLeft < threshold) {
+        dx = pos.x - vertices[i].x;
+        dy = pos.y - vertices[i].y;
+        dragIdx = i;
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    const inRight = pointInTriangle2(vertices[0].x, vertices[0].y, vertices[1].x, vertices[1].y, vertices[2].x, vertices[2].y, pos.x, pos.y);
+    const inLeft = pointInTriangle2(vertices[0].x - 200, vertices[0].y, vertices[1].x - 200, vertices[1].y, vertices[2].x - 200, vertices[2].y, pos.x, pos.y);
+    if (inRight || inLeft) {
+      dx = pos.x - vertices[0].x;
+      dy = pos.y - vertices[0].y;
+      dragIdx = 3;
+      canvas.setPointerCapture(e.pointerId);
+    }
+  }
+  function onPointerMove(e) {
+    if (dragIdx < 0 || (e.buttons & 1) === 0)
+      return;
+    const pos = canvasPos2(canvas, e);
+    if (dragIdx === 3) {
+      const newX = pos.x - dx;
+      const newY = pos.y - dy;
+      const ddx = newX - vertices[0].x;
+      const ddy = newY - vertices[0].y;
+      for (const v of vertices) {
+        v.x += ddx;
+        v.y += ddy;
+      }
+      draw();
+      return;
+    }
+    vertices[dragIdx].x = pos.x - dx;
+    vertices[dragIdx].y = pos.y - dy;
+    draw();
+  }
+  function onPointerUp() {
+    dragIdx = -1;
+  }
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
   const slGamma = addSlider(sidebar, "Gamma", 0, 1, 0.5, 0.01, (v) => {
     gammaVal = v;
     draw();
@@ -1464,6 +1730,15 @@ function init11(container) {
   const slAlpha = addSlider(sidebar, "Alpha", 0, 1, 1, 0.01, (v) => {
     alpha = v;
     draw();
+  });
+  const cbTest = addCheckbox(sidebar, "Test Performance", false, (v) => {
+    testPerformance = v;
+    draw();
+    if (v) {
+      testPerformance = false;
+      cbTest.checked = false;
+      draw();
+    }
   });
   const canvasControls = [
     { type: "slider", x1: 140, y1: 14, x2: 280, y2: 22, min: 0, max: 1, sidebarEl: slGamma, onChange: (v) => {
@@ -1473,17 +1748,57 @@ function init11(container) {
     { type: "slider", x1: 290, y1: 14, x2: 490, y2: 22, min: 0, max: 1, sidebarEl: slAlpha, onChange: (v) => {
       alpha = v;
       draw();
+    } },
+    { type: "checkbox", x1: 140, y1: 30, x2: 270, y2: 46, sidebarEl: cbTest, onChange: (v) => {
+      testPerformance = v;
+      draw();
+      if (v) {
+        testPerformance = false;
+        cbTest.checked = false;
+        draw();
+      }
     } }
   ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: "bottom-left" });
+  function onKeyDown(e) {
+    let ddx = 0;
+    let ddy = 0;
+    switch (e.key) {
+      case "ArrowLeft":
+        ddx = -0.1;
+        break;
+      case "ArrowRight":
+        ddx = 0.1;
+        break;
+      case "ArrowUp":
+        ddy = 0.1;
+        break;
+      case "ArrowDown":
+        ddy = -0.1;
+        break;
+      default:
+        return;
+    }
+    vertices[0].x += ddx;
+    vertices[0].y += ddy;
+    vertices[1].x += ddx;
+    vertices[1].y += ddy;
+    draw();
+    e.preventDefault();
+  }
+  window.addEventListener("keydown", onKeyDown);
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Drag the 3 vertices.";
+  hint.textContent = "Drag vertices on either triangle or drag inside triangle to move all.";
   sidebar.appendChild(hint);
   draw();
   return () => {
-    cleanupDrag();
     cleanupCC();
+    window.removeEventListener("keydown", onKeyDown);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", onPointerUp);
+    canvas.removeEventListener("pointercancel", onPointerUp);
   };
 }
 var init_rasterizers = __esm(() => {
@@ -1493,9 +1808,9 @@ var init_rasterizers = __esm(() => {
 // src/demos/conv_contour.ts
 var exports_conv_contour = {};
 __export(exports_conv_contour, {
-  init: () => init12
+  init: () => init11
 });
-function init12(container) {
+function init11(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Conv Contour", 'Letter "A" with adjustable contour width — matching C++ conv_contour.cpp.');
   const W = 440, H = 330;
   let closeMode = 0;
@@ -1545,115 +1860,12 @@ var init_conv_contour = __esm(() => {
   init_render_canvas();
 });
 
-// src/demos/conv_dash.ts
-var exports_conv_dash = {};
-__export(exports_conv_dash, {
-  init: () => init13
-});
-function init13(container) {
-  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Conv Dash", "Dashed stroke with cap styles — based on C++ conv_dash_marker.cpp.");
-  const W = 500, H = 330;
-  const vertices = [
-    { x: 157, y: 60 },
-    { x: 469, y: 170 },
-    { x: 243, y: 310 }
-  ];
-  let capType = 0;
-  let strokeWidth = 3;
-  let closePoly = false;
-  let evenOdd = false;
-  let smooth = 1;
-  function draw() {
-    renderToCanvas({
-      demoName: "conv_dash",
-      canvas,
-      width: W,
-      height: H,
-      params: [
-        vertices[0].x,
-        vertices[0].y,
-        vertices[1].x,
-        vertices[1].y,
-        vertices[2].x,
-        vertices[2].y,
-        capType,
-        strokeWidth,
-        closePoly ? 1 : 0,
-        evenOdd ? 1 : 0,
-        smooth
-      ],
-      timeDisplay: timeEl
-    });
-  }
-  const cleanupDrag = setupVertexDrag({
-    canvas,
-    vertices,
-    threshold: 20,
-    onDrag: draw
-  });
-  const radioEls = addRadioGroup(sidebar, "Cap", ["Butt Cap", "Square Cap", "Round Cap"], 0, (v) => {
-    capType = v;
-    draw();
-  });
-  const slWidth = addSlider(sidebar, "Width", 0.5, 10, 3, 0.5, (v) => {
-    strokeWidth = v;
-    draw();
-  });
-  const slSmooth = addSlider(sidebar, "Smooth", 0, 2, 1, 0.1, (v) => {
-    smooth = v;
-    draw();
-  });
-  const cbClose = addCheckbox(sidebar, "Close Polygons", false, (v) => {
-    closePoly = v;
-    draw();
-  });
-  const cbEO = addCheckbox(sidebar, "Even-Odd Fill", false, (v) => {
-    evenOdd = v;
-    draw();
-  });
-  const canvasControls = [
-    { type: "radio", x1: 10, y1: 10, x2: 130, y2: 80, numItems: 3, sidebarEls: radioEls, onChange: (v) => {
-      capType = v;
-      draw();
-    } },
-    { type: "slider", x1: 140, y1: 14, x2: 280, y2: 22, min: 0, max: 10, sidebarEl: slWidth, onChange: (v) => {
-      strokeWidth = v;
-      draw();
-    } },
-    { type: "slider", x1: 290, y1: 14, x2: 490, y2: 22, min: 0, max: 2, sidebarEl: slSmooth, onChange: (v) => {
-      smooth = v;
-      draw();
-    } },
-    { type: "checkbox", x1: 140, y1: 25, x2: 290, y2: 40, sidebarEl: cbClose, onChange: (v) => {
-      closePoly = v;
-      draw();
-    } },
-    { type: "checkbox", x1: 300, y1: 25, x2: 450, y2: 40, sidebarEl: cbEO, onChange: (v) => {
-      evenOdd = v;
-      draw();
-    } }
-  ];
-  const cleanupControls = setupCanvasControls(canvas, canvasControls, draw);
-  const hint = document.createElement("div");
-  hint.className = "control-hint";
-  hint.textContent = "Drag triangle vertices. Click canvas controls to interact.";
-  sidebar.appendChild(hint);
-  draw();
-  return () => {
-    cleanupDrag();
-    cleanupControls();
-  };
-}
-var init_conv_dash = __esm(() => {
-  init_render_canvas();
-});
-
 // src/demos/perspective.ts
 var exports_perspective = {};
 __export(exports_perspective, {
-  init: () => init14
+  init: () => init12
 });
-function init14(container) {
+function init12(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Perspective", "Lion with bilinear/perspective quad transform — matching C++ perspective.cpp.");
   const W = 600, H = 600;
   const ox = (W - 240) / 2;
@@ -1665,6 +1877,19 @@ function init14(container) {
     { x: ox, y: oy + 380 }
   ];
   let transType = 0;
+  function pointInPolygon(x, y, verts) {
+    let inside = false;
+    for (let i = 0, j = verts.length - 1;i < verts.length; j = i++) {
+      const xi = verts[i].x;
+      const yi = verts[i].y;
+      const xj = verts[j].x;
+      const yj = verts[j].y;
+      const intersects = yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi || 0.000000000001) + xi;
+      if (intersects)
+        inside = !inside;
+    }
+    return inside;
+  }
   function draw() {
     renderToCanvas({
       demoName: "perspective",
@@ -1688,7 +1913,11 @@ function init14(container) {
   const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
-    threshold: 20,
+    threshold: 5,
+    dragEdges: true,
+    edgeThreshold: 5,
+    dragAll: true,
+    dragAllHitTest: pointInPolygon,
     onDrag: draw
   });
   const radioEls = addRadioGroup(sidebar, "Transform", ["Bilinear", "Perspective"], 0, (v) => {
@@ -1719,9 +1948,9 @@ var init_perspective = __esm(() => {
 // src/demos/image_fltr_graph.ts
 var exports_image_fltr_graph = {};
 __export(exports_image_fltr_graph, {
-  init: () => init15
+  init: () => init13
 });
-function init15(container) {
+function init13(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Filter Graph", "Image filter weight function visualization — matching C++ image_fltr_graph.cpp.");
   const W = 780, H = 300;
   let radius = 4;
@@ -1802,9 +2031,9 @@ var init_image_fltr_graph = __esm(() => {
 // src/demos/image1.ts
 var exports_image1 = {};
 __export(exports_image1, {
-  init: () => init16
+  init: () => init14
 });
-function init16(container) {
+function init14(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Affine Transforms", "Original AGG spheres image rotated/scaled through an ellipse with bilinear filtering. Port of image1.cpp.");
   const W = 340, H = 360;
   let angle = 0;
@@ -1848,9 +2077,9 @@ var init_image1 = __esm(() => {
 // src/demos/image_filters.ts
 var exports_image_filters = {};
 __export(exports_image_filters, {
-  init: () => init17
+  init: () => init15
 });
-function init17(container) {
+function init15(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Filters", "Iterative image rotation showing filter quality degradation — matching C++ image_filters.cpp.");
   const W = 430, H = 340;
   let filterIdx = 1;
@@ -2059,9 +2288,9 @@ var init_image_filters = __esm(() => {
 // src/demos/gradient_focal.ts
 var exports_gradient_focal = {};
 __export(exports_gradient_focal, {
-  init: () => init18
+  init: () => init16
 });
-function init18(container) {
+function init16(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Gradient Focal", "Radial gradient with moveable focal point — matching C++ gradient_focal.cpp.");
   const W = 600, H = 400;
   let focalX = W / 2;
@@ -2143,9 +2372,9 @@ var init_gradient_focal = __esm(() => {
 // src/demos/idea.ts
 var exports_idea = {};
 __export(exports_idea, {
-  init: () => init19
+  init: () => init17
 });
-function init19(container) {
+function init17(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Idea", "Rotating light bulb icon with fill options — matching C++ idea.cpp.");
   const W = 250, H = 280;
   let angle = 0;
@@ -2230,9 +2459,9 @@ var init_idea = __esm(() => {
 // src/demos/graph_test.ts
 var exports_graph_test = {};
 __export(exports_graph_test, {
-  init: () => init20
+  init: () => init18
 });
-function init20(container) {
+function init18(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Graph Test", "Random graph with 200 nodes and 100 edges — matching C++ graph_test.cpp.");
   const W = 700, H = 530;
   let edgeType = 0;
@@ -2312,9 +2541,9 @@ var init_graph_test = __esm(() => {
 // src/demos/gamma_tuner.ts
 var exports_gamma_tuner = {};
 __export(exports_gamma_tuner, {
-  init: () => init21
+  init: () => init19
 });
-function init21(container) {
+function init19(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Gamma Tuner", "Gradient background + alpha pattern with gamma correction — matching C++ gamma_tuner.cpp.");
   const W = 500, H = 500;
   let gamma = 2.2;
@@ -2383,9 +2612,9 @@ var init_gamma_tuner = __esm(() => {
 // src/demos/image_filters2.ts
 var exports_image_filters2 = {};
 __export(exports_image_filters2, {
-  init: () => init22
+  init: () => init20
 });
-function init22(container) {
+function init20(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Filters 2", "4x4 test image filtered through 17 filter types — matching C++ image_filters2.cpp.");
   const W = 500, H = 340;
   let filterIdx = 1;
@@ -2470,9 +2699,9 @@ var init_image_filters2 = __esm(() => {
 // src/demos/conv_dash_marker.ts
 var exports_conv_dash_marker = {};
 __export(exports_conv_dash_marker, {
-  init: () => init23
+  init: () => init21
 });
-function init23(container) {
+function init21(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Conv Dash Marker", "Dashed stroke with cap styles — matching C++ conv_dash_marker.cpp layout.");
   const W = 500, H = 330;
   const vertices = [
@@ -2482,6 +2711,7 @@ function init23(container) {
   ];
   let capType = 0;
   let strokeWidth = 3;
+  let smooth = 1;
   let closePoly = false;
   let evenOdd = false;
   function draw() {
@@ -2500,16 +2730,36 @@ function init23(container) {
         capType,
         strokeWidth,
         closePoly ? 1 : 0,
-        evenOdd ? 1 : 0
+        evenOdd ? 1 : 0,
+        smooth
       ],
       timeDisplay: timeEl
     });
+  }
+  function pointInTriangle3(px, py, a, b, c) {
+    const v0x = c.x - a.x;
+    const v0y = c.y - a.y;
+    const v1x = b.x - a.x;
+    const v1y = b.y - a.y;
+    const v2x = px - a.x;
+    const v2y = py - a.y;
+    const dot00 = v0x * v0x + v0y * v0y;
+    const dot01 = v0x * v1x + v0y * v1y;
+    const dot02 = v0x * v2x + v0y * v2y;
+    const dot11 = v1x * v1x + v1y * v1y;
+    const dot12 = v1x * v2x + v1y * v2y;
+    const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+    const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+    const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+    return u >= 0 && v >= 0 && u + v <= 1;
   }
   const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 10,
-    onDrag: draw
+    onDrag: draw,
+    dragAll: true,
+    dragAllHitTest: (x, y, vs) => pointInTriangle3(x, y, vs[0], vs[1], vs[2])
   });
   const radioEls = addRadioGroup(sidebar, "Cap Style", ["Butt Cap", "Square Cap", "Round Cap"], 0, (v) => {
     capType = v;
@@ -2517,6 +2767,10 @@ function init23(container) {
   });
   const slWidth = addSlider(sidebar, "Width", 0, 10, 3, 0.01, (v) => {
     strokeWidth = v;
+    draw();
+  });
+  const slSmooth = addSlider(sidebar, "Smooth", 0, 2, 1, 0.01, (v) => {
+    smooth = v;
     draw();
   });
   const cbClose = addCheckbox(sidebar, "Close Polygons", false, (v) => {
@@ -2532,15 +2786,19 @@ function init23(container) {
       capType = v;
       draw();
     } },
-    { type: "slider", x1: 140, y1: 14, x2: 290, y2: 22, min: 0, max: 10, sidebarEl: slWidth, onChange: (v) => {
+    { type: "slider", x1: 140, y1: 14, x2: 280, y2: 22, min: 0, max: 10, sidebarEl: slWidth, onChange: (v) => {
       strokeWidth = v;
       draw();
     } },
-    { type: "checkbox", x1: 140, y1: 34, x2: 290, y2: 47, sidebarEl: cbClose, onChange: (v) => {
+    { type: "slider", x1: 290, y1: 14, x2: 490, y2: 22, min: 0, max: 2, sidebarEl: slSmooth, onChange: (v) => {
+      smooth = v;
+      draw();
+    } },
+    { type: "checkbox", x1: 140, y1: 25, x2: 290, y2: 40, sidebarEl: cbClose, onChange: (v) => {
       closePoly = v > 0.5;
       draw();
     } },
-    { type: "checkbox", x1: 300, y1: 34, x2: 490, y2: 47, sidebarEl: cbEvenOdd, onChange: (v) => {
+    { type: "checkbox", x1: 290, y1: 25, x2: 490, y2: 40, sidebarEl: cbEvenOdd, onChange: (v) => {
       evenOdd = v > 0.5;
       draw();
     } }
@@ -2548,7 +2806,7 @@ function init23(container) {
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Drag triangle vertices. Dashed strokes with arrowhead markers (simplified).";
+  hint.textContent = "Drag triangle vertices. Dashed strokes with arrowhead markers.";
   sidebar.appendChild(hint);
   draw();
   return () => {
@@ -2563,9 +2821,9 @@ var init_conv_dash_marker = __esm(() => {
 // src/demos/aa_test.ts
 var exports_aa_test = {};
 __export(exports_aa_test, {
-  init: () => init24
+  init: () => init22
 });
-function init24(container) {
+function init22(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "AA Test", "Radial dashes, ellipses, gradient lines, and Gouraud triangles — matching C++ aa_test.cpp.");
   const W = 480, H = 350;
   let gamma = 1.6;
@@ -2604,9 +2862,9 @@ var init_aa_test = __esm(() => {
 // src/demos/bspline.ts
 var exports_bspline = {};
 __export(exports_bspline, {
-  init: () => init25
+  init: () => init23
 });
-function init25(container) {
+function init23(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "B-Spline", "B-spline curve through 6 draggable control points — matching C++ bspline.cpp.");
   const W = 600, H = 600;
   const vertices = [
@@ -2675,16 +2933,16 @@ var init_bspline = __esm(() => {
 // src/demos/image_perspective.ts
 var exports_image_perspective = {};
 __export(exports_image_perspective, {
-  init: () => init26
+  init: () => init24
 });
-function init26(container) {
+function init24(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Perspective", "Image transformed through affine/bilinear/perspective quad — matching C++ image_perspective.cpp.");
   const W = 600, H = 600;
   const vertices = [
     { x: 100, y: 100 },
-    { x: 500, y: 50 },
-    { x: 500, y: 500 },
-    { x: 100, y: 500 }
+    { x: W - 100, y: 100 },
+    { x: W - 100, y: H - 100 },
+    { x: 100, y: H - 100 }
   ];
   let transType = 0;
   function draw() {
@@ -2700,43 +2958,59 @@ function init26(container) {
       timeDisplay: timeEl
     });
   }
+  function pointInPolygon(x, y, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1;i < pts.length; j = i++) {
+      const xi = pts[i].x;
+      const yi = pts[i].y;
+      const xj = pts[j].x;
+      const yj = pts[j].y;
+      const intersects = yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi || 0.000000000001) + xi;
+      if (intersects)
+        inside = !inside;
+    }
+    return inside;
+  }
   const cleanupDrag = setupVertexDrag({
     canvas,
     vertices,
     threshold: 10,
+    dragEdges: true,
+    edgeThreshold: 5,
+    dragAll: true,
+    dragAllHitTest: (x, y, verts) => pointInPolygon(x, y, verts),
     onDrag: draw
   });
-  const radioDiv = document.createElement("div");
-  radioDiv.className = "control-group";
-  const radioLabel = document.createElement("label");
-  radioLabel.className = "control-label";
-  radioLabel.textContent = "Transform Type";
-  radioDiv.appendChild(radioLabel);
   const names = ["Affine Parallelogram", "Bilinear", "Perspective"];
-  names.forEach((name, i) => {
-    const row = document.createElement("label");
-    row.style.display = "block";
-    row.style.cursor = "pointer";
-    row.style.marginBottom = "2px";
-    const rb = document.createElement("input");
-    rb.type = "radio";
-    rb.name = "img_persp_trans";
-    rb.value = String(i);
-    rb.checked = i === transType;
-    rb.addEventListener("change", () => {
-      transType = i;
-      draw();
-    });
-    row.appendChild(rb);
-    row.appendChild(document.createTextNode(" " + name));
-    radioDiv.appendChild(row);
+  const namesUi = [...names].reverse();
+  const radioInputsUi = addRadioGroup(sidebar, "Transform Type", namesUi, names.length - 1 - transType, (uiIdx) => {
+    transType = names.length - 1 - uiIdx;
+    draw();
   });
-  sidebar.appendChild(radioDiv);
-  const canvasControls = [];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
+  const radioInputs = new Array(names.length);
+  for (let uiIdx = 0;uiIdx < names.length; uiIdx++) {
+    const logicalIdx = names.length - 1 - uiIdx;
+    radioInputs[logicalIdx] = radioInputsUi[uiIdx];
+  }
+  const canvasControls = [
+    {
+      type: "radio",
+      x1: 420,
+      y1: 5,
+      x2: 590,
+      y2: 65,
+      numItems: 3,
+      sidebarEls: radioInputs,
+      onChange(index) {
+        transType = index;
+        draw();
+      }
+    }
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: "bottom-left" });
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Drag the 4 quad corners to transform the image.";
+  hint.textContent = "Drag corners, edges, or inside the quad. Canvas and sidebar transform controls are synchronized.";
   sidebar.appendChild(hint);
   draw();
   return () => {
@@ -2751,9 +3025,9 @@ var init_image_perspective = __esm(() => {
 // src/demos/alpha_mask.ts
 var exports_alpha_mask = {};
 __export(exports_alpha_mask, {
-  init: () => init27
+  init: () => init25
 });
-function init27(container) {
+function init25(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Alpha Mask", "Lion with elliptical alpha mask — matching C++ alpha_mask.cpp.");
   const W = 512, H = 400;
   let angle = 0;
@@ -2870,9 +3144,9 @@ var init_alpha_mask = __esm(() => {
 // src/demos/alpha_gradient.ts
 var exports_alpha_gradient = {};
 __export(exports_alpha_gradient, {
-  init: () => init28
+  init: () => init26
 });
-function init28(container) {
+function init26(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Alpha Gradient", "Gradient with alpha curve control over a random ellipse background — matching C++ alpha_gradient.cpp.");
   const W = 512, H = 400;
   const vertices = [
@@ -2881,6 +3155,46 @@ function init28(container) {
     { x: 143, y: 310 }
   ];
   const alphaValues = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function pointInTriangle3(px, py, a, b, c) {
+    const s = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);
+    const t = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
+    const u = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
+    const hasNeg = s < 0 || t < 0 || u < 0;
+    const hasPos = s > 0 || t > 0 || u > 0;
+    return !(hasNeg && hasPos);
+  }
+  function canvasPos3(e) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width;
+    const sy = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * sx;
+    const yTop = (e.clientY - rect.top) * sy;
+    return {
+      raw: { x, y: yTop },
+      agg: { x, y: canvas.height - yTop }
+    };
+  }
+  const spline = {
+    x1: 2,
+    y1: 2,
+    x2: 200,
+    y2: 30,
+    border: 1
+  };
+  const splineXs1 = spline.x1 + spline.border;
+  const splineYs1 = spline.y1 + spline.border;
+  const splineXs2 = spline.x2 - spline.border;
+  const splineYs2 = spline.y2 - spline.border;
+  function inSplineRect(p) {
+    return p.x >= spline.x1 && p.x <= spline.x2 && p.y >= spline.y1 && p.y <= spline.y2;
+  }
+  function splinePoint(i) {
+    return {
+      x: splineXs1 + (splineXs2 - splineXs1) * (i / 5),
+      y: splineYs1 + (splineYs2 - splineYs1) * alphaValues[i]
+    };
+  }
   function draw() {
     renderToCanvas({
       demoName: "alpha_gradient",
@@ -2894,36 +3208,93 @@ function init28(container) {
       timeDisplay: timeEl
     });
   }
-  const cleanupDrag = setupVertexDrag({
-    canvas,
-    vertices,
-    threshold: 10,
-    onDrag: draw
-  });
-  const controls = [];
+  const alphaSliders = [];
   for (let i = 0;i < 6; i++) {
-    controls.push({
-      type: "slider",
-      label: `Alpha ${i}`,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      initial: alphaValues[i],
-      onChange(v) {
-        alphaValues[i] = v;
-        draw();
-      }
-    });
+    alphaSliders.push(addSlider(sidebar, `Alpha ${i}`, 0, 1, alphaValues[i], 0.01, (v) => {
+      alphaValues[i] = v;
+      draw();
+    }));
   }
-  const cleanupCC = setupCanvasControls(canvas, controls, draw);
+  let drag = { kind: "none" };
+  function onPointerDown(e) {
+    if (e.button !== 0)
+      return;
+    const pos = canvasPos3(e);
+    const useRawForSpline = !inSplineRect(pos.agg) && inSplineRect(pos.raw);
+    const pSpline = useRawForSpline ? pos.raw : pos.agg;
+    for (let i = 0;i < 6; i++) {
+      const sp = splinePoint(i);
+      if (Math.hypot(pSpline.x - sp.x, pSpline.y - sp.y) <= 8) {
+        drag = { kind: "alpha", idx: i, useRaw: useRawForSpline, pdy: sp.y - pSpline.y };
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+    const p = pos.agg;
+    for (let i = 0;i < 3; i++) {
+      const d = Math.hypot(p.x - vertices[i].x, p.y - vertices[i].y);
+      if (d < 10) {
+        drag = { kind: "vertex", idx: i, dx: p.x - vertices[i].x, dy: p.y - vertices[i].y };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    if (pointInTriangle3(p.x, p.y, vertices[0], vertices[1], vertices[2])) {
+      drag = { kind: "all", dx: p.x - vertices[0].x, dy: p.y - vertices[0].y };
+      canvas.setPointerCapture(e.pointerId);
+    }
+  }
+  function onPointerMove(e) {
+    if (drag.kind === "none" || e.buttons === 0)
+      return;
+    const pos = canvasPos3(e);
+    if (drag.kind === "alpha") {
+      const p2 = drag.useRaw ? pos.raw : pos.agg;
+      const y = p2.y + drag.pdy;
+      const v = clamp((y - splineYs1) / (splineYs2 - splineYs1), 0, 1);
+      const slider = alphaSliders[drag.idx];
+      slider.value = String(v);
+      slider.dispatchEvent(new Event("input"));
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const p = pos.agg;
+    if (drag.kind === "vertex") {
+      vertices[drag.idx].x = p.x - drag.dx;
+      vertices[drag.idx].y = p.y - drag.dy;
+      draw();
+      return;
+    }
+    const nx = p.x - drag.dx;
+    const ny = p.y - drag.dy;
+    const ddx = nx - vertices[0].x;
+    const ddy = ny - vertices[0].y;
+    for (const v of vertices) {
+      v.x += ddx;
+      v.y += ddy;
+    }
+    draw();
+  }
+  function onPointerUp() {
+    drag = { kind: "none" };
+  }
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Drag the 3 triangle vertices. Adjust alpha curve with sliders.";
+  hint.textContent = "Drag vertices or inside the triangle to move the parallelogram; drag spline points on canvas or use the sidebar sliders.";
   sidebar.appendChild(hint);
   draw();
   return () => {
-    cleanupDrag();
-    cleanupCC();
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", onPointerUp);
+    canvas.removeEventListener("pointercancel", onPointerUp);
   };
 }
 var init_alpha_gradient = __esm(() => {
@@ -2933,9 +3304,9 @@ var init_alpha_gradient = __esm(() => {
 // src/demos/image_alpha.ts
 var exports_image_alpha = {};
 __export(exports_image_alpha, {
-  init: () => init29
+  init: () => init27
 });
-function init29(container) {
+function init27(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Alpha", "Image with brightness-to-alpha mapping over a random ellipse background — matching C++ image_alpha.cpp.");
   const W = 512, H = 400;
   const alphaValues = [1, 1, 1, 0.5, 0.5, 1];
@@ -2981,9 +3352,9 @@ var init_image_alpha = __esm(() => {
 // src/demos/alpha_mask3.ts
 var exports_alpha_mask3 = {};
 __export(exports_alpha_mask3, {
-  init: () => init30
+  init: () => init28
 });
-function init30(container) {
+function init28(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Alpha Mask 3", "Alpha mask polygon clipping with AND/SUB operations — matching C++ alpha_mask3.cpp.");
   const W = 640, H = 520;
   let scenario = 3;
@@ -3018,6 +3389,8 @@ function init30(container) {
   };
   let dragging = false;
   const onPointerDown = (e) => {
+    if (e.defaultPrevented)
+      return;
     if (e.button === 0) {
       const p = aggMousePos(e);
       mouseX = p.x;
@@ -3028,6 +3401,8 @@ function init30(container) {
     }
   };
   const onPointerMove = (e) => {
+    if (e.defaultPrevented)
+      return;
     if (!dragging || (e.buttons & 1) === 0)
       return;
     const p = aggMousePos(e);
@@ -3090,7 +3465,7 @@ function init30(container) {
       }
     }
   ];
-  const cleanupCC = setupCanvasControls(canvas, controls, draw);
+  const cleanupCC = setupCanvasControls(canvas, controls, draw, { origin: "bottom-left" });
   const hint = document.createElement("div");
   hint.className = "control-hint";
   hint.textContent = "Left-click or drag on canvas to move shapes. Canvas and sidebar controls are synchronized.";
@@ -3111,118 +3486,220 @@ var init_alpha_mask3 = __esm(() => {
 // src/demos/image_transforms.ts
 var exports_image_transforms = {};
 __export(exports_image_transforms, {
-  init: () => init31
+  init: () => init29
 });
-function init31(container) {
-  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Transforms", "Star polygon textured with image through 7 transform modes — matching C++ image_transforms.cpp.");
-  const W = 430, H = 340;
+function init29(container) {
+  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Transforms", "Star polygon textured with image through 7 transform modes - matching C++ image_transforms.cpp.");
+  const W = 320;
+  const H = 300;
   let polyAngle = 0;
   let polyScale = 1;
   let imgAngle = 0;
   let imgScale = 1;
-  let exampleIdx = 1;
+  let rotatePolygon = false;
+  let rotateImage = false;
+  let exampleIdx = 0;
+  let imageCx = W / 2;
+  let imageCy = H / 2;
+  let polygonCx = W / 2;
+  let polygonCy = H / 2;
+  let dragFlag = 0;
+  let dx = 0;
+  let dy = 0;
+  let rafId = 0;
   function draw() {
     renderToCanvas({
       demoName: "image_transforms",
       canvas,
       width: W,
       height: H,
-      params: [polyAngle, polyScale, imgAngle, imgScale, exampleIdx, W / 2, H / 2, W / 2, H / 2],
+      params: [
+        polyAngle,
+        polyScale,
+        imgAngle,
+        imgScale,
+        rotatePolygon ? 1 : 0,
+        rotateImage ? 1 : 0,
+        exampleIdx,
+        imageCx,
+        imageCy,
+        polygonCx,
+        polygonCy
+      ],
       timeDisplay: timeEl
     });
   }
-  const radioDiv = document.createElement("div");
-  radioDiv.className = "control-group";
-  const radioLabel = document.createElement("label");
-  radioLabel.className = "control-label";
-  radioLabel.textContent = "Transform Example";
-  radioDiv.appendChild(radioLabel);
-  const names = [
-    "1: Rotate around (img_cx, img_cy)",
-    "2: Plus translate to center",
-    "3: Image in polygon coords",
-    "4: Image in polygon + rotate",
-    "5: Image in polygon + rotate + scale",
-    "6: Rotate image + polygon same center",
-    "7: Rotate image + polygon separately"
-  ];
-  names.forEach((name, i) => {
-    const row = document.createElement("label");
-    row.style.display = "block";
-    row.style.cursor = "pointer";
-    row.style.marginBottom = "2px";
-    row.style.fontSize = "12px";
-    const rb = document.createElement("input");
-    rb.type = "radio";
-    rb.name = "img_trans_example";
-    rb.value = String(i + 1);
-    rb.checked = i + 1 === exampleIdx;
-    rb.addEventListener("change", () => {
-      exampleIdx = i + 1;
-      draw();
-    });
-    row.appendChild(rb);
-    row.appendChild(document.createTextNode(" " + name));
-    radioDiv.appendChild(row);
+  const slPolyAngle = addSlider(sidebar, "Polygon Angle", -180, 180, polyAngle, 0.01, (v) => {
+    polyAngle = v;
+    draw();
   });
-  sidebar.appendChild(radioDiv);
+  const slPolyScale = addSlider(sidebar, "Polygon Scale", 0.1, 5, polyScale, 0.01, (v) => {
+    polyScale = v;
+    draw();
+  });
+  const slImgAngle = addSlider(sidebar, "Image Angle", -180, 180, imgAngle, 0.01, (v) => {
+    imgAngle = v;
+    draw();
+  });
+  const slImgScale = addSlider(sidebar, "Image Scale", 0.1, 5, imgScale, 0.01, (v) => {
+    imgScale = v;
+    draw();
+  });
+  const cbRotatePolygon = addCheckbox(sidebar, "Rotate Polygon", rotatePolygon, (v) => {
+    rotatePolygon = v;
+    draw();
+  });
+  const cbRotateImage = addCheckbox(sidebar, "Rotate Image", rotateImage, (v) => {
+    rotateImage = v;
+    draw();
+  });
+  const radioEls = addRadioGroup(sidebar, "Example", ["0", "1", "2", "3", "4", "5", "6"], 0, (v) => {
+    exampleIdx = v;
+    draw();
+  });
   const controls = [
-    {
-      type: "slider",
-      label: "Polygon Angle",
-      min: -180,
-      max: 180,
-      step: 1,
-      initial: polyAngle,
-      onChange(v) {
-        polyAngle = v;
-        draw();
-      }
-    },
-    {
-      type: "slider",
-      label: "Polygon Scale",
-      min: 0.1,
-      max: 5,
-      step: 0.05,
-      initial: polyScale,
-      onChange(v) {
-        polyScale = v;
-        draw();
-      }
-    },
-    {
-      type: "slider",
-      label: "Image Angle",
-      min: -180,
-      max: 180,
-      step: 1,
-      initial: imgAngle,
-      onChange(v) {
-        imgAngle = v;
-        draw();
-      }
-    },
-    {
-      type: "slider",
-      label: "Image Scale",
-      min: 0.1,
-      max: 5,
-      step: 0.05,
-      initial: imgScale,
-      onChange(v) {
-        imgScale = v;
-        draw();
-      }
-    }
+    { type: "slider", x1: 5, y1: 5, x2: 145, y2: 11, min: -180, max: 180, sidebarEl: slPolyAngle, onChange: (v) => {
+      polyAngle = v;
+      draw();
+    } },
+    { type: "slider", x1: 5, y1: 19, x2: 145, y2: 26, min: 0.1, max: 5, sidebarEl: slPolyScale, onChange: (v) => {
+      polyScale = v;
+      draw();
+    } },
+    { type: "slider", x1: 155, y1: 5, x2: 300, y2: 12, min: -180, max: 180, sidebarEl: slImgAngle, onChange: (v) => {
+      imgAngle = v;
+      draw();
+    } },
+    { type: "slider", x1: 155, y1: 19, x2: 300, y2: 26, min: 0.1, max: 5, sidebarEl: slImgScale, onChange: (v) => {
+      imgScale = v;
+      draw();
+    } },
+    { type: "checkbox", x1: 5, y1: 33, x2: 125, y2: 45, sidebarEl: cbRotatePolygon, onChange: (v) => {
+      rotatePolygon = v;
+      draw();
+    } },
+    { type: "checkbox", x1: 5, y1: 47, x2: 125, y2: 59, sidebarEl: cbRotateImage, onChange: (v) => {
+      rotateImage = v;
+      draw();
+    } },
+    { type: "radio", x1: 5, y1: 56, x2: 40, y2: 190, numItems: 7, sidebarEls: radioEls, onChange: (v) => {
+      exampleIdx = v;
+      draw();
+    } }
   ];
   const cleanupCC = setupCanvasControls(canvas, controls, draw);
+  function canvasPosAgg(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: canvas.height - (e.clientY - rect.top) * scaleY
+    };
+  }
+  function transformedStarPoints() {
+    const points = [];
+    const r = Math.min(W, H);
+    const r1 = r / 3 - 8;
+    const r2 = r1 / 1.45;
+    const a = polyAngle * Math.PI / 180;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    for (let i = 0;i < 14; i++) {
+      const angle = Math.PI * 2 * i / 14 - Math.PI / 2;
+      const rr = i & 1 ? r1 : r2;
+      const x0 = polygonCx + Math.cos(angle) * rr;
+      const y0 = polygonCy + Math.sin(angle) * rr;
+      const x = (x0 - polygonCx) * polyScale;
+      const y = (y0 - polygonCy) * polyScale;
+      points.push({
+        x: x * ca - y * sa + polygonCx,
+        y: x * sa + y * ca + polygonCy
+      });
+    }
+    return points;
+  }
+  function pointInPolygon(x, y, verts) {
+    let inside = false;
+    for (let i = 0, j = verts.length - 1;i < verts.length; j = i++) {
+      const xi = verts[i].x;
+      const yi = verts[i].y;
+      const xj = verts[j].x;
+      const yj = verts[j].y;
+      const intersects = yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi || 0.000000000001) + xi;
+      if (intersects)
+        inside = !inside;
+    }
+    return inside;
+  }
+  function onPointerDown(e) {
+    if (e.button !== 0)
+      return;
+    const pos = canvasPosAgg(e);
+    if (Math.hypot(pos.x - imageCx, pos.y - imageCy) < 5) {
+      dx = pos.x - imageCx;
+      dy = pos.y - imageCy;
+      dragFlag = 1;
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (pointInPolygon(pos.x, pos.y, transformedStarPoints())) {
+      dx = pos.x - polygonCx;
+      dy = pos.y - polygonCy;
+      dragFlag = 2;
+      canvas.setPointerCapture(e.pointerId);
+    }
+  }
+  function onPointerMove(e) {
+    if ((e.buttons & 1) === 0 || dragFlag === 0)
+      return;
+    const pos = canvasPosAgg(e);
+    if (dragFlag === 1) {
+      imageCx = pos.x - dx;
+      imageCy = pos.y - dy;
+      draw();
+    } else if (dragFlag === 2) {
+      polygonCx = pos.x - dx;
+      polygonCy = pos.y - dy;
+      draw();
+    }
+  }
+  function onPointerUp() {
+    dragFlag = 0;
+  }
+  function onTick() {
+    if (rotatePolygon) {
+      polyAngle += 0.5;
+      if (polyAngle >= 180)
+        polyAngle -= 360;
+      slPolyAngle.value = String(polyAngle);
+      slPolyAngle.dispatchEvent(new Event("input"));
+    }
+    if (rotateImage) {
+      imgAngle += 0.5;
+      if (imgAngle >= 180)
+        imgAngle -= 360;
+      slImgAngle.value = String(imgAngle);
+      slImgAngle.dispatchEvent(new Event("input"));
+    }
+    rafId = requestAnimationFrame(onTick);
+  }
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
+  rafId = requestAnimationFrame(onTick);
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Select transform example and adjust angles/scales.";
+  hint.textContent = "Drag the image center marker or star polygon; controls also work on the canvas.";
   sidebar.appendChild(hint);
   draw();
   return () => {
+    cancelAnimationFrame(rafId);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", onPointerUp);
+    canvas.removeEventListener("pointercancel", onPointerUp);
     cleanupCC();
   };
 }
@@ -3233,9 +3710,9 @@ var init_image_transforms = __esm(() => {
 // src/demos/mol_view.ts
 var exports_mol_view = {};
 __export(exports_mol_view, {
-  init: () => init32
+  init: () => init30
 });
-function init32(container) {
+function init30(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Molecule Viewer", "Molecular structure viewer with rotate/scale/pan — matching C++ mol_view.cpp.");
   const W = 400, H = 400;
   let molIdx = 0;
@@ -3397,9 +3874,9 @@ var init_mol_view = __esm(() => {
 // src/demos/raster_text.ts
 var exports_raster_text = {};
 __export(exports_raster_text, {
-  init: () => init33
+  init: () => init31
 });
-function init33(container) {
+function init31(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Raster Text", "All 34 embedded bitmap fonts rendered with sample text — matching C++ raster_text.cpp.");
   const W = 640, H = 480;
   function draw() {
@@ -3421,9 +3898,9 @@ var init_raster_text = __esm(() => {
 // src/demos/gamma_ctrl.ts
 var exports_gamma_ctrl = {};
 __export(exports_gamma_ctrl, {
-  init: () => init34
+  init: () => init32
 });
-function init34(container) {
+function init32(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Gamma Control", "Interactive gamma spline widget with stroked ellipses — matching C++ gamma_ctrl.cpp.");
   const W = 500, H = 400;
   let kx1 = 1, ky1 = 1, kx2 = 1, ky2 = 1;
@@ -3462,9 +3939,9 @@ var init_gamma_ctrl = __esm(() => {
 // src/demos/trans_polar.ts
 var exports_trans_polar = {};
 __export(exports_trans_polar, {
-  init: () => init35
+  init: () => init33
 });
-function init35(container) {
+function init33(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Polar Transform", "Slider control warped through polar coordinates — matching C++ trans_polar.cpp.");
   const W = 600, H = 400;
   let value = 32;
@@ -3517,9 +3994,9 @@ var init_trans_polar = __esm(() => {
 // src/demos/multi_clip.ts
 var exports_multi_clip = {};
 __export(exports_multi_clip, {
-  init: () => init36
+  init: () => init34
 });
-function init36(container) {
+function init34(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Multi Clip", "Lion rendered through N×N clip regions with random shapes — matching C++ multi_clip.cpp.");
   const W = 512, H = 400;
   let n = 4;
@@ -3571,37 +4048,60 @@ var init_multi_clip = __esm(() => {
 // src/demos/simple_blur.ts
 var exports_simple_blur = {};
 __export(exports_simple_blur, {
-  init: () => init37
+  init: () => init35
 });
-function init37(container) {
-  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Simple Blur", "Lion with 3×3 box blur — left half original, right half blurred. Matching C++ simple_blur.cpp.");
+function init35(container) {
+  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Simple Blur", "Lion with 3x3 box blur inside a draggable circle. Matching C++ simple_blur.cpp.");
   const W = 512, H = 400;
-  let angle = 0;
-  let scale = 1;
+  let blurCx = 100;
+  let blurCy = 102;
   function draw() {
     renderToCanvas({
       demoName: "simple_blur",
       canvas,
       width: W,
       height: H,
-      params: [angle, scale],
+      params: [blurCx, blurCy],
       timeDisplay: timeEl
     });
   }
-  const cleanupRS = setupRotateScale({
-    canvas,
-    onLeftDrag: (a, s) => {
-      angle = a;
-      scale = s;
-      draw();
-    }
-  });
+  function aggPos2(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: H - (e.clientY - rect.top) * scaleY
+    };
+  }
+  function onPointerDown(e) {
+    if (e.button !== 0)
+      return;
+    canvas.setPointerCapture(e.pointerId);
+    const p = aggPos2(e);
+    blurCx = p.x;
+    blurCy = p.y;
+    draw();
+  }
+  function onPointerMove(e) {
+    if ((e.buttons & 1) === 0)
+      return;
+    const p = aggPos2(e);
+    blurCx = p.x;
+    blurCy = p.y;
+    draw();
+  }
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
   const hint = document.createElement("div");
   hint.className = "control-hint";
-  hint.textContent = "Left-drag: rotate & scale.";
+  hint.textContent = "Left-drag: move the blur circle.";
   sidebar.appendChild(hint);
   draw();
-  return cleanupRS;
+  return () => {
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+  };
 }
 var init_simple_blur = __esm(() => {
   init_render_canvas();
@@ -3610,21 +4110,22 @@ var init_simple_blur = __esm(() => {
 // src/demos/blur.ts
 var exports_blur = {};
 __export(exports_blur, {
-  init: () => init38
+  init: () => init36
 });
-function init38(container) {
+function init36(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Blur", "Stack blur and recursive blur on colored shapes — matching C++ blur.cpp.");
   const W = 440, H = 330;
   let radius = 15;
   let method = 0;
+  const methodLabels = ["Stack blur", "Recursive blur", "Channels"];
   let channelR = false;
   let channelG = true;
   let channelB = false;
   const shadowQuad = [
-    { x: 174.24, y: 86.28 },
-    { x: 336.76, y: 86.28 },
-    { x: 336.76, y: 274.16 },
-    { x: 174.24, y: 274.16 }
+    { x: 164.24, y: 96.28 },
+    { x: 326.76, y: 96.28 },
+    { x: 326.76, y: 284.16 },
+    { x: 164.24, y: 284.16 }
   ];
   function draw() {
     renderToCanvas({
@@ -3654,10 +4155,16 @@ function init38(container) {
     radius = v;
     draw();
   });
-  const methodRadios = addRadioGroup(sidebar, "Method", ["Stack blur", "Recursive blur", "Channels"], method, (i) => {
-    method = i;
+  const methodLabelsUi = [...methodLabels].reverse();
+  const methodInputsUi = addRadioGroup(sidebar, "Method", methodLabelsUi, methodLabels.length - 1 - method, (uiIndex) => {
+    method = methodLabels.length - 1 - uiIndex;
     draw();
   });
+  const methodInputs = new Array(methodLabels.length);
+  for (let uiIndex = 0;uiIndex < methodLabels.length; uiIndex++) {
+    const logicalIndex = methodLabels.length - 1 - uiIndex;
+    methodInputs[logicalIndex] = methodInputsUi[uiIndex];
+  }
   const cbRed = addCheckbox(sidebar, "Red", channelR, (v) => {
     channelR = v;
     draw();
@@ -3675,7 +4182,7 @@ function init38(container) {
       radius = v;
       draw();
     } },
-    { type: "radio", x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, sidebarEls: methodRadios, onChange: (i) => {
+    { type: "radio", x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, sidebarEls: methodInputs, onChange: (i) => {
       method = i;
       draw();
     } },
@@ -3800,9 +4307,9 @@ var init_blur = __esm(() => {
 // src/demos/trans_curve1.ts
 var exports_trans_curve1 = {};
 __export(exports_trans_curve1, {
-  init: () => init39
+  init: () => init37
 });
-function init39(container) {
+function init37(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Text Along Curve 1", "TrueType text warped along a B-spline curve using trans_single_path — matching C++ trans_curve1_ft.cpp.");
   const W = 600, H = 600;
   const initPts = [
@@ -3944,9 +4451,9 @@ var init_trans_curve1 = __esm(() => {
 // src/demos/trans_curve2.ts
 var exports_trans_curve2 = {};
 __export(exports_trans_curve2, {
-  init: () => init40
+  init: () => init38
 });
-function init40(container) {
+function init38(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Text Along Curve 2", "TrueType text warped between two B-spline curves using trans_double_path — matching C++ trans_curve2_ft.cpp.");
   const W = 600, H = 600;
   const initPoly1 = [
@@ -4106,9 +4613,9 @@ var init_trans_curve2 = __esm(() => {
 // src/demos/lion_lens.ts
 var exports_lion_lens = {};
 __export(exports_lion_lens, {
-  init: () => init41
+  init: () => init39
 });
-function init41(container) {
+function init39(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Lion Lens", "Magnifying lens effect on the lion using trans_warp_magnifier — matching C++ lion_lens.cpp.");
   const W = 512, H = 400;
   let magn = 3;
@@ -4171,9 +4678,9 @@ var init_lion_lens = __esm(() => {
 // src/demos/distortions.ts
 var exports_distortions = {};
 __export(exports_distortions, {
-  init: () => init42
+  init: () => init40
 });
-function init42(container) {
+function init40(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Distortions", "Animated wave/swirl distortions on image and gradient sources — matching C++ distortions.cpp.");
   const W = 620, H = 360;
   let angle = 20;
@@ -4302,9 +4809,9 @@ var init_distortions = __esm(() => {
 // src/demos/blend_color.ts
 var exports_blend_color = {};
 __export(exports_blend_color, {
-  init: () => init43
+  init: () => init41
 });
-function init43(container) {
+function init41(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Blend Color", "Shape with blurred shadow — demonstrates blur compositing matching C++ blend_color.cpp.");
   const W = 440, H = 330;
   let blurRadius = 15;
@@ -4339,9 +4846,9 @@ var init_blend_color = __esm(() => {
 // src/demos/component_rendering.ts
 var exports_component_rendering = {};
 __export(exports_component_rendering, {
-  init: () => init44
+  init: () => init42
 });
-function init44(container) {
+function init42(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Component Rendering", "Three overlapping circles rendered to separate R/G/B gray channels — matching C++ component_rendering.cpp.");
   const W = 440, H = 330;
   let alpha = 255;
@@ -4376,9 +4883,9 @@ var init_component_rendering = __esm(() => {
 // src/demos/polymorphic_renderer.ts
 var exports_polymorphic_renderer = {};
 __export(exports_polymorphic_renderer, {
-  init: () => init45
+  init: () => init43
 });
-function init45(container) {
+function init43(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Polymorphic Renderer", "Same shapes rendered with different pixel formats (RGBA32, RGB24, Gray8) — matching C++ polymorphic_renderer.cpp.");
   const W = 400, H = 330;
   let format = 0;
@@ -4431,9 +4938,9 @@ var init_polymorphic_renderer = __esm(() => {
 // src/demos/scanline_boolean.ts
 var exports_scanline_boolean = {};
 __export(exports_scanline_boolean, {
-  init: () => init46
+  init: () => init44
 });
-function init46(container) {
+function init44(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Scanline Boolean", "Two overlapping circle groups combined with boolean operations — matching C++ scanline_boolean.cpp.");
   const W = 800;
   const H = 600;
@@ -4677,9 +5184,9 @@ var init_scanline_boolean = __esm(() => {
 // src/demos/scanline_boolean2.ts
 var exports_scanline_boolean2 = {};
 __export(exports_scanline_boolean2, {
-  init: () => init47
+  init: () => init45
 });
-function init47(container) {
+function init45(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Scanline Boolean 2", "Boolean operations on complex shapes — matching C++ scanline_boolean2.cpp.");
   const W = 655, H = 520;
   let polygonIdx = 3;
@@ -4838,9 +5345,9 @@ var init_scanline_boolean2 = __esm(() => {
 // src/demos/pattern_fill.ts
 var exports_pattern_fill = {};
 __export(exports_pattern_fill, {
-  init: () => init48
+  init: () => init46
 });
-function init48(container) {
+function init46(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Pattern Fill", "Star polygon filled with a repeating tile pattern — matching C++ pattern_fill.cpp.");
   const W = 512, H = 400;
   let patSize = 30;
@@ -4884,9 +5391,9 @@ var init_pattern_fill = __esm(() => {
 // src/demos/pattern_perspective.ts
 var exports_pattern_perspective = {};
 __export(exports_pattern_perspective, {
-  init: () => init49
+  init: () => init47
 });
-function init49(container) {
+function init47(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Pattern Perspective", "Perspective-transformed pattern fill in a draggable quad — matching C++ pattern_perspective.cpp.");
   const W = 600, H = 600;
   const vertices = [
@@ -4955,9 +5462,9 @@ var init_pattern_perspective = __esm(() => {
 // src/demos/pattern_resample.ts
 var exports_pattern_resample = {};
 __export(exports_pattern_resample, {
-  init: () => init50
+  init: () => init48
 });
-function init50(container) {
+function init48(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Pattern Resample", "Perspective-transformed procedural image with gamma control — matching C++ pattern_resample.cpp.");
   const W = 600, H = 600;
   const vertices = [
@@ -5014,9 +5521,9 @@ var init_pattern_resample = __esm(() => {
 // src/demos/lion_outline.ts
 var exports_lion_outline = {};
 __export(exports_lion_outline, {
-  init: () => init51
+  init: () => init49
 });
-function init51(container) {
+function init49(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Lion Outline", "Lion rendered with anti-aliased outline rasterizer vs scanline rasterizer — matching C++ lion_outline.cpp.");
   const W = 512, H = 512;
   let angle = 0;
@@ -5099,9 +5606,9 @@ var init_lion_outline = __esm(() => {
 // src/demos/rasterizers2.ts
 var exports_rasterizers2 = {};
 __export(exports_rasterizers2, {
-  init: () => init52
+  init: () => init50
 });
-function init52(container) {
+function init50(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Rasterizers 2", "Comparison of different rasterization techniques: aliased, AA outline, scanline, and image pattern — matching C++ rasterizers2.cpp.");
   const W = 500, H = 450;
   let step = 0.1;
@@ -5238,9 +5745,9 @@ var init_rasterizers2 = __esm(() => {
 // src/demos/line_patterns.ts
 var exports_line_patterns = {};
 __export(exports_line_patterns, {
-  init: () => init53
+  init: () => init51
 });
-function init53(container) {
+function init51(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Line Patterns", "Drawing bezier curves with image patterns — port of C++ line_patterns.cpp. Each curve uses a different procedural pattern sampled along its length.");
   const W = 500, H = 450;
   let scaleX = 1;
@@ -5453,9 +5960,9 @@ var init_line_patterns = __esm(() => {
 // src/demos/line_patterns_clip.ts
 var exports_line_patterns_clip = {};
 __export(exports_line_patterns_clip, {
-  init: () => init54
+  init: () => init52
 });
-function init54(container) {
+function init52(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Line Patterns Clip", "Anti-aliased outline spirals clipped to a region — adapted from C++ line_patterns_clip.cpp.");
   const W = 500, H = 450;
   let lineWidth = 3;
@@ -5512,9 +6019,9 @@ var init_line_patterns_clip = __esm(() => {
 // src/demos/compositing.ts
 var exports_compositing = {};
 __export(exports_compositing, {
-  init: () => init55
+  init: () => init53
 });
-function init55(container) {
+function init53(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Compositing", "SVG compositing operations — two shapes blended with selectable comp_op mode.");
   const W = 600, H = 400;
   let compOp = 3, srcAlpha = 0.75, dstAlpha = 1;
@@ -5599,9 +6106,9 @@ var init_compositing = __esm(() => {
 // src/demos/compositing2.ts
 var exports_compositing2 = {};
 __export(exports_compositing2, {
-  init: () => init56
+  init: () => init54
 });
-function init56(container) {
+function init54(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Compositing 2", "Multiple overlapping circles blended with selected SVG compositing mode.");
   const W = 600, H = 400;
   let compOp = 3, srcAlpha = 1, dstAlpha = 1;
@@ -5686,9 +6193,9 @@ var init_compositing2 = __esm(() => {
 // src/demos/flash_rasterizer.ts
 var exports_flash_rasterizer = {};
 __export(exports_flash_rasterizer, {
-  init: () => init57
+  init: () => init55
 });
-function init57(container) {
+function init55(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Flash Rasterizer", "Compound rasterizer with multi-style filled shapes — matching C++ flash_rasterizer.cpp behavior.");
   const W = 655, H = 520;
   const m = [1, 0, 0, 1, 0, 0];
@@ -5806,7 +6313,7 @@ function init57(container) {
   hint.className = "control-hint";
   hint.textContent = "Canvas: left-drag vertices, right-hold to test fill hit, arrows rotate around mouse, +/- zoom around mouse.";
   sidebar.appendChild(hint);
-  function canvasPos2(e) {
+  function canvasPos3(e) {
     const rect = canvas.getBoundingClientRect();
     const sx = W / rect.width;
     const sy = H / rect.height;
@@ -5849,7 +6356,7 @@ function init57(container) {
     }
   }
   function onPointerDown(e) {
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     pointerX = p.x;
     pointerY = p.y;
     if (e.button === 2) {
@@ -5876,7 +6383,7 @@ function init57(container) {
     e.preventDefault();
   }
   function onPointerMove(e) {
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     pointerX = p.x;
     pointerY = p.y;
     if (dragVertex >= 0 && (e.buttons & 1) !== 0) {
@@ -5935,9 +6442,9 @@ var init_flash_rasterizer = __esm(() => {
 // src/demos/flash_rasterizer2.ts
 var exports_flash_rasterizer2 = {};
 __export(exports_flash_rasterizer2, {
-  init: () => init58
+  init: () => init56
 });
-function init58(container) {
+function init56(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Flash Rasterizer 2", "Multi-style shapes rendered with regular rasterizer — matching C++ flash_rasterizer2.cpp behavior.");
   const W = 655, H = 520;
   const m = [1, 0, 0, 1, 0, 0];
@@ -6054,7 +6561,7 @@ function init58(container) {
   hint.className = "control-hint";
   hint.textContent = "Canvas: left-drag vertices. Arrows rotate around mouse, +/- zoom around mouse.";
   sidebar.appendChild(hint);
-  function canvasPos2(e) {
+  function canvasPos3(e) {
     const rect = canvas.getBoundingClientRect();
     const sx = W / rect.width;
     const sy = H / rect.height;
@@ -6099,7 +6606,7 @@ function init58(container) {
   function onPointerDown(e) {
     if (e.button !== 0)
       return;
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     pointerX = p.x;
     pointerY = p.y;
     const pickRadius = 10 / approxScale();
@@ -6117,7 +6624,7 @@ function init58(container) {
     e.preventDefault();
   }
   function onPointerMove(e) {
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     pointerX = p.x;
     pointerY = p.y;
     if (dragVertex >= 0 && (e.buttons & 1) !== 0) {
@@ -6161,9 +6668,9 @@ var init_flash_rasterizer2 = __esm(() => {
 // src/demos/rasterizer_compound.ts
 var exports_rasterizer_compound = {};
 __export(exports_rasterizer_compound, {
-  init: () => init59
+  init: () => init57
 });
-function init59(container) {
+function init57(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Rasterizer Compound", "Compound rasterizer with layer order control — matching C++ rasterizer_compound.cpp.");
   const W = 440;
   const H = 330;
@@ -6269,7 +6776,7 @@ function init59(container) {
     });
     syncSidebarFromState();
   }
-  function canvasPos2(e) {
+  function canvasPos3(e) {
     const rect = canvas.getBoundingClientRect();
     const sx = W / rect.width;
     const sy = H / rect.height;
@@ -6310,7 +6817,7 @@ function init59(container) {
   function onPointerDown(e) {
     if (e.button !== 0)
       return;
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     const si = sliderIndexAt(p.x, p.yAgg);
     if (si >= 0) {
       activeCanvasSlider = si;
@@ -6329,7 +6836,7 @@ function init59(container) {
   function onPointerMove(e) {
     if (activeCanvasSlider < 0 || (e.buttons & 1) === 0)
       return;
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     setSliderFromCanvas(activeCanvasSlider, p.x);
     draw();
     e.preventDefault();
@@ -6356,35 +6863,86 @@ var init_rasterizer_compound = __esm(() => {
 // src/demos/gouraud_mesh.ts
 var exports_gouraud_mesh = {};
 __export(exports_gouraud_mesh, {
-  init: () => init60
+  init: () => init58
 });
-function init60(container) {
-  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Gouraud Mesh", "Gouraud-shaded triangle mesh with compound rasterizer — matching C++ gouraud_mesh.cpp.");
-  const W = 512, H = 400;
-  let cols = 8, rows = 8, seed = 0;
+function init58(container) {
+  const { canvas, sidebar, timeEl } = createDemoLayout(container, "Gouraud Mesh", "Animated Gouraud-shaded triangle mesh with draggable vertices — matching C++ gouraud_mesh.cpp.");
+  const W = 400;
+  const H = 400;
+  const PICK_RADIUS = 8;
+  const overrides = new Map;
+  let dragIdx = -1;
+  let frame = 0;
+  let raf = 0;
+  function canvasPos3(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: canvas.height - (e.clientY - rect.top) * scaleY
+    };
+  }
+  function buildParams(animStep) {
+    const params = [animStep, overrides.size];
+    for (const [idx, p] of overrides) {
+      params.push(idx, p.x, p.y);
+    }
+    return params;
+  }
   function draw() {
     renderToCanvas({
       demoName: "gouraud_mesh",
       canvas,
       width: W,
       height: H,
-      params: [cols, rows, seed],
+      params: buildParams(frame),
       timeDisplay: timeEl
     });
   }
-  addSlider(sidebar, "Columns", 3, 20, 8, 1, (v) => {
-    cols = v;
+  function onPointerDown(e) {
+    if (e.button !== 0)
+      return;
+    const pos = canvasPos3(e);
+    dragIdx = gouraudMeshPickVertex(W, H, buildParams(frame), pos.x, pos.y, PICK_RADIUS);
+    if (dragIdx >= 0) {
+      overrides.set(dragIdx, { x: pos.x, y: pos.y });
+      canvas.setPointerCapture(e.pointerId);
+      draw();
+    }
+  }
+  function onPointerMove(e) {
+    if (dragIdx < 0)
+      return;
+    const pos = canvasPos3(e);
+    overrides.set(dragIdx, { x: pos.x, y: pos.y });
     draw();
-  });
-  addSlider(sidebar, "Rows", 3, 20, 8, 1, (v) => {
-    rows = v;
+  }
+  function onPointerUp() {
+    dragIdx = -1;
+  }
+  function animate() {
+    frame = (frame + 1) % 256;
     draw();
-  });
-  addSlider(sidebar, "Color Seed", 0, 100, 0, 1, (v) => {
-    seed = v;
-    draw();
-  });
+    raf = requestAnimationFrame(animate);
+  }
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
+  const hint = document.createElement("div");
+  hint.className = "control-hint";
+  hint.textContent = "Drag mesh vertices directly on the canvas.";
+  sidebar.appendChild(hint);
   draw();
+  raf = requestAnimationFrame(animate);
+  return () => {
+    cancelAnimationFrame(raf);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", onPointerUp);
+    canvas.removeEventListener("pointercancel", onPointerUp);
+  };
 }
 var init_gouraud_mesh = __esm(() => {
   init_render_canvas();
@@ -6393,9 +6951,9 @@ var init_gouraud_mesh = __esm(() => {
 // src/demos/image_resample.ts
 var exports_image_resample = {};
 __export(exports_image_resample, {
-  init: () => init61
+  init: () => init59
 });
-function init61(container) {
+function init59(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Image Resample", "Image resampling with affine and perspective transforms — matching C++ image_resample.cpp.");
   const W = 512, H = 400;
   let mode = 0, blur = 1;
@@ -6426,9 +6984,9 @@ var init_image_resample = __esm(() => {
 // src/demos/alpha_mask2.ts
 var exports_alpha_mask2 = {};
 __export(exports_alpha_mask2, {
-  init: () => init62
+  init: () => init60
 });
-function init62(container) {
+function init60(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "Alpha Mask 2", "Alpha mask with random ellipses modulating lion rendering — matching C++ alpha_mask2.cpp.");
   const W = 512, H = 400;
   let numEllipses = 10;
@@ -6447,7 +7005,7 @@ function init62(container) {
       timeDisplay: timeEl
     });
   }
-  function canvasPos2(e) {
+  function canvasPos3(e) {
     const rect = canvas.getBoundingClientRect();
     const sx = W / rect.width;
     const sy = H / rect.height;
@@ -6494,7 +7052,7 @@ function init62(container) {
   ];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: "bottom-left" });
   function onPointerDown(e) {
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     canvas.setPointerCapture(e.pointerId);
     dragging = true;
     if (e.button === 2) {
@@ -6511,7 +7069,7 @@ function init62(container) {
   function onPointerMove(e) {
     if (!dragging)
       return;
-    const p = canvasPos2(e);
+    const p = canvasPos3(e);
     let flags = 0;
     if ((e.buttons & 1) !== 0)
       flags |= 1;
@@ -6550,9 +7108,9 @@ var init_alpha_mask2 = __esm(() => {
 // src/demos/truetype_test.ts
 var exports_truetype_test = {};
 __export(exports_truetype_test, {
-  init: () => init63
+  init: () => init61
 });
-function init63(container) {
+function init61(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "TrueType LCD Subpixel", "LCD subpixel font rendering with faux weight/italic, gamma, and multiple typefaces. Port of C++ truetype_test_02_win.");
   const W = 640, H = 560;
   let typefaceIdx = 4;
@@ -7201,10 +7759,8 @@ var demoModules = {
   rounded_rect: () => Promise.resolve().then(() => (init_rounded_rect(), exports_rounded_rect)),
   aa_demo: () => Promise.resolve().then(() => (init_aa_demo(), exports_aa_demo)),
   gamma_correction: () => Promise.resolve().then(() => (init_gamma_correction(), exports_gamma_correction)),
-  line_thickness: () => Promise.resolve().then(() => (init_line_thickness(), exports_line_thickness)),
   rasterizers: () => Promise.resolve().then(() => (init_rasterizers(), exports_rasterizers)),
   conv_contour: () => Promise.resolve().then(() => (init_conv_contour(), exports_conv_contour)),
-  conv_dash: () => Promise.resolve().then(() => (init_conv_dash(), exports_conv_dash)),
   perspective: () => Promise.resolve().then(() => (init_perspective(), exports_perspective)),
   image_fltr_graph: () => Promise.resolve().then(() => (init_image_fltr_graph(), exports_image_fltr_graph)),
   image1: () => Promise.resolve().then(() => (init_image1(), exports_image1)),
@@ -7273,7 +7829,6 @@ var thumbnails = {
   compositing: "compositing.png",
   compositing2: "compositing2.png",
   conv_contour: "conv_contour.gif",
-  conv_dash: "conv_dash_marker.gif",
   conv_dash_marker: "conv_dash_marker.gif",
   conv_stroke: "conv_stroke.gif",
   distortions: "distortions.png",
@@ -7298,7 +7853,6 @@ var thumbnails = {
   image1: "image1.jpg",
   line_patterns: "line_patterns.gif",
   line_patterns_clip: "line_patterns_clip.png",
-  line_thickness: "conv_stroke.gif",
   lion: "lion.png",
   lion_lens: "lion_lens.gif",
   lion_outline: "lion_outline.gif",
@@ -7394,10 +7948,8 @@ var demoCards = [
   { route: "rounded_rect", title: "Rounded Rect", desc: "Draggable rounded rectangle with adjustable corner radius." },
   { route: "aa_demo", title: "AA Demo", desc: "Anti-aliasing visualization &mdash; enlarged pixel view of a triangle." },
   { route: "gamma_correction", title: "Gamma Correction", desc: "Gamma curve visualization with concentric colored ellipses." },
-  { route: "line_thickness", title: "Line Thickness", desc: "Lines at varying sub-pixel widths from 0.1 to 5.0 pixels." },
   { route: "rasterizers", title: "Rasterizers", desc: "Filled and stroked triangle with alpha control." },
   { route: "conv_contour", title: "Conv Contour", desc: 'Letter "A" with adjustable contour width and orientation control.' },
-  { route: "conv_dash", title: "Conv Dash", desc: "Dashed stroke patterns with cap styles on a draggable triangle." },
   { route: "perspective", title: "Perspective", desc: "Lion with bilinear/perspective quad transform &mdash; drag corners to warp." },
   { route: "image_fltr_graph", title: "Filter Graph", desc: "Image filter kernel weight function visualization &mdash; 16 filters." },
   { route: "image1", title: "Image Transforms", desc: "Procedural sphere image with affine rotation/scaling through a bilinear filter." },
@@ -7560,4 +8112,4 @@ async function navigate(route) {
 window.addEventListener("hashchange", () => navigate(getRoute()));
 navigate(getRoute());
 
-//# debugId=47488609378033D464756E2164756E21
+//# debugId=7C3FF4A508B4E35564756E2164756E21

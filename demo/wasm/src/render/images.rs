@@ -5,8 +5,11 @@
 use agg_rust::color::Rgba8;
 use agg_rust::curves::Curve4Div;
 use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl};
+use agg_rust::arrowhead::Arrowhead;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
+use agg_rust::conv_marker::ConvMarker;
+use agg_rust::conv_smooth_poly1::ConvSmoothPoly1;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ellipse::Ellipse;
@@ -20,6 +23,7 @@ use agg_rust::image_filters::{
     ImageFilterMitchell, ImageFilterSinc, ImageFilterLanczos, ImageFilterBlackman,
     ImageFilterFunction, ImageFilterLut, IMAGE_FILTER_SCALE,
 };
+use agg_rust::basics::{is_move_to, is_vertex, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
 use agg_rust::math_stroke::LineCap;
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
@@ -123,11 +127,12 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 let xs = (x_end + x_start) / 2.0 - (r * (x_end - x_start) / 16.0);
                 let dx = (x_end - x_start) * r / 8.0;
                 let mut path = PathStorage::new();
-                let w0 = $filter.calc_weight(-r);
+                // AGG image_fltr_graph uses adaptors that evaluate filter weight at |x|.
+                let w0 = $filter.calc_weight(r.abs());
                 path.move_to(xs + 0.5, ys + dy * w0);
                 for j in 1..n {
                     let xf = j as f64 / 256.0 - r;
-                    let w = $filter.calc_weight(xf);
+                    let w = $filter.calc_weight(xf.abs());
                     path.line_to(xs + dx * j as f64 / n as f64 + 0.5, ys + dy * w);
                 }
                 let mut stroke = ConvStroke::new(&mut path);
@@ -147,7 +152,7 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     for xfract in (-ir)..ir {
                         let xf = xint as f64 / 256.0 + xfract as f64;
                         if xf >= -r && xf <= r {
-                            sum += $filter.calc_weight(xf);
+                            sum += $filter.calc_weight(xf.abs());
                         }
                     }
                     let x = x_center + ((-128.0 + xint as f64) / 128.0) * r * (x_end - x_start) / 16.0;
@@ -1599,7 +1604,7 @@ pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 }
 
 /// Conv dash marker — dashed stroke with cap styles.
-/// Simplified from C++ conv_dash_marker.cpp (arrowheads and smooth poly skipped).
+/// Matches C++ conv_dash_marker.cpp, including marker arrows.
 pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let x0 = params.get(0).copied().unwrap_or(157.0);
     let y0 = params.get(1).copied().unwrap_or(60.0);
@@ -1611,6 +1616,7 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     let stroke_width = params.get(7).copied().unwrap_or(3.0);
     let close_poly = params.get(8).copied().unwrap_or(0.0) > 0.5;
     let even_odd = params.get(9).copied().unwrap_or(0.0) > 0.5;
+    let smooth = params.get(10).copied().unwrap_or(1.0);
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -1622,27 +1628,151 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     let mut ras = RasterizerScanlineAa::new();
     let mut sl = ScanlineU8::new();
 
-    // Build path: triangle + midpoint triangle
+    fn append_polyline(path: &mut PathStorage, points: &[(f64, f64)], closed: bool) {
+        if points.is_empty() {
+            return;
+        }
+        path.move_to(points[0].0, points[0].1);
+        for (x, y) in points.iter().skip(1) {
+            path.line_to(*x, *y);
+        }
+        if closed {
+            path.close_polygon(0);
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct Segment {
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+    }
+
+    fn collect_terminal_marker_segments<VS: VertexSource>(
+        vs: &mut VS,
+    ) -> (Vec<Segment>, Vec<Segment>) {
+        let mut markers: Vec<(f64, f64)> = Vec::new();
+        vs.rewind(0);
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = vs.vertex(&mut x, &mut y);
+            if cmd == PATH_CMD_STOP {
+                break;
+            }
+            if is_move_to(cmd) {
+                if (markers.len() & 1) != 0 {
+                    if let Some(last) = markers.last_mut() {
+                        *last = (x, y);
+                    }
+                } else {
+                    markers.push((x, y));
+                }
+            } else if is_vertex(cmd) {
+                if (markers.len() & 1) != 0 {
+                    markers.push((x, y));
+                    let last = markers[markers.len() - 1];
+                    markers.push(last);
+                    let third_last = markers[markers.len() - 3];
+                    markers.push(third_last);
+                } else if !markers.is_empty() {
+                    let n = markers.len();
+                    markers[n - 1] = markers[n - 2];
+                    markers[n - 2] = (x, y);
+                }
+            }
+        }
+
+        let mut tails = Vec::new();
+        let mut heads = Vec::new();
+        let mut i = 0usize;
+        while i + 1 < markers.len() {
+            tails.push(Segment {
+                x1: markers[i].0,
+                y1: markers[i].1,
+                x2: markers[i + 1].0,
+                y2: markers[i + 1].1,
+            });
+            i += 4;
+        }
+        i = 2;
+        while i + 1 < markers.len() {
+            heads.push(Segment {
+                x1: markers[i].0,
+                y1: markers[i].1,
+                x2: markers[i + 1].0,
+                y2: markers[i + 1].1,
+            });
+            i += 4;
+        }
+        (tails, heads)
+    }
+
+    struct MarkerLocator {
+        tails: Vec<Segment>,
+        heads: Vec<Segment>,
+        path_id: u32,
+        index: usize,
+        emit_start: bool,
+    }
+
+    impl MarkerLocator {
+        fn new(tails: Vec<Segment>, heads: Vec<Segment>) -> Self {
+            Self {
+                tails,
+                heads,
+                path_id: 0,
+                index: 0,
+                emit_start: true,
+            }
+        }
+    }
+
+    impl VertexSource for MarkerLocator {
+        fn rewind(&mut self, path_id: u32) {
+            self.path_id = path_id;
+            self.index = 0;
+            self.emit_start = true;
+        }
+
+        fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
+            let segments = match self.path_id {
+                0 => &self.tails,
+                1 => &self.heads,
+                _ => return PATH_CMD_STOP,
+            };
+            if self.index >= segments.len() {
+                return PATH_CMD_STOP;
+            }
+            let s = segments[self.index];
+            if self.emit_start {
+                *x = s.x1;
+                *y = s.y1;
+                self.emit_start = false;
+                PATH_CMD_MOVE_TO
+            } else {
+                *x = s.x2;
+                *y = s.y2;
+                self.emit_start = true;
+                self.index += 1;
+                PATH_CMD_LINE_TO
+            }
+        }
+    }
+
+    // Build base path: triangle + midpoint triangle
     let cx = (x0 + x1 + x2) / 3.0;
     let cy = (y0 + y1 + y2) / 3.0;
+    let poly1 = vec![(x0, y0), (x1, y1), (cx, cy), (x2, y2)];
+    let poly2 = vec![
+        ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
+        ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+        ((x2 + x0) / 2.0, (y2 + y0) / 2.0),
+    ];
 
     let mut path = PathStorage::new();
-    // Triangle 1: v0 -> v1 -> center -> v2 (-> close if enabled)
-    path.move_to(x0, y0);
-    path.line_to(x1, y1);
-    path.line_to(cx, cy);
-    path.line_to(x2, y2);
-    if close_poly {
-        path.close_polygon(0);
-    }
-
-    // Midpoint triangle
-    path.move_to((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-    path.line_to((x1 + x2) / 2.0, (y1 + y2) / 2.0);
-    path.line_to((x2 + x0) / 2.0, (y2 + y0) / 2.0);
-    if close_poly {
-        path.close_polygon(0);
-    }
+    append_polyline(&mut path, &poly1, close_poly);
+    append_polyline(&mut path, &poly2, close_poly);
 
     // Set fill rule
     if even_odd {
@@ -1653,38 +1783,77 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     ras.reset();
     ras.add_path(&mut path, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-        &Rgba8::new(178, 127, 25, 127)); // rgba(0.7, 0.5, 0.1, 0.5)
+        &Rgba8::new(179, 128, 26, 128)); // rgba(0.7, 0.5, 0.1, 0.5)
 
-    // 2. Outline stroke
-    let mut outline = ConvStroke::new(&mut path);
-    outline.set_width(1.0);
-    ras.reset();
-    ras.add_path(&mut outline, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-        &Rgba8::new(0, 153, 0, 204)); // rgba(0.0, 0.6, 0.0, 0.8)
+    // 2. Smooth fill layer (matches C++ translucent smooth poly pass).
+    {
+        let mut smooth_fill = ConvSmoothPoly1::new(&mut path);
+        smooth_fill.set_smooth_value(smooth);
+        ras.reset();
+        ras.add_path(&mut smooth_fill, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+            &Rgba8::new(26, 128, 179, 26)); // rgba(0.1, 0.5, 0.7, 0.1)
+    }
 
-    // 3. Dashed stroked path
-    let path_inner = outline.source_mut();
-    let mut curve = ConvCurve::new(path_inner);
-    let mut dash = ConvDash::new(&mut curve);
-    dash.add_dash(20.0, 5.0);
-    dash.add_dash(5.0, 5.0);
-    dash.add_dash(5.0, 5.0);
-    dash.dash_start(10.0);
+    // 3. Outline stroke
+    {
+        let mut smooth_outline_src = ConvSmoothPoly1::new(&mut path);
+        smooth_outline_src.set_smooth_value(smooth);
+        let mut outline = ConvStroke::new(&mut smooth_outline_src);
+        outline.set_width(1.0);
+        ras.reset();
+        ras.add_path(&mut outline, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+            &Rgba8::new(0, 153, 0, 204)); // rgba(0.0, 0.6, 0.0, 0.8)
+    }
 
-    let mut stroke = ConvStroke::new(&mut dash);
-    stroke.set_width(stroke_width);
+    // 4. Dashed stroked path
     let cap = match cap_type {
         1 => LineCap::Square,
         2 => LineCap::Round,
         _ => LineCap::Butt,
     };
-    stroke.set_line_cap(cap);
+    {
+        let mut smooth_dash_src = ConvSmoothPoly1::new(&mut path);
+        smooth_dash_src.set_smooth_value(smooth);
+        let mut curve = ConvCurve::new(&mut smooth_dash_src);
+        let mut dash = ConvDash::new(&mut curve);
+        dash.add_dash(20.0, 5.0);
+        dash.add_dash(5.0, 5.0);
+        dash.add_dash(5.0, 5.0);
+        dash.dash_start(10.0);
 
+        let mut stroke = ConvStroke::new(&mut dash);
+        stroke.set_width(stroke_width);
+        stroke.set_line_cap(cap);
+        ras.reset();
+        ras.add_path(&mut stroke, 0);
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
+            &Rgba8::new(0, 0, 0, 255));
+    }
+
+    // 5. Arrow markers from terminal marker generator semantics.
+    let (mut tail_segments, head_segments_all) = {
+        let mut smooth_marker_src = ConvSmoothPoly1::new(&mut path);
+        smooth_marker_src.set_smooth_value(smooth);
+        let mut marker_curve_src = ConvCurve::new(&mut smooth_marker_src);
+        collect_terminal_marker_segments(&mut marker_curve_src)
+    };
+    if close_poly {
+        tail_segments.clear();
+    }
+
+    let mut locator = MarkerLocator::new(tail_segments, head_segments_all);
+    let mut arrow = Arrowhead::new();
+    let k = stroke_width.max(0.0).powf(0.7);
+    arrow.head(4.0 * k, 4.0 * k, 3.0 * k, 2.0 * k);
+    if !close_poly {
+        arrow.tail(1.0 * k, 1.5 * k, 3.0 * k, 5.0 * k);
+    }
+    let mut marker = ConvMarker::new(&mut locator, &mut arrow);
     ras.reset();
-    ras.add_path(&mut stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-        &Rgba8::new(0, 0, 0, 255));
+    ras.add_path(&mut marker, 0);
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
     // Render controls
     let mut m_cap = RboxCtrl::new(10.0, 10.0, 130.0, 80.0);
@@ -1694,17 +1863,23 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     m_cap.set_cur_item(cap_type as i32);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_cap);
 
-    let mut m_width = SliderCtrl::new(140.0, 14.0, 290.0, 22.0);
+    let mut m_width = SliderCtrl::new(140.0, 14.0, 280.0, 22.0);
     m_width.label("Width=%1.2f");
     m_width.range(0.0, 10.0);
     m_width.set_value(stroke_width);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_width);
 
-    let mut m_close = CboxCtrl::new(140.0, 34.0, "Close Polygons");
+    let mut m_smooth = SliderCtrl::new(290.0, 14.0, 490.0, 22.0);
+    m_smooth.label("Smooth=%1.2f");
+    m_smooth.range(0.0, 2.0);
+    m_smooth.set_value(smooth);
+    render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_smooth);
+
+    let mut m_close = CboxCtrl::new(140.0, 30.0, "Close Polygons");
     m_close.set_status(close_poly);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_close);
 
-    let mut m_even_odd = CboxCtrl::new(300.0, 34.0, "Even-Odd Fill");
+    let mut m_even_odd = CboxCtrl::new(290.0, 30.0, "Even-Odd Fill");
     m_even_odd.set_status(even_odd);
     render_ctrl(&mut ras, &mut sl, &mut rb, &mut m_even_odd);
 

@@ -26,7 +26,10 @@ export interface VertexDragOptions {
   canvas: HTMLCanvasElement;
   vertices: Vertex[];
   threshold?: number;       // grab radius in pixels (default 10)
+  dragEdges?: boolean;      // allow dragging polygon edges (moves 2 adjacent vertices)
+  edgeThreshold?: number;   // edge grab distance in pixels (default = threshold)
   dragAll?: boolean;        // allow dragging all vertices when clicking inside shape
+  dragAllHitTest?: (x: number, y: number, vertices: Vertex[]) => boolean;
   onDrag: () => void;       // called whenever vertices change
 }
 
@@ -37,8 +40,28 @@ export interface VertexDragOptions {
 export function setupVertexDrag(opts: VertexDragOptions): () => void {
   const { canvas, vertices, onDrag } = opts;
   const threshold = opts.threshold ?? 10;
+  const edgeThreshold = opts.edgeThreshold ?? threshold;
   let dragIdx = -1;
+  let dragEdge = -1;
   let dx = 0, dy = 0;
+
+  function distanceToSegment(
+    px: number, py: number,
+    x1: number, y1: number,
+    x2: number, y2: number,
+  ): { distance: number; t: number } {
+    const vx = x2 - x1;
+    const vy = y2 - y1;
+    const len2 = vx * vx + vy * vy;
+    if (len2 <= 1e-12) {
+      return { distance: Math.hypot(px - x1, py - y1), t: 0 };
+    }
+    const tRaw = ((px - x1) * vx + (py - y1) * vy) / len2;
+    const t = Math.max(0, Math.min(1, tRaw));
+    const cx = x1 + t * vx;
+    const cy = y1 + t * vy;
+    return { distance: Math.hypot(px - cx, py - cy), t };
+  }
 
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
@@ -54,25 +77,69 @@ export function setupVertexDrag(opts: VertexDragOptions): () => void {
 
     if (bestIdx >= 0) {
       dragIdx = bestIdx;
+      dragEdge = -1;
       dx = pos.x - vertices[bestIdx].x;
       dy = pos.y - vertices[bestIdx].y;
       canvas.setPointerCapture(e.pointerId);
+    } else if (opts.dragEdges && vertices.length >= 2) {
+      let bestEdgeDist = edgeThreshold;
+      let bestEdge = -1;
+      const n = vertices.length;
+      for (let i = 0; i < n; i++) {
+        // Match AGG interactive_polygon: edge i is between i and (i+n-1)%n
+        const n1 = i;
+        const n2 = (i + n - 1) % n;
+        const hit = distanceToSegment(
+          pos.x, pos.y,
+          vertices[n1].x, vertices[n1].y,
+          vertices[n2].x, vertices[n2].y,
+        );
+        if (hit.t > 0 && hit.t < 1 && hit.distance < bestEdgeDist) {
+          bestEdgeDist = hit.distance;
+          bestEdge = i;
+        }
+      }
+      if (bestEdge >= 0) {
+        dragIdx = -1;
+        dragEdge = bestEdge;
+        dx = pos.x;
+        dy = pos.y;
+        canvas.setPointerCapture(e.pointerId);
+      }
     } else if (opts.dragAll && vertices.length >= 3) {
-      // Drag all vertices together (click inside shape)
-      dragIdx = vertices.length; // special index
-      dx = pos.x - vertices[0].x;
-      dy = pos.y - vertices[0].y;
-      canvas.setPointerCapture(e.pointerId);
+      const canDragAll = opts.dragAllHitTest
+        ? opts.dragAllHitTest(pos.x, pos.y, vertices)
+        : true;
+      if (canDragAll) {
+        // Drag all vertices together (click inside shape)
+        dragIdx = vertices.length; // special index
+        dragEdge = -1;
+        dx = pos.x - vertices[0].x;
+        dy = pos.y - vertices[0].y;
+        canvas.setPointerCapture(e.pointerId);
+      }
     }
   }
 
   function onPointerMove(e: PointerEvent) {
-    if (dragIdx < 0) return;
+    if (dragIdx < 0 && dragEdge < 0) return;
     const pos = canvasPos(canvas, e);
 
     if (dragIdx < vertices.length) {
       vertices[dragIdx].x = pos.x - dx;
       vertices[dragIdx].y = pos.y - dy;
+    } else if (dragEdge >= 0 && vertices.length >= 2) {
+      const n = vertices.length;
+      const n1 = dragEdge;
+      const n2 = (n1 + n - 1) % n;
+      const ddx = pos.x - dx;
+      const ddy = pos.y - dy;
+      vertices[n1].x += ddx;
+      vertices[n1].y += ddy;
+      vertices[n2].x += ddx;
+      vertices[n2].y += ddy;
+      dx = pos.x;
+      dy = pos.y;
     } else {
       // Drag all
       const newX = pos.x - dx;
@@ -86,6 +153,7 @@ export function setupVertexDrag(opts: VertexDragOptions): () => void {
 
   function onPointerUp() {
     dragIdx = -1;
+    dragEdge = -1;
   }
 
   canvas.addEventListener('pointerdown', onPointerDown);

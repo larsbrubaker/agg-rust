@@ -70,6 +70,8 @@ async function serveFile(pathname: string): Promise<Response | null> {
 
 const server = Bun.serve({
   port: PORT,
+  // Keep SSE /__reload connections alive during long idle periods.
+  idleTimeout: 0,
   async fetch(req) {
     const url = new URL(req.url);
     let pathname = decodeURIComponent(url.pathname);
@@ -160,6 +162,7 @@ async function buildWasm(): Promise<boolean> {
       "wasm-pack",
       "build",
       "demo/wasm",
+      "--dev",
       "--target",
       "web",
       "--out-dir",

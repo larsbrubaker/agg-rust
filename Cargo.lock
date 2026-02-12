@@ -15,6 +15,7 @@ name = "agg-wasm"
 version = "0.1.0"
 dependencies = [
  "agg-rust",
+ "js-sys",
  "wasm-bindgen",
 ]
 

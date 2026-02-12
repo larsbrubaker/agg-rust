@@ -53,7 +53,8 @@ export function renderToCanvas(opts: RenderOptions): void {
   } catch (err) {
     console.error(`[renderToCanvas] Failed to render ${demoName}:`, err);
     if (timeDisplay) {
-      timeDisplay.textContent = 'render failed';
+      const message = err instanceof Error ? err.message : String(err);
+      timeDisplay.textContent = `render failed: ${message}`;
     }
   }
 }
