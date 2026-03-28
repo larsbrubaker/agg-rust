@@ -9,8 +9,10 @@
 //! Gamma correction can be applied in the renderer or pixel format layer.
 
 use crate::basics::{
-    is_close, is_move_to, is_stop, is_vertex, FillingRule, VertexSource, POLY_SUBPIXEL_SHIFT,
+    is_close, is_move_to, is_stop, is_vertex, FillingRule, VertexD, VertexSource,
+    POLY_SUBPIXEL_SHIFT,
 };
+use crate::rasterizer_cells_aa::CellAa;
 use crate::rasterizer_cells_aa::{RasterizerCellsAa, ScanlineHitTest};
 use crate::rasterizer_sl_clip::{poly_coord, RasterizerSlClipInt};
 
@@ -235,6 +237,62 @@ impl RasterizerScanlineAa {
             }
             self.add_vertex(x, y, cmd);
         }
+    }
+
+    /// Add vertices from an immutable slice, avoiding the mutable VertexSource
+    /// protocol entirely. Use `PathStorage::vertices()` to get the slice.
+    pub fn add_path_vertices(&mut self, vertices: &[VertexD]) {
+        if self.outline.sorted() {
+            self.reset();
+        }
+        for v in vertices {
+            if is_stop(v.cmd) {
+                break;
+            }
+            self.add_vertex(v.x, v.y, v.cmd);
+        }
+    }
+
+    /// Add vertices from an immutable slice with an affine transform applied
+    /// to each vertex coordinate. Avoids cloning PathStorage.
+    pub fn add_path_vertices_transformed(
+        &mut self,
+        vertices: &[VertexD],
+        transform: &crate::trans_affine::TransAffine,
+    ) {
+        if self.outline.sorted() {
+            self.reset();
+        }
+        for v in vertices {
+            if is_stop(v.cmd) {
+                break;
+            }
+            let (mut x, mut y) = (v.x, v.y);
+            if is_vertex(v.cmd) {
+                transform.transform(&mut x, &mut y);
+            }
+            self.add_vertex(x, y, v.cmd);
+        }
+    }
+
+    /// Import pre-computed cells with a pixel offset, bypassing the entire
+    /// path→cell conversion. Use this for cached glyph outlines: rasterize
+    /// the glyph once at (0,0) via `add_path`, extract cells with
+    /// `outline_cells()`, cache them, then replay at any position with this.
+    pub fn add_cells_offset(&mut self, cells: &[CellAa], dx: i32, dy: i32) {
+        if self.outline.sorted() {
+            self.reset();
+        }
+        self.outline.add_cells_offset(cells, dx, dy);
+    }
+
+    /// Get a snapshot of the current rasterizer cells for caching.
+    /// Call after `add_path` but before `render_scanlines`.
+    /// The cells represent the glyph outline at whatever position was used.
+    pub fn outline_cells(&mut self) -> Vec<CellAa> {
+        // Flush any pending current-cell state
+        self.outline.add_curr_cell_public();
+        self.outline.cells().to_vec()
     }
 
     // ========================================================================

@@ -189,6 +189,28 @@ impl RasterizerCellsAa {
         &self.cells
     }
 
+    /// Import pre-computed cells with a pixel offset, bypassing path conversion.
+    ///
+    /// The cells must have been generated at position (0, 0). The (dx, dy)
+    /// offset is added to each cell's (x, y) before insertion. This skips
+    /// the expensive path→cell conversion in `render_line`/`render_hline`
+    /// when the same outline is rendered at many positions.
+    ///
+    /// The caller must call `sort_cells()` (via the rasterizer) after this.
+    pub fn add_cells_offset(&mut self, src: &[CellAa], dx: i32, dy: i32) {
+        self.sorted = false;
+        self.cells.reserve(src.len());
+        for c in src {
+            let x = c.x + dx;
+            let y = c.y + dy;
+            if x < self.min_x { self.min_x = x; }
+            if x > self.max_x { self.max_x = x; }
+            if y < self.min_y { self.min_y = y; }
+            if y > self.max_y { self.max_y = y; }
+            self.cells.push(CellAa { x, y, cover: c.cover, area: c.area });
+        }
+    }
+
     // ========================================================================
     // Private helpers
     // ========================================================================
@@ -199,6 +221,12 @@ impl RasterizerCellsAa {
         if self.curr_cell.area | self.curr_cell.cover != 0 {
             self.cells.push(self.curr_cell);
         }
+    }
+
+    /// Public version of add_curr_cell for extracting cells before sort.
+    #[inline]
+    pub fn add_curr_cell_public(&mut self) {
+        self.add_curr_cell();
     }
 
     /// Move to a new cell position, flushing the previous cell if needed.

@@ -326,6 +326,12 @@ impl PathStorage {
         self.vertices.len()
     }
 
+    /// Immutable access to the raw vertex slice.
+    /// Use with `RasterizerScanlineAa::add_path_vertices` to avoid cloning.
+    pub fn vertices(&self) -> &[VertexD] {
+        &self.vertices
+    }
+
     /// Convert relative coordinates to absolute by adding last vertex position.
     pub fn rel_to_abs(&self, x: &mut f64, y: &mut f64) {
         if !self.vertices.is_empty() {
