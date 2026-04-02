@@ -10,5 +10,6 @@ demo/public/pkg/
 bun.lock
 cpp-references/
 nul
+.DS_Store
 tools/cpp-renderer/
 tools/output/
