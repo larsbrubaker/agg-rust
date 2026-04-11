@@ -326,6 +326,15 @@ impl PathStorage {
         self.vertices.len()
     }
 
+    /// Immutable access to the raw vertex slice.
+    ///
+    /// Useful when you need to iterate or cache path data without going through
+    /// the mutable `VertexSource` iterator protocol. The slice is valid for the
+    /// lifetime of the `PathStorage`.
+    pub fn vertices(&self) -> &[VertexD] {
+        &self.vertices
+    }
+
     /// Convert relative coordinates to absolute by adding last vertex position.
     pub fn rel_to_abs(&self, x: &mut f64, y: &mut f64) {
         if !self.vertices.is_empty() {
@@ -1416,5 +1425,22 @@ mod tests {
         let cmd = ps.prev_vertex_xy(&mut x, &mut y);
         assert_eq!(cmd, PATH_CMD_MOVE_TO);
         assert!((x - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_vertices_accessor() {
+        let mut ps = PathStorage::new();
+        ps.move_to(1.0, 2.0);
+        ps.line_to(3.0, 4.0);
+        ps.line_to(5.0, 6.0);
+
+        let verts = ps.vertices();
+        assert_eq!(verts.len(), 3);
+        assert!((verts[0].x - 1.0).abs() < 1e-10);
+        assert!((verts[0].y - 2.0).abs() < 1e-10);
+        assert_eq!(verts[0].cmd, PATH_CMD_MOVE_TO);
+        assert!((verts[1].x - 3.0).abs() < 1e-10);
+        assert!((verts[2].x - 5.0).abs() < 1e-10);
+        assert_eq!(verts[2].cmd, PATH_CMD_LINE_TO);
     }
 }

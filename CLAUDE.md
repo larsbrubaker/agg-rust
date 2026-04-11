@@ -1,5 +1,21 @@
 # Claude Code Guidelines
 
+## Project Phase
+
+The core AGG 2.6 port is now **mostly complete**. The project has entered a post-port phase where:
+
+- Rust-idiomatic improvements and extensions beyond the C++ original are welcome
+- New APIs that don't exist in C++ AGG may be added when they provide real-world value
+- The strict "exact C++ behavioral match" requirement still governs all ported functionality
+- Extensions must not modify or break any existing ported behavior
+- Every extension must have tests that verify correctness against the existing ported baseline
+
+**Guidelines for new extensions:**
+1. Clear, demonstrated real-world use case (not speculative)
+2. Tests that prove correctness — ideally a round-trip or comparison against the equivalent existing API
+3. Clean Rust-idiomatic API design; document any invariants or limitations the caller must respect
+4. No exposure of internal implementation details as public API — use `pub(crate)` for helpers that bridge modules
+
 ## Philosophy
 
 **Quality through iterations** - Start with correct implementations, then improve. Code that doesn't matter can be quick and dirty. But code that matters *really* matters—treat it with respect and improve it meticulously. In a porting project, every function matters.

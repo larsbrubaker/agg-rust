@@ -195,9 +195,48 @@ impl RasterizerCellsAa {
 
     /// Flush the current cell into the cells array if it has non-zero data.
     #[inline]
-    fn add_curr_cell(&mut self) {
+    pub(crate) fn add_curr_cell(&mut self) {
         if self.curr_cell.area | self.curr_cell.cover != 0 {
             self.cells.push(self.curr_cell);
+        }
+    }
+
+    /// Import pre-computed cells with a pixel offset, bypassing path conversion.
+    ///
+    /// The cells must have been generated at position (0, 0) — i.e., with the
+    /// path origin at pixel (0, 0). The `(dx, dy)` offset is added to each
+    /// cell's `(x, y)` before insertion.
+    ///
+    /// **Caller responsibility**: the shifted cells must remain within the
+    /// rasterizer's configured clip region. This bypasses the clipper entirely,
+    /// so out-of-bounds cells will produce incorrect rendering near clip edges.
+    ///
+    /// Call `sort_cells()` (via the rasterizer's `rewind_scanlines()`) after
+    /// all cells have been inserted.
+    pub fn add_cells_offset(&mut self, src: &[CellAa], dx: i32, dy: i32) {
+        self.sorted = false;
+        self.cells.reserve(src.len());
+        for c in src {
+            let x = c.x + dx;
+            let y = c.y + dy;
+            if x < self.min_x {
+                self.min_x = x;
+            }
+            if x > self.max_x {
+                self.max_x = x;
+            }
+            if y < self.min_y {
+                self.min_y = y;
+            }
+            if y > self.max_y {
+                self.max_y = y;
+            }
+            self.cells.push(CellAa {
+                x,
+                y,
+                cover: c.cover,
+                area: c.area,
+            });
         }
     }
 

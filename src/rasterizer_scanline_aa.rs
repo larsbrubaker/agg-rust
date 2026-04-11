@@ -11,7 +11,7 @@
 use crate::basics::{
     is_close, is_move_to, is_stop, is_vertex, FillingRule, VertexSource, POLY_SUBPIXEL_SHIFT,
 };
-use crate::rasterizer_cells_aa::{RasterizerCellsAa, ScanlineHitTest};
+use crate::rasterizer_cells_aa::{CellAa, RasterizerCellsAa, ScanlineHitTest};
 use crate::rasterizer_sl_clip::{poly_coord, RasterizerSlClipInt};
 
 // ============================================================================
@@ -235,6 +235,44 @@ impl RasterizerScanlineAa {
             }
             self.add_vertex(x, y, cmd);
         }
+    }
+
+    /// Snapshot the rasterizer's current cell array for external caching.
+    ///
+    /// Returns a `Vec<CellAa>` representing all cells accumulated so far. Call
+    /// this after `add_path()` but before `rewind_scanlines()`. The returned
+    /// cells are positioned at whatever coordinates were used when the path was
+    /// rasterized; for glyph caching, rasterize the glyph at origin (0, 0) so
+    /// the cells can be replayed at any position with `add_cells_offset()`.
+    ///
+    /// Integer-pixel offsets preserve sub-pixel coverage exactly, because
+    /// `area` and `cover` are computed relative to each cell's own pixel
+    /// boundary rather than absolute coordinates.
+    pub fn outline_cells(&mut self) -> Vec<CellAa> {
+        // Flush any partially-accumulated current cell before snapshotting.
+        self.outline.add_curr_cell();
+        self.outline.cells().to_vec()
+    }
+
+    /// Import pre-computed cells with a pixel offset, bypassing path→cell conversion.
+    ///
+    /// This is the replay half of the glyph caching workflow:
+    /// 1. Rasterize a glyph outline once at position (0, 0).
+    /// 2. Cache the cells via `outline_cells()`.
+    /// 3. For each subsequent rendering of the same glyph, call
+    ///    `add_cells_offset(cached, glyph_x as i32, glyph_y as i32)`.
+    ///
+    /// **Sub-pixel positioning**: integer offsets preserve coverage exactly.
+    /// For sub-pixel accuracy, cache one cell set per quantized sub-pixel slot
+    /// (typically 4 slots per axis = 16 total for 1/4-pixel precision).
+    ///
+    /// **Clipping**: cells are inserted without passing through the clipper.
+    /// Ensure the shifted cells stay within any configured `clip_box`.
+    pub fn add_cells_offset(&mut self, cells: &[CellAa], dx: i32, dy: i32) {
+        if self.outline.sorted() {
+            self.reset();
+        }
+        self.outline.add_cells_offset(cells, dx, dy);
     }
 
     // ========================================================================
@@ -726,5 +764,94 @@ mod tests {
         ras.line_to_d(15.0, 20.0);
         // Don't close explicitly — auto_close should handle it on rewind
         assert!(ras.rewind_scanlines());
+    }
+
+    /// Sweep all scanlines from a rasterizer into a flat list of (y, x, len, cover) tuples.
+    fn collect_scanlines(ras: &mut RasterizerScanlineAa) -> Vec<(i32, i32, u32, u32)> {
+        let mut sl = TestScanline::new();
+        let mut result = Vec::new();
+        while ras.sweep_scanline(&mut sl) {
+            for &(x, len, cover) in &sl.spans {
+                result.push((sl.y_val, x, len, cover));
+            }
+        }
+        result
+    }
+
+    /// Verify that outline_cells() + add_cells_offset(dx, dy) produces identical
+    /// scanline output to rasterizing the same path translated by (dx, dy) directly.
+    ///
+    /// This is the key correctness invariant for glyph cell caching: integer-pixel
+    /// offsets preserve sub-pixel coverage values because area/cover are computed
+    /// relative to each cell's own pixel boundary, not absolute coordinates.
+    #[test]
+    fn test_outline_cells_round_trip() {
+        // Triangle with varied edge angles to exercise sub-pixel coverage
+        let mut path = PathStorage::new();
+        path.move_to(10.0, 10.0);
+        path.line_to(30.0, 10.0);
+        path.line_to(20.0, 25.0);
+        path.close_polygon(PATH_FLAGS_NONE);
+
+        let dx = 15i32;
+        let dy = 20i32;
+
+        // --- Baseline: rasterize path translated by (dx, dy) directly ---
+        let mut path_shifted = path.clone();
+        path_shifted.translate_all_paths(dx as f64, dy as f64);
+        let mut ras_direct = RasterizerScanlineAa::new();
+        ras_direct.add_path(&mut path_shifted, 0);
+        assert!(ras_direct.rewind_scanlines());
+        let direct = collect_scanlines(&mut ras_direct);
+
+        // --- Cell cache: rasterize at origin, extract cells, replay at offset ---
+        let mut ras_source = RasterizerScanlineAa::new();
+        ras_source.add_path(&mut path, 0);
+        let cached_cells = ras_source.outline_cells();
+        assert!(!cached_cells.is_empty(), "outline_cells() should return non-empty cells");
+
+        let mut ras_replay = RasterizerScanlineAa::new();
+        ras_replay.add_cells_offset(&cached_cells, dx, dy);
+        assert!(ras_replay.rewind_scanlines());
+        let replayed = collect_scanlines(&mut ras_replay);
+
+        assert_eq!(
+            direct, replayed,
+            "cell cache replay must produce identical scanlines to direct rasterization"
+        );
+    }
+
+    /// Verify outline_cells() can be composed: two glyphs at different offsets
+    /// produce the same result whether rasterized directly or via cached cells.
+    #[test]
+    fn test_outline_cells_multiple_offsets() {
+        let mut path = PathStorage::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(8.0, 0.0);
+        path.line_to(8.0, 12.0);
+        path.line_to(0.0, 12.0);
+        path.close_polygon(PATH_FLAGS_NONE);
+
+        // Cache cells once
+        let mut ras_source = RasterizerScanlineAa::new();
+        ras_source.add_path(&mut path, 0);
+        let cells = ras_source.outline_cells();
+
+        // Two different offsets to simulate two glyphs in a text run
+        for (dx, dy) in [(5i32, 10i32), (20i32, 10i32)] {
+            let mut path_shifted = path.clone();
+            path_shifted.translate_all_paths(dx as f64, dy as f64);
+            let mut ras_direct = RasterizerScanlineAa::new();
+            ras_direct.add_path(&mut path_shifted, 0);
+            assert!(ras_direct.rewind_scanlines());
+            let direct = collect_scanlines(&mut ras_direct);
+
+            let mut ras_replay = RasterizerScanlineAa::new();
+            ras_replay.add_cells_offset(&cells, dx, dy);
+            assert!(ras_replay.rewind_scanlines());
+            let replayed = collect_scanlines(&mut ras_replay);
+
+            assert_eq!(direct, replayed, "mismatch at offset ({dx}, {dy})");
+        }
     }
 }
