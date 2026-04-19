@@ -194,7 +194,7 @@ function mapDemoStemToRoute(stem: string, availableRoutes: Set<string>): string 
 }
 
 function rustDemoSourceUrl(route: string): string {
-  return `https://github.com/larsbrubaker/agg-rust/blob/master/demo/src/demos/${route}.ts`;
+  return `https://github.com/larsbrubaker/agg-rust/blob/main/demo/src/demos/${route}.ts`;
 }
 
 function enhanceDemoTable(container: HTMLElement): void {
