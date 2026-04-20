@@ -12,6 +12,8 @@ A pure Rust port of [Anti-Grain Geometry (AGG) 2.6](https://github.com/ghaerr/ag
 
 Crate listing: **[`agg-rust` on crates.io](https://crates.io/crates/agg-rust)**.
 
+> Part of the [rust-apps](https://github.com/larsbrubaker/rust-apps) suite — a collection of Rust graphics and geometry libraries by Lars Brubaker.
+
 <p align="center">
   <a href="https://larsbrubaker.github.io/agg-rust/">
     <img src="docs/screenshot.png" alt="AGG.rs Interactive Demo — Lion rendering with anti-aliased vector graphics" width="800">
