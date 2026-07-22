@@ -27,6 +27,22 @@ pub trait ImagePatternSource {
     fn width(&self) -> f64;
     fn height(&self) -> f64;
     fn pixel(&self, x: i32, y: i32) -> Rgba8;
+
+    /// Full-precision (floating-point) color used by scaling filters such as
+    /// [`LineImageScale`].
+    ///
+    /// The default widens the 8-bit [`pixel`](Self::pixel) result to float.
+    /// Sources that internally carry more precision — for example an
+    /// sRGB-decoded, premultiplied pixmap whose C++ `color_type` is `rgba`
+    /// rather than `rgba8` — should override this to avoid quantizing at the
+    /// leaf before the filter runs. That early rounding otherwise costs up to
+    /// one least-significant bit per channel versus the C++ result, which
+    /// keeps the source color in floating point all the way through
+    /// `line_image_scale` and only converts to `rgba8` when the pattern is
+    /// finally stored.
+    fn pixel_rgba(&self, x: i32, y: i32) -> Rgba {
+        rgba8_to_rgba(self.pixel(x, y))
+    }
 }
 
 // ============================================================================
@@ -105,12 +121,12 @@ impl<'a, S: ImagePatternSource> ImagePatternSource for LineImageScale<'a, S> {
             let pix1 = if y1 < 0 {
                 Rgba::no_color()
             } else {
-                rgba8_to_rgba(self.source.pixel(x, y1))
+                self.source.pixel_rgba(x, y1)
             };
             let pix2 = if y2 > h {
                 Rgba::no_color()
             } else {
-                rgba8_to_rgba(self.source.pixel(x, y2))
+                self.source.pixel_rgba(x, y2)
             };
             let k = src_y - y1 as f64;
             rgba_to_rgba8(&pix1.gradient(&pix2, k))
@@ -126,7 +142,7 @@ impl<'a, S: ImagePatternSource> ImagePatternSource for LineImageScale<'a, S> {
             // First partial row
             if y1 >= 0 {
                 let weight = (y1 + 1) as f64 - src_y1;
-                let p = rgba8_to_rgba(self.source.pixel(x, y1));
+                let p = self.source.pixel_rgba(x, y1);
                 c += p * weight;
             }
 
@@ -134,7 +150,7 @@ impl<'a, S: ImagePatternSource> ImagePatternSource for LineImageScale<'a, S> {
             y1 += 1;
             while y1 < y2 {
                 if y1 <= h {
-                    c += rgba8_to_rgba(self.source.pixel(x, y1));
+                    c += self.source.pixel_rgba(x, y1);
                 }
                 y1 += 1;
             }
@@ -142,7 +158,7 @@ impl<'a, S: ImagePatternSource> ImagePatternSource for LineImageScale<'a, S> {
             // Last partial row
             if y2 <= h {
                 let weight = src_y2 - y2 as f64;
-                let p = rgba8_to_rgba(self.source.pixel(x, y2));
+                let p = self.source.pixel_rgba(x, y2);
                 c += p * weight;
             }
 

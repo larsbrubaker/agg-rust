@@ -4,14 +4,15 @@
 // demo/wasm/src/render/compositing.rs::rasterizers2().
 
 use agg_rust::basics::{is_stop, is_vertex, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
-use agg_rust::color::Rgba8;
+use agg_rust::color::{Rgba, Rgba8};
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::ctrl::{render_ctrl, CboxCtrl, SliderCtrl};
+use agg_rust::gamma::srgb_to_linear;
 use agg_rust::gsv_text::GsvText;
 use agg_rust::math_stroke::LineCap;
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pattern_filters_rgba::PatternFilterBilinearRgba;
-use agg_rust::pixfmt_rgba::PixfmtRgba32;
+use agg_rust::pixfmt_rgba::{PixfmtRgba32, PixfmtRgba32Pre};
 use agg_rust::rasterizer_outline::RasterizerOutline;
 use agg_rust::rasterizer_outline_aa::{OutlineAaJoin, RasterizerOutlineAa};
 use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
@@ -105,18 +106,48 @@ impl PatternPixmapArgb32 {
     }
     fn pw(&self) -> u32 { self.pixmap[0] }
     fn ph(&self) -> u32 { self.pixmap[1] }
+
+    /// Full-precision premultiplied linear color for pixel (x, y).
+    ///
+    /// Replicates the C++ `rgba(srgba8(...)).premultiply()` conversion, whose
+    /// intermediate `color_type` is the floating-point `rgba`:
+    ///   1. Decode the RGB bytes from sRGB to linear via the float LUT
+    ///      (`sRGB_conv<float>::rgb_from_sRGB` stores `float(sRGB_to_linear(x/255))`),
+    ///      so the intermediate is rounded to f32.
+    ///   2. Alpha is linear: `float(x)/255.0f` (also f32).
+    ///   3. Premultiply in float.
+    fn pixel_premul_float(&self, x: i32, y: i32) -> Rgba {
+        let p = self.pixmap[(y as u32 * self.pw() + x as u32 + 2) as usize];
+        let sr = ((p >> 16) & 0xFF) as u8;
+        let sg = ((p >> 8) & 0xFF) as u8;
+        let sb = (p & 0xFF) as u8;
+        let sa = ((p >> 24) & 0xFF) as u8;
+
+        let r = srgb_to_linear(sr as f64 / 255.0) as f32 as f64;
+        let g = srgb_to_linear(sg as f64 / 255.0) as f32 as f64;
+        let b = srgb_to_linear(sb as f64 / 255.0) as f32 as f64;
+        let a = (sa as f32 / 255.0f32) as f64;
+
+        Rgba::new(r * a, g * a, b * a, a)
+    }
 }
 
 impl agg_rust::renderer_outline_image::ImagePatternSource for PatternPixmapArgb32 {
     fn width(&self) -> f64 { self.pw() as f64 }
     fn height(&self) -> f64 { self.ph() as f64 }
     fn pixel(&self, x: i32, y: i32) -> Rgba8 {
-        let p = self.pixmap[(y as u32 * self.pw() + x as u32 + 2) as usize];
-        let r = (p >> 16) & 0xFF;
-        let g = (p >> 8) & 0xFF;
-        let b = p & 0xFF;
-        let a = p >> 24;
-        Rgba8::new(r, g, b, a)
+        // The 8-bit form is what C++ stores when the pattern is used directly
+        // (no scaling): `rgba8(rgba(srgba8).premultiply())` via `uround`.
+        // AGG `uround(v) == unsigned(v + 0.5)` (truncation of a non-negative value).
+        let c = self.pixel_premul_float(x, y);
+        let to8 = |v: f64| -> u32 { (v * 255.0 + 0.5) as u32 };
+        Rgba8::new(to8(c.r), to8(c.g), to8(c.b), to8(c.a))
+    }
+
+    /// Override the scaling-filter accessor so `line_image_scale` interpolates
+    /// full-precision premultiplied color, matching C++'s `rgba` `color_type`.
+    fn pixel_rgba(&self, x: i32, y: i32) -> Rgba {
+        self.pixel_premul_float(x, y)
     }
 }
 
@@ -144,11 +175,19 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut buf = vec![255u8; (width * height * 4) as usize];
     let mut ra = RowAccessor::new();
     unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
-    let pf = PixfmtRgba32::new(&mut ra);
-    let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 242, 255));
 
     let color = Rgba8::new(102, 77, 26, 255);
+
+    // The C++ demo draws the main scene into a *premultiplied* pixel format
+    // (`pixfmt_bgr24_pre`) and then renders the controls afterwards through a
+    // separate *plain* (non-premultiplied) view of the same buffer
+    // (`ren_base2` over `pixfmt`). The premultiplied `prelerp` blend rounds
+    // differently from the straight-alpha `lerp`, so the main scene must use
+    // `PixfmtRgba32Pre` to match byte-for-byte.
+    {
+    let pf = PixfmtRgba32Pre::new(&mut ra);
+    let mut rb = RendererBase::new(pf);
+    rb.clear(&Rgba8::new(255, 255, 242, 255));
 
     // 1. Aliased pixel accuracy — Bresenham with rounded coords
     {
@@ -258,9 +297,13 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
         }
     }
+    } // end premultiplied main scene
 
-    // Controls — match C++ layout
+    // Controls — match C++ layout. Rendered through a plain (non-premultiplied)
+    // view of the same buffer, matching C++'s `ren_base2` over `pixfmt`.
     {
+        let pf = PixfmtRgba32::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
         let mut ras = RasterizerScanlineAa::new();
         let mut sl = ScanlineU8::new();
 
