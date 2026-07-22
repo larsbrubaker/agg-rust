@@ -2,13 +2,18 @@
 
 ## Project Phase
 
-The core AGG 2.6 port is now **mostly complete**. The project has entered a post-port phase where:
+The core AGG 2.6 port is **complete**. The project's goal is now to **improve the library beyond the original C++ version**:
 
-- Rust-idiomatic improvements and extensions beyond the C++ original are welcome
-- New APIs that don't exist in C++ AGG may be added when they provide real-world value
-- The strict "exact C++ behavioral match" requirement still governs all ported functionality
-- Extensions must not modify or break any existing ported behavior
-- Every extension must have tests that verify correctness against the existing ported baseline
+- Fix bugs, including bugs inherited from the C++ original
+- Improve performance
+- Extend capabilities with new APIs that don't exist in C++ AGG when they provide real-world value
+
+C++ behavioral matching remains the default baseline. Any divergence from C++ behavior must be a **deliberate, justified fix of a demonstrable C++ bug** — never accidental drift. Every deliberate divergence must be:
+
+- **Documented in code comments** explaining what the C++ bug was and why we diverge from it
+- **Locked in with a regression test** that proves the corrected behavior and guards against reverting to the C++ bug
+
+The model example is the gradient LUT off-by-one fix (see `seg_len` in `src/gradient_lut.rs`): upstream `agg_gradient_lut.h` sizes segments as `end - start + 1`, but the correct sizing is `end - start - 1` so gradient segments reach their end color. That divergence is documented at the call site and covered by a regression test.
 
 **Guidelines for new extensions:**
 1. Clear, demonstrated real-world use case (not speculative)
@@ -88,6 +93,8 @@ This project is a strict port of the AGG 2.6 C++ library to Rust. These rules en
 - Same performance characteristics (or better)
 - Pixel-perfect rendering output (byte-for-byte match with C++ rendered buffers)
 - No "close enough" implementations
+
+**Sanctioned exception:** known C++ AGG bugs may be deliberately fixed, diverging from the original behavior — but only following the documentation + regression-test requirements defined in the Project Phase section (code comment explaining the C++ bug, plus a regression test locking in the corrected behavior). Undocumented or accidental divergence from C++ behavior remains forbidden.
 
 ### Template-to-Trait Mapping
 

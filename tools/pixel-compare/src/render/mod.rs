@@ -269,6 +269,19 @@ mod demo_smoke_tests {
         // params: [comp_op = 3 (src-over), src_alpha = 0.5, dst_alpha = 0.5]
         assert_compositing2_matches(REF, &[3.0, 0.5, 0.5]);
     }
+
+    /// Byte-for-byte regression at comp-op src-atop (index 9), src alpha =
+    /// dst alpha = 0.5. This locks in the port's replication of the upstream
+    /// C++ AGG 2.6 src_atop blue-channel typo (agg_pixfmt_rgba.h:530): the
+    /// blue channel is computed from the just-updated green (`d.g`), not blue,
+    /// so byte-identity with the compiled C++ renderer requires the Rust port
+    /// to carry the same typo rather than silently "fixing" it.
+    #[test]
+    fn compositing2_matches_cpp_reference_600x400_srcatop_a050() {
+        const REF: &[u8] = include_bytes!("../../../../compositing2_cpp_600x400_srcatop_a050.raw");
+        // params: [comp_op = 9 (src-atop), src_alpha = 0.5, dst_alpha = 0.5]
+        assert_compositing2_matches(REF, &[9.0, 0.5, 0.5]);
+    }
 }
 
 /// Byte-for-byte regression tests against the committed C++ AGG reference
