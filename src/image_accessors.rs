@@ -859,6 +859,62 @@ mod tests {
         assert_eq!(&pix[..4], &[99, 88, 77, 66]);
     }
 
+    #[test]
+    fn test_clone_fast_path_border_walk() {
+        // Exercise the cached-pointer fast path (span/next_x/next_y) at the
+        // exact right/bottom border and off the edge, asserting each fetch
+        // matches the clamping `pixel()` path. The other clone tests only use
+        // len=1 and never advance along the fast path, so this guards the
+        // unsafe raw-pointer arithmetic that replaced the per-call row slice.
+        let mut data = Vec::new();
+        let rbuf = make_rgba_buffer(4, 4, &mut data);
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                set_rgba_pixel(&mut data, 4, x, y, [x as u8, y as u8, (x * 4 + y) as u8, 255]);
+            }
+        }
+
+        // Oracle: fetch the clamped pixel at (x, y) via the production slow
+        // path. A huge `len` fails the fast-path bounds check, forcing span()
+        // into the clamping `pixel()` branch, so this reuses the real clamping
+        // logic rather than duplicating it.
+        let clamp_pixel = |x: i32, y: i32| -> [u8; 4] {
+            let mut oracle = ImageAccessorClone::<4>::new(&rbuf);
+            let p = oracle.span(x, y, 1_000_000);
+            [p[0], p[1], p[2], p[3]]
+        };
+
+        // Fast-path span flush against the right border: x + len == width
+        // (2 + 2 == 4) and y == height - 1 (3). span() takes the fast path.
+        let mut acc = ImageAccessorClone::<4>::new(&rbuf);
+        let p = acc.span(2, 3, 2);
+        assert_eq!(&p[..4], &clamp_pixel(2, 3), "span at right/bottom border");
+
+        // Fast-path next_x pointer advance to the last valid column (3, 3).
+        let p = acc.next_x();
+        assert_eq!(&p[..4], &clamp_pixel(3, 3), "next_x fast-path advance");
+
+        // next_y steps off the bottom edge (y -> 4): must drop off the fast
+        // path and clamp, returning x0 = 2 clamped to (2, 3).
+        let p = acc.next_y();
+        assert_eq!(&p[..4], &clamp_pixel(2, 4), "next_y off bottom edge clamps");
+
+        // next_x after leaving the fast path advances logical x and clamps
+        // (3, 4) -> (3, 3).
+        let p = acc.next_x();
+        assert_eq!(&p[..4], &clamp_pixel(3, 4), "next_x after clamp fallback");
+
+        // Separate fully in-bounds walk exercising several consecutive
+        // fast-path next_x pointer advances across a row.
+        let mut acc2 = ImageAccessorClone::<4>::new(&rbuf);
+        let p = acc2.span(0, 1, 4);
+        assert_eq!(&p[..4], &clamp_pixel(0, 1));
+        for x in 1..4 {
+            let p = acc2.next_x();
+            assert_eq!(&p[..4], &clamp_pixel(x, 1), "in-bounds fast-path next_x");
+        }
+    }
+
     // -- ImageAccessorWrap tests --
 
     #[test]

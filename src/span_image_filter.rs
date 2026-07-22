@@ -60,7 +60,11 @@ impl<'a, I> SpanImageFilterBase<'a, I> {
     /// weight-array slice it yields can be held across a `generate` loop that
     /// also mutably borrows the interpolator. This avoids cloning the LUT per
     /// span in hot inner loops.
-    pub fn filter_lut(&self) -> Option<&'a ImageFilterLut> {
+    ///
+    /// Crate-internal: this exposes the stored borrow's lifetime, an
+    /// implementation detail of the span generators, so it is not part of the
+    /// public API (per the no-internals-as-public-API rule).
+    pub(crate) fn filter_lut(&self) -> Option<&'a ImageFilterLut> {
         self.filter
     }
 
