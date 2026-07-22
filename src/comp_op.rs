@@ -810,15 +810,30 @@ impl<'a> PixfmtRgba32CompOp<'a> {
         self.comp_op = op;
     }
 
+    /// Row of pixels at `y` as a byte slice (shared, read-only view).
+    #[inline]
+    fn row(&self, y: i32) -> &[u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
+    /// Row of pixels at `y` as a mutable byte slice.
+    #[inline]
+    fn row_mut(&mut self, y: i32) -> &mut [u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
     /// Clear the entire buffer to a solid color.
     pub fn clear(&mut self, c: &Rgba8) {
         let w = self.rbuf.width();
         let h = self.rbuf.height();
         for y in 0..h {
-            let row = unsafe {
-                let ptr = self.rbuf.row_ptr(y as i32);
-                std::slice::from_raw_parts_mut(ptr, (w as usize) * BPP)
-            };
+            let row = self.row_mut(y as i32);
             for x in 0..w as usize {
                 let off = x * BPP;
                 row[off] = c.r;
@@ -842,10 +857,7 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
     }
 
     fn pixel(&self, x: i32, y: i32) -> Rgba8 {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row(y);
         let off = x as usize * BPP;
         Rgba8::new(
             row[off] as u32,
@@ -856,10 +868,7 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
     }
 
     fn copy_pixel(&mut self, x: i32, y: i32, c: &Rgba8) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         let off = x as usize * BPP;
         row[off] = c.r;
         row[off + 1] = c.g;
@@ -868,10 +877,7 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
     }
 
     fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         for i in 0..len as usize {
             let off = (x as usize + i) * BPP;
             row[off] = c.r;
@@ -882,24 +888,20 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
     }
 
     fn blend_pixel(&mut self, x: i32, y: i32, c: &Rgba8, cover: CoverType) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let comp_op = self.comp_op;
+        let row = self.row_mut(y);
         let off = x as usize * BPP;
         let px: &mut [u8; 4] = (&mut row[off..off + BPP]).try_into().unwrap();
-        comp_op_blend(self.comp_op, px, c.r, c.g, c.b, c.a, cover);
+        comp_op_blend(comp_op, px, c.r, c.g, c.b, c.a, cover);
     }
 
     fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, cover: CoverType) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let comp_op = self.comp_op;
+        let row = self.row_mut(y);
         // Slice the span once so the inner loop carries no per-pixel bounds checks
         // or index arithmetic — the C++ path walks a raw pointer here.
         let span = &mut row[x as usize * BPP..(x as usize + len as usize) * BPP];
-        comp_op_span!(self.comp_op, |blend| {
+        comp_op_span!(comp_op, |blend| {
             // Colour and cover are constant across the span, so the premultiply is
             // loop-invariant (byte-identical to premultiplying per pixel).
             let r = Rgba8::multiply(c.r, c.a);
@@ -916,12 +918,10 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
     }
 
     fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, covers: &[CoverType]) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let comp_op = self.comp_op;
+        let row = self.row_mut(y);
         let span = &mut row[x as usize * BPP..(x as usize + len as usize) * BPP];
-        comp_op_span!(self.comp_op, |blend| {
+        comp_op_span!(comp_op, |blend| {
             // Solid span: constant colour, so premultiply once outside the loop.
             let r = Rgba8::multiply(c.r, c.a);
             let g = Rgba8::multiply(c.g, c.a);
@@ -943,12 +943,10 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
         covers: &[CoverType],
         cover: CoverType,
     ) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let comp_op = self.comp_op;
+        let row = self.row_mut(y);
         let span = &mut row[x as usize * BPP..(x as usize + len as usize) * BPP];
-        comp_op_span!(self.comp_op, |blend| {
+        comp_op_span!(comp_op, |blend| {
             // Colour differs per pixel here, so the premultiply must stay per pixel
             // (matching comp_op_adaptor_rgba). The single outer op-dispatch and the
             // pre-sliced span are what remove the overhead.
