@@ -22,7 +22,16 @@
 static void flash_palette2(agg::rgba8* colors) {
     agg::msvc_rand rng;
     for (int i = 0; i < 100; ++i) {
-        colors[i] = agg::rgba8(rng.next() & 0xFF, rng.next() & 0xFF, rng.next() & 0xFF, 230);
+        // Sequence the RNG into named temporaries so the three bytes map to
+        // (r, g, b) in that order. C++ leaves argument evaluation order
+        // unspecified (MSVC evaluates right-to-left), so constructing
+        // rgba8(rand(), rand(), rand(), 230) directly would assign the first
+        // byte to blue. Assigning in logical r,g,b order matches the example's
+        // intent and the Rust port.
+        unsigned r = rng.next() & 0xFF;
+        unsigned g = rng.next() & 0xFF;
+        unsigned b = rng.next() & 0xFF;
+        colors[i] = agg::rgba8(r, g, b, 230);
         colors[i].premultiply();
     }
 }

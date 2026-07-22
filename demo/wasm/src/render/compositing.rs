@@ -2792,16 +2792,16 @@ fn flash_rand_byte(state: &mut u32) -> u8 {
 
 fn flash_palette() -> Vec<Rgba8> {
     // The flash demos draw an arbitrary random test palette (100 colors, alpha
-    // 230, premultiplied). The C++ reference we match consumes the three random
-    // bytes in blue, green, red order (the first byte becomes the blue channel),
-    // so we assign them here in the same order to stay byte-for-byte identical.
+    // 230, premultiplied). The three RNG bytes are assigned to (r, g, b) in
+    // that order, matching the logical intent of the AGG example's
+    // rgba8(rand(), rand(), rand(), 230).
     let mut holdrand: u32 = 1;
     let mut colors = vec![Rgba8::new(0, 0, 0, 255); 100];
     for c in &mut colors {
-        let b0 = flash_rand_byte(&mut holdrand) as u32;
-        let b1 = flash_rand_byte(&mut holdrand) as u32;
-        let b2 = flash_rand_byte(&mut holdrand) as u32;
-        *c = Rgba8::new(b2, b1, b0, 230);
+        let r = flash_rand_byte(&mut holdrand) as u32;
+        let g = flash_rand_byte(&mut holdrand) as u32;
+        let b = flash_rand_byte(&mut holdrand) as u32;
+        *c = Rgba8::new(r, g, b, 230);
         c.premultiply();
     }
     colors
@@ -3352,11 +3352,10 @@ mod tests {
     fn flash_palette_first_entry_matches_cpp_style() {
         let colors = flash_palette();
         assert_eq!(colors[0].a, 230);
-        // First three random bytes are (41, 35, 190), assigned to (b, g, r) to
-        // match the C++ reference's channel order, giving pre-premultiply
-        // (r, g, b) = (190, 35, 41). After AGG premultiply with alpha=230:
-        assert_eq!(colors[0].r, 171);
+        // First three random bytes (41, 35, 190) are assigned to (r, g, b).
+        // After AGG premultiply with alpha=230:
+        assert_eq!(colors[0].r, 37);
         assert_eq!(colors[0].g, 32);
-        assert_eq!(colors[0].b, 37);
+        assert_eq!(colors[0].b, 171);
     }
 }
