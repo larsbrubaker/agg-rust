@@ -25,11 +25,6 @@ export function init(container: HTMLElement) {
   const slWidth = addSlider(sidebar, 'Width', 0.5, 10, 3, 0.01, v => { lineWidth = v; draw(); });
   addSlider(sidebar, 'Start Angle', 0, 360, 0, 1, v => { startAngle = v; draw(); });
 
-  const canvasControls: CanvasControl[] = [
-    { type: 'slider', x1: 10, y1: 14, x2: 490, y2: 22, min: 0.5, max: 10, sidebarEl: slWidth, onChange: v => { lineWidth = v; draw(); } },
-  ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
-
   // Checkbox for accurate joins
   const cbDiv = document.createElement('div');
   cbDiv.className = 'control-group';
@@ -44,6 +39,15 @@ export function init(container: HTMLElement) {
   cbDiv.appendChild(cb);
   cbDiv.appendChild(cbLabel);
   sidebar.appendChild(cbDiv);
+
+  // Canvas controls — hit areas matching the AGG-rendered controls.
+  // WASM (compositing.rs) renders the Width slider and an "Accurate Joins"
+  // CboxCtrl at AGG (10,30); both must be registered here for on-canvas clicks.
+  const canvasControls: CanvasControl[] = [
+    { type: 'slider', x1: 10, y1: 14, x2: 490, y2: 22, min: 0.5, max: 10, sidebarEl: slWidth, onChange: v => { lineWidth = v; draw(); } },
+    { type: 'checkbox', x1: 10, y1: 30, x2: 110, y2: 44, sidebarEl: cb, onChange: v => { accurateJoins = v ? 1 : 0; draw(); } },
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
   draw();
   return cleanupCC;
