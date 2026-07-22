@@ -1826,10 +1826,16 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         let mut stroke = ConvStroke::new(&mut dash);
         stroke.set_width(stroke_width);
         stroke.set_line_cap(cap);
+        // C++ adds the dash stroke and the arrow markers to the SAME rasterizer
+        // and renders them in a single render_scanlines_aa_solid call (see
+        // conv_dash_marker.cpp: ras.add_path(stroke); ras.add_path(arrow);
+        // render(black)). Rendering them in two separate AA passes would
+        // double-blend the anti-aliased pixels where the arrowheads overlap the
+        // dash stroke, leaving those pixels slightly lighter than C++. So we
+        // only accumulate the stroke into the rasterizer here and defer the
+        // single render until after the arrow path is also added.
         ras.reset();
         ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-            &Rgba8::new(0, 0, 0, 255));
     }
 
     // 5. Arrow markers from terminal marker generator semantics.
@@ -1851,7 +1857,8 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         arrow.tail(1.0 * k, 1.5 * k, 3.0 * k, 5.0 * k);
     }
     let mut marker = ConvMarker::new(&mut locator, &mut arrow);
-    ras.reset();
+    // Add the arrow markers to the same rasterizer as the dash stroke (no
+    // reset) and render both in one pass, matching C++'s combined coverage.
     ras.add_path(&mut marker, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
