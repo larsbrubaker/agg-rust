@@ -25,11 +25,15 @@ typedef agg::order_bgra order;
 
 template <class Container>
 void generate_color_ramp(Container& c, agg::rgba c1, agg::rgba c2, agg::rgba c3, agg::rgba c4) {
-    color a1(c1), a2(c2), a3(c3), a4(c4);
+    // Match the upstream example (examples/compositing2.cpp:66-82): the stops are
+    // agg::rgba, so the gradient is computed in DOUBLE precision (rgba::gradient)
+    // and converted to rgba8 only on assignment into the pod_auto_array<rgba8>.
+    // (Previously this pre-converted to rgba8 and used the fixed-point
+    // rgba8::gradient, which diverges from the example at partial alpha.)
     unsigned i;
-    for (i = 0; i < 85; i++) c[i] = a1.gradient(a2, i / 85.0);
-    for (; i < 170; i++) c[i] = a2.gradient(a3, (i - 85) / 85.0);
-    for (; i < 256; i++) c[i] = a3.gradient(a4, (i - 170) / 85.0);
+    for (i = 0; i < 85; i++) c[i] = c1.gradient(c2, i / 85.0);
+    for (; i < 170; i++) c[i] = c2.gradient(c3, (i - 85) / 85.0);
+    for (; i < 256; i++) c[i] = c3.gradient(c4, (i - 170) / 85.0);
 }
 
 template <class RenBase, class ColorRamp>

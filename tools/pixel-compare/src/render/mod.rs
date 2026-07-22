@@ -258,10 +258,11 @@ mod demo_smoke_tests {
 
     /// Byte-for-byte regression at a non-default partial alpha (comp-op src-over,
     /// src alpha = dst alpha = 0.5). This locks in the color-ramp construction: at
-    /// alpha < 1 the fixed-point `rgba8::gradient` used by the reference harness
-    /// diverges from the double-precision `rgba::gradient` (10 segment-3 ramp
-    /// entries differ, ~12260 output bytes), so this guards against a regression
-    /// back to the double-precision path.
+    /// alpha < 1 the double-precision `rgba::gradient` used by the example/harness
+    /// diverges from the fixed-point `rgba8::gradient` (10 segment-3 ramp entries
+    /// differ, ~12260 output bytes), so this guards against a regression to the
+    /// fixed-point path (the default-params test alone cannot catch it, since the
+    /// two paths coincide at alpha = 1.0).
     #[test]
     fn compositing2_matches_cpp_reference_600x400_alpha050() {
         const REF: &[u8] = include_bytes!("../../../../compositing2_cpp_600x400_alpha050.raw");
