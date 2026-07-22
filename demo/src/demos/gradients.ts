@@ -122,8 +122,17 @@ export function init(container: HTMLElement) {
 
   function onPointerDown(e: PointerEvent) {
     const pos = canvasPos(e);
-    const useRawForControls = !inControls(pos.agg) && inControls(pos.raw);
-    const p = useRawForControls ? pos.raw : pos.agg;
+    // Every interactive target — gamma control, spline points, gradient-type
+    // rbox, and the highlight sphere — is rendered into the top-origin buffer
+    // and only flipped for display via CSS (scaleY(-1)). Reversing that flip
+    // once (pos.agg) puts the pointer in the exact coordinate space of all the
+    // hit-test geometry, so a single convention covers every target. The old
+    // per-region raw-vs-flipped heuristic mis-classified the sphere: its
+    // flipped screen position falls inside a spline-box region, so it switched
+    // to raw coords and inSphere() (expressed in agg coords) never matched,
+    // making the center undraggable.
+    const useRawForControls = false;
+    const p = pos.agg;
     const btn = e.button;
     canvas.setPointerCapture(e.pointerId);
 
