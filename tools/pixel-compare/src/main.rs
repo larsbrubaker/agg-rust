@@ -146,6 +146,32 @@ fn cmd_compare(args: &[String]) {
     }
 }
 
+/// Suffix appended to verify output filenames so runs with different
+/// params never overwrite each other. Empty params keep the legacy
+/// name (no suffix) for backward compatibility with existing files.
+fn params_suffix(params: &[f64]) -> String {
+    if params.is_empty() {
+        return String::new();
+    }
+
+    // Deterministic FNV-1a hash over each param's raw bit pattern.
+    // std's DefaultHasher is randomly seeded per process, so it cannot be
+    // used here — filenames must be stable across runs and platforms.
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for p in params {
+        let bits = p.to_bits();
+        for byte in bits.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    format!("_p{:08x}", hash as u32)
+}
+
 fn cmd_verify(args: &[String]) {
     if args.len() < 3 {
         eprintln!(
@@ -185,6 +211,8 @@ fn cmd_verify(args: &[String]) {
         process::exit(1);
     });
 
+    let suffix = params_suffix(&params);
+
     // 1. Render Rust version
     println!("Rendering Rust '{}'...", demo);
     let rust_buf = pixel_compare::render::render_demo(demo, width, height, &params)
@@ -194,12 +222,12 @@ fn cmd_verify(args: &[String]) {
         });
 
     // Save Rust output for inspection
-    let rust_path = format!("{}_rust_{}x{}.bmp", demo, width, height);
+    let rust_path = format!("{}_rust_{}x{}{}.bmp", demo, width, height, suffix);
     save_image(Path::new(&rust_path), &rust_buf).expect("Failed to save Rust output");
     println!("  Saved Rust output: {}", rust_path);
 
     // 2. Run C++ renderer
-    let cpp_raw_path = format!("{}_cpp_{}x{}.raw", demo, width, height);
+    let cpp_raw_path = format!("{}_cpp_{}x{}{}.raw", demo, width, height, suffix);
     println!("Rendering C++ '{}'...", demo);
 
     let mut cmd_args = vec![
@@ -228,7 +256,7 @@ fn cmd_verify(args: &[String]) {
     // matching Rust's layout, so no row flip is needed here.
 
     // Save C++ output as BMP for inspection
-    let cpp_bmp_path = format!("{}_cpp_{}x{}.bmp", demo, width, height);
+    let cpp_bmp_path = format!("{}_cpp_{}x{}{}.bmp", demo, width, height, suffix);
     save_image(Path::new(&cpp_bmp_path), &cpp_buf).expect("Failed to save C++ BMP");
     println!("  Saved C++ output: {}", cpp_bmp_path);
 
@@ -245,7 +273,7 @@ fn cmd_verify(args: &[String]) {
     if !result.identical {
         // Always save side-by-side on failure
         let sbs = generate_sidebyside(&rust_buf, &cpp_buf);
-        let sbs_path = format!("{}_sidebyside_{}x{}.bmp", demo, width, height);
+        let sbs_path = format!("{}_sidebyside_{}x{}{}.bmp", demo, width, height, suffix);
         save_image(Path::new(&sbs_path), &sbs).expect("Failed to save side-by-side");
         println!("Side-by-side saved: {}", sbs_path);
 
@@ -261,4 +289,40 @@ fn cmd_verify(args: &[String]) {
     }
 
     println!("\nPIXEL-PERFECT MATCH!");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::params_suffix;
+
+    #[test]
+    fn empty_params_yield_empty_suffix() {
+        assert_eq!(params_suffix(&[]), "");
+    }
+
+    #[test]
+    fn non_empty_params_have_fixed_length_prefixed_suffix() {
+        let suffix = params_suffix(&[0.5]);
+        assert!(suffix.starts_with("_p"), "suffix was {suffix}");
+        // "_p" + 8 hex chars (lower 32 bits of the FNV-1a hash).
+        assert_eq!(suffix.len(), 10, "suffix was {suffix}");
+    }
+
+    #[test]
+    fn different_params_yield_different_suffixes() {
+        assert_ne!(params_suffix(&[0.5]), params_suffix(&[0.25]));
+    }
+
+    #[test]
+    fn same_params_yield_identical_suffix() {
+        assert_eq!(params_suffix(&[1.0, 2.0, 3.0]), params_suffix(&[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn known_value_pins_hash_algorithm() {
+        // Pins the exact output for [0.5] so an accidental change to the
+        // hashing algorithm (which would silently invalidate on-disk
+        // filenames) fails this test loudly.
+        assert_eq!(params_suffix(&[0.5]), "_p29e886a8");
+    }
 }
