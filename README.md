@@ -2,7 +2,7 @@
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 [![Crates.io](https://img.shields.io/crates/v/agg-rust.svg)](https://crates.io/crates/agg-rust)
-[![Tests](https://img.shields.io/badge/tests-903_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-983_passing-brightgreen.svg)](#)
 [![Modules](https://img.shields.io/badge/modules-88_ported-brightgreen.svg)](#)
 [![Demos](https://img.shields.io/badge/demos-64_interactive-orange.svg)](https://larsbrubaker.github.io/agg-rust/)
 
@@ -130,7 +130,7 @@ render_scanlines_aa_solid(&mut ras, &mut sl, &mut ren_base, &Rgba8::new(200, 80,
 
 ```bash
 cargo build
-cargo test                    # 903 tests
+cargo test                    # 983 tests
 cargo clippy -- -D warnings
 ```
 
@@ -147,15 +147,62 @@ Then open `http://localhost:3000` in your browser.
 
 ## Project Status
 
-All 88 core library modules have been ported from the C++ original with 903 tests passing. All 64 applicable demos are fully implemented and running via WebAssembly.
+All 88 core library modules have been ported from the C++ original with 983 tests passing. All 64 applicable demos are fully implemented and running via WebAssembly.
 
 | Metric | Value |
 |--------|-------|
 | Core modules ported | 88 |
-| Tests passing | 903 |
+| Tests passing | 983 |
 | Interactive demos | 64 |
 | External dependencies | 0 |
 | GPU dependencies | 0 |
+
+## Benchmarks
+
+The Rust port is benchmarked head-to-head against the original AGG 2.6 C++ library
+on a shared set of demos. Both sides render **the same scene at the same size**, and
+timings cover **the render call only** (no process startup, asset loading, or file
+I/O). Each demo runs 2 untimed warmups followed by 10 timed iterations, and the
+**median** of the per-iteration samples is reported.
+
+The key credibility claim: both renderers draw the same scene. For the demos marked
+**byte-identical** below, a committed `pixel-compare` reference test pins the Rust
+output byte-for-byte against the C++ output, so their speed difference reflects the
+implementation — not a difference in what is drawn. The remaining demos render the
+same scene and match visually, but are not yet pinned by a byte-compare test.
+
+Measured on an Intel Core i7-7660U @ 2.50GHz (Windows 10 19045), rustc 1.91.0 vs
+MSVC 19.44 (2026-07-22). Run-to-run variance from OS scheduling is expected:
+
+| Demo | Size | Byte-identical | C++ median (ms) | Rust median (ms) | Rust / C++ |
+|------|------|----------------|-----------------|------------------|------------|
+| simple_line | 512x512 | — | 0.41 | 0.86 | 2.09x |
+| lion_outline | 512x512 | yes | 3.10 | 3.12 | 1.00x |
+| rasterizers2 | 500x450 | yes | 2.55 | 2.97 | 1.16x |
+| conv_dash_marker | 500x330 | yes | 1.39 | 2.10 | 1.51x |
+| perspective | 600x600 | — | 3.96 | 4.42 | 1.12x |
+| image_perspective | 600x600 | — | 6.96 | 7.98 | 1.15x |
+| image_transforms | 430x340 | — | 3.76 | 2.69 | 0.72x |
+| image_filters | 430x340 | — | 5.33 | 4.03 | 0.76x |
+| compositing2 | 600x400 | yes | 6.63 | 8.24 | 1.24x |
+| flash_rasterizer | 655x520 | yes | 5.78 | 6.74 | 1.17x |
+| flash_rasterizer2 | 655x520 | yes | 4.28 | 11.97 | 2.80x |
+
+The **Byte-identical** column marks demos whose Rust output is pinned byte-for-byte
+against the C++ reference by a committed test; a `—` means the scene matches visually
+but is not yet covered by a byte-compare test.
+
+Full methodology, machine details, and compiler versions are in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md). Regenerate the whole suite (build both
+sides in release, run every demo, rewrite the doc) with:
+
+```bash
+cargo build --release -p pixel-compare
+cmake -S tools/cpp-renderer -B tools/cpp-renderer/build -A x64
+cmake --build tools/cpp-renderer/build --config Release
+target\release\pixel-compare bench-compare \
+  --cpp tools\cpp-renderer\build\Release\agg-render.exe --out docs\BENCHMARKS.md
+```
 
 ## License
 
