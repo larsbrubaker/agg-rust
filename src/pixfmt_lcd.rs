@@ -118,6 +118,24 @@ impl<'a> PixfmtRgba32Lcd<'a> {
         self.rbuf.width()
     }
 
+    /// Row of pixels at `y` as a byte slice (shared, read-only view).
+    #[inline]
+    fn row(&self, y: i32) -> &[u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
+    /// Row of pixels at `y` as a mutable byte slice.
+    #[inline]
+    fn row_mut(&mut self, y: i32) -> &mut [u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
     /// Blend a single byte in the RGBA buffer using the C++ alpha formula.
     ///
     /// `*p = (((rgb_val - *p) * alpha) + (*p << 16)) >> 16`
@@ -145,10 +163,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
         if pixel >= actual_w {
             return Rgba8::new(0, 0, 0, 0);
         }
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, actual_w * BPP)
-        };
+        let row = self.row(y);
         let off = pixel * BPP;
         Rgba8::new(
             row[off] as u32,
@@ -164,10 +179,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
         if pixel >= actual_w {
             return;
         }
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, actual_w * BPP)
-        };
+        let row = self.row_mut(y);
         let off = pixel * BPP;
         row[off] = c.r;
         row[off + 1] = c.g;
@@ -178,10 +190,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
     fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8) {
         // Copy len subpixels — sets whole pixels for each affected pixel
         let actual_w = self.actual_width() as usize;
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, actual_w * BPP)
-        };
+        let row = self.row_mut(y);
         for k in 0..len as usize {
             let sp = x as usize + k;
             let pixel = sp / 3;
@@ -204,10 +213,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
         if pixel >= actual_w {
             return;
         }
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, actual_w * BPP)
-        };
+        let row = self.row_mut(y);
         let byte_off = pixel * BPP + channel;
         let rgb = [c.r, c.g, c.b];
         let alpha = cover as i32 * c.a as i32;
@@ -223,10 +229,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
 
     fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, cover: CoverType) {
         let actual_w = self.actual_width() as usize;
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, actual_w * BPP)
-        };
+        let row = self.row_mut(y);
         let alpha = cover as i32 * c.a as i32;
         if alpha == 0 {
             return;
@@ -301,10 +304,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
 
         // Step 3: Apply distributed covers to RGBA buffer
         let actual_w = self.actual_width() as usize;
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, actual_w * BPP)
-        };
+        let row = self.row_mut(y);
 
         let rgb = [c.r, c.g, c.b];
         // Channel cycling: which RGB channel does sp_start map to?
@@ -347,10 +347,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
         cover: CoverType,
     ) {
         let actual_w = self.actual_width() as usize;
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, actual_w * BPP)
-        };
+        let row = self.row_mut(y);
 
         for k in 0..len as usize {
             let sp = x as usize + k;

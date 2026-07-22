@@ -31,15 +31,30 @@ impl<'a> PixfmtRgb24<'a> {
         Self { rbuf }
     }
 
+    /// Row of pixels at `y` as a byte slice (shared, read-only view).
+    #[inline]
+    fn row(&self, y: i32) -> &[u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
+    /// Row of pixels at `y` as a mutable byte slice.
+    #[inline]
+    fn row_mut(&mut self, y: i32) -> &mut [u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
     /// Clear the entire buffer to a solid color.
     pub fn clear(&mut self, c: &Rgba8) {
         let w = self.rbuf.width();
         let h = self.rbuf.height();
         for y in 0..h {
-            let row = unsafe {
-                let ptr = self.rbuf.row_ptr(y as i32);
-                std::slice::from_raw_parts_mut(ptr, (w as usize) * BPP)
-            };
+            let row = self.row_mut(y as i32);
             for x in 0..w as usize {
                 let off = x * BPP;
                 row[off] = c.r;
@@ -71,19 +86,13 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
     }
 
     fn pixel(&self, x: i32, y: i32) -> Rgba8 {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row(y);
         let off = x as usize * BPP;
         Rgba8::new(row[off] as u32, row[off + 1] as u32, row[off + 2] as u32, 255)
     }
 
     fn copy_pixel(&mut self, x: i32, y: i32, c: &Rgba8) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         let off = x as usize * BPP;
         row[off] = c.r;
         row[off + 1] = c.g;
@@ -91,10 +100,7 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
     }
 
     fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         for i in 0..len as usize {
             let off = (x as usize + i) * BPP;
             row[off] = c.r;
@@ -104,10 +110,7 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
     }
 
     fn blend_pixel(&mut self, x: i32, y: i32, c: &Rgba8, cover: CoverType) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         let off = x as usize * BPP;
         let alpha = Rgba8::mult_cover(c.a, cover);
         if alpha == 255 {
@@ -120,10 +123,7 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
     }
 
     fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, cover: CoverType) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         let alpha = Rgba8::mult_cover(c.a, cover);
         if alpha == 255 {
             for i in 0..len as usize {
@@ -141,10 +141,7 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
     }
 
     fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, covers: &[CoverType]) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         for (i, &cov) in covers.iter().enumerate().take(len as usize) {
             let off = (x as usize + i) * BPP;
             let alpha = Rgba8::mult_cover(c.a, cov);
@@ -167,10 +164,7 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
         covers: &[CoverType],
         cover: CoverType,
     ) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        };
+        let row = self.row_mut(y);
         if !covers.is_empty() {
             for i in 0..len as usize {
                 let off = (x as usize + i) * BPP;
