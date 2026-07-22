@@ -86,13 +86,12 @@ test('lion_outline: clicking the on-canvas Use Scanline Rasterizer checkbox togg
 
   // The checkbox click must NOT also fire the demo's rotation drag handler
   // (a bubble-phase listener on the same canvas), which would snap
-  // angle/scale to the click point. Caveats: (1) happy-dom non-spec-compliantly
-  // suppresses same-target bubble listeners on stopPropagation(), so this
-  // passes here even without the real fix — do not trust it alone for
-  // real-browser behavior; (2) the real-browser leak is being fixed separately
-  // in canvas-controls.ts (stopImmediatePropagation on control hits). This
-  // assertion documents intent and guards the spec-correct path once that
-  // fix lands.
+  // angle/scale to the click point. These assertions guard the canvas-controls
+  // suppression contract: the capture-phase handler in canvas-controls.ts runs
+  // first and calls stopPropagation(), which per DOM dispatch suppresses the
+  // demo's bubble-phase drag handler on the SAME canvas (verified empirically
+  // in both happy-dom v20 and Chromium). See lion_outline.controls.test.ts for
+  // the fuller contract tests.
   expect(lastParams[0]).toBe(angleBefore);
   expect(lastParams[1]).toBe(scaleBefore);
 

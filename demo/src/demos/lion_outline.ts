@@ -46,11 +46,13 @@ export function init(container: HTMLElement) {
   // WASM (compositing.rs) renders the Width slider and a "Use Scanline
   // Rasterizer" CboxCtrl at AGG (160,5); both must be registered here so
   // on-canvas clicks work. canvas-controls.ts handles these on the
-  // capture-phase pointer handler. Note: the rotation drag handler below is a
-  // bubble-phase listener on the SAME canvas, and per the DOM spec
-  // stopPropagation() does not suppress same-element listeners — suppressing
-  // it relies on canvas-controls.ts's interception (stopImmediatePropagation,
-  // being fixed separately there).
+  // capture-phase pointer handler and calls stopPropagation()+preventDefault()
+  // when a control is hit. The rotation/scale drag handler below is a
+  // bubble-phase listener on the SAME canvas; per DOM dispatch the capture pass
+  // at the target runs first and sets the stop-propagation flag, so the
+  // bubbling-pass invoke on this element returns early — the drag handler never
+  // sees on-canvas control clicks, so they never disturb the rotation/scale
+  // drag state.
   const canvasControls: CanvasControl[] = [
     { type: 'slider', x1: 5, y1: 5, x2: 150, y2: 12, min: 0, max: 4, sidebarEl: slWidth, onChange: v => { lineWidth = v; draw(); } },
     { type: 'checkbox', x1: 160, y1: 5, x2: 340, y2: 19, sidebarEl: cb, onChange: v => { useScanline = v ? 1 : 0; draw(); } },
