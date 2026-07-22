@@ -196,6 +196,40 @@ mod demo_smoke_tests {
             assert!(demos.contains(&name), "available_demos missing {name}");
         }
     }
+
+    /// Byte-for-byte regression against the C++ AGG reference render of the
+    /// compositing2 demo (600x400, default params). The reference `.raw` file
+    /// carries an 8-byte `[width:u32][height:u32]` header followed by RGBA data.
+    #[test]
+    fn compositing2_matches_cpp_reference_600x400() {
+        const REF: &[u8] =
+            include_bytes!("../../../../compositing2_cpp_600x400.raw");
+        let width = u32::from_le_bytes([REF[0], REF[1], REF[2], REF[3]]);
+        let height = u32::from_le_bytes([REF[4], REF[5], REF[6], REF[7]]);
+        assert_eq!((width, height), (600, 400), "reference dimensions");
+        let cpp = &REF[8..];
+
+        let out = render_demo("compositing2", width, height, &[])
+            .expect("compositing2 renderer missing");
+        assert_eq!(out.data.len(), cpp.len(), "buffer length");
+
+        let mut mismatches = 0usize;
+        let mut first: Option<usize> = None;
+        for (i, (r, c)) in out.data.iter().zip(cpp.iter()).enumerate() {
+            if r != c {
+                mismatches += 1;
+                if first.is_none() {
+                    first = Some(i);
+                }
+            }
+        }
+        assert_eq!(
+            mismatches, 0,
+            "compositing2 differs from C++ reference: {mismatches} byte(s) differ, \
+             first at byte {:?}",
+            first
+        );
+    }
 }
 
 fn parse_path_line(line: &str, path: &mut PathStorage) {

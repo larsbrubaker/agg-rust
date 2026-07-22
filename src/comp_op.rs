@@ -206,18 +206,27 @@ fn blend_src(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     }
 }
 
-// ---- SrcOver: Dca' = Sca + Dca.(1 - Sa)
+// ---- SrcOver: Dca' = Sca + Dca.(1 - Sa), Da' = Sa + Da - Sa.Da
+//
+// C++ `comp_op_rgba_src_over` delegates to `blender_rgba_pre::blend_pix`, which
+// works entirely in integer/fixed-point (`mult_cover` + `prelerp`), NOT the
+// floating-point `rgba` get/set path used by the separable blend modes
+// (multiply, difference, ...). Doing this in `f64` agrees with C++ when the
+// destination is opaque, but rounds differently by up to 1 code when the
+// destination has partial alpha — which is exactly the case where a src-over
+// shape overlaps an already-composited (difference) shape. Match the fixed-point
+// path to stay byte-identical. The incoming (r, g, b, a) are already the
+// premultiplied source from `comp_op_blend`.
 #[inline]
 fn blend_src_over(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
-    let s = PremulRgba::get(r, g, b, a, cover);
-    let d = PremulRgba::get_pix(p, 255);
-    let out = PremulRgba {
-        r: d.r + s.r - d.r * s.a,
-        g: d.g + s.g - d.g * s.a,
-        b: d.b + s.b - d.b * s.a,
-        a: d.a + s.a - d.a * s.a,
-    };
-    PremulRgba::set(p, &out);
+    let cr = Rgba8::mult_cover(r, cover);
+    let cg = Rgba8::mult_cover(g, cover);
+    let cb = Rgba8::mult_cover(b, cover);
+    let ca = Rgba8::mult_cover(a, cover);
+    p[0] = Rgba8::prelerp(p[0], cr, ca);
+    p[1] = Rgba8::prelerp(p[1], cg, ca);
+    p[2] = Rgba8::prelerp(p[2], cb, ca);
+    p[3] = Rgba8::prelerp(p[3], ca, ca);
 }
 
 // ---- DstOver: Dca' = Dca + Sca.(1 - Da)

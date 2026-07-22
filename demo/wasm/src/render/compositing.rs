@@ -35,7 +35,8 @@ use agg_rust::scanline_storage_aa::ScanlineStorageAa;
 use agg_rust::scanline_storage_bin::ScanlineStorageBin;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
-use agg_rust::gradient_lut::{GradientLinearColor, GradientLut};
+use agg_rust::basics::uround;
+use agg_rust::gradient_lut::{ColorFunction, GradientLinearColor};
 use agg_rust::span_gradient::{GradientRadial, GradientX, SpanGradient};
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
@@ -2466,7 +2467,7 @@ pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
 fn radial_shape(
     rb: &mut RendererBase<PixfmtRgba32CompOp>,
-    ramp: &GradientLut,
+    ramp: &ColorRamp,
     resize_mtx: &TransAffine,
     x1: f64,
     y1: f64,
@@ -2495,15 +2496,63 @@ fn radial_shape(
     render_scanlines_aa(&mut ras, &mut sl, rb, &mut alloc, &mut span);
 }
 
-fn generate_color_ramp(c1: Rgba8, c2: Rgba8, c3: Rgba8, c4: Rgba8) -> GradientLut {
-    let mut lut = GradientLut::new(256);
-    lut.remove_all();
-    lut.add_color(0.0, c1);
-    lut.add_color(85.0 / 255.0, c2);
-    lut.add_color(170.0 / 255.0, c3);
-    lut.add_color(1.0, c4);
-    lut.build_lut();
-    lut
+/// A 256-entry color ramp built exactly like the C++ compositing2
+/// `generate_color_ramp`: three linearly interpolated segments of 85 entries
+/// each (boundaries fixed at 0, 85, 170, 256).
+///
+/// This deliberately does NOT use `GradientLut`. `GradientLut::build_lut` places
+/// segment boundaries with `uround(offset * size)` (so 170/255 lands at index 171,
+/// not 170) and interpolates each segment with a 14-bit DDA. Those differences
+/// shift a handful of ramp entries versus the reference, which propagates through
+/// the radial gradients and comp-op blends into tens of thousands of off-by-a-few
+/// pixels. Reproducing the exact segmented ramp is what makes the render match.
+struct ColorRamp {
+    lut: Vec<Rgba8>,
+}
+
+impl ColorFunction for ColorRamp {
+    type Color = Rgba8;
+
+    fn size(&self) -> usize {
+        self.lut.len()
+    }
+
+    fn get(&self, index: usize) -> Rgba8 {
+        self.lut[index]
+    }
+}
+
+/// Colors are `[r, g, b, a]` in the `f64` [0..1] domain, matching the
+/// `agg::rgba(...)` arguments of the C++ demo.
+///
+/// The color stops are first converted to `rgba8` (`uround(channel * 255)`), then
+/// each segment is interpolated with the fixed-point `Rgba8::gradient`
+/// (`agg::rgba8::gradient`, using `lerp` and `ik = uround(k * 255)`) — mirroring
+/// the reference's `color a1(c1); ... c[i] = a1.gradient(a2, k)`. Note this is the
+/// integer/fixed-point gradient, not the `f64` `rgba::gradient`; the reference
+/// pre-converts the stops to `rgba8`, so the fixed-point path is required for a
+/// byte-for-byte match.
+fn generate_color_ramp(c1: [f64; 4], c2: [f64; 4], c3: [f64; 4], c4: [f64; 4]) -> ColorRamp {
+    let to8 = |c: [f64; 4]| -> Rgba8 {
+        Rgba8::new(
+            uround(c[0] * 255.0),
+            uround(c[1] * 255.0),
+            uround(c[2] * 255.0),
+            uround(c[3] * 255.0),
+        )
+    };
+    let (a1, a2, a3, a4) = (to8(c1), to8(c2), to8(c3), to8(c4));
+    let mut lut = vec![Rgba8::default(); 256];
+    for (i, entry) in lut.iter_mut().enumerate().take(85) {
+        *entry = a1.gradient(&a2, i as f64 / 85.0);
+    }
+    for i in 85..170 {
+        lut[i] = a2.gradient(&a3, (i - 85) as f64 / 85.0);
+    }
+    for i in 170..256 {
+        lut[i] = a3.gradient(&a4, (i - 170) as f64 / 85.0);
+    }
+    ColorRamp { lut }
 }
 
 /// params[0] = comp_op (0..23), params[1] = src alpha (0..1), params[2] = dst alpha (0..1)
@@ -2522,16 +2571,16 @@ pub fn compositing2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     let resize_mtx = build_resize_mtx(width, height, true);
     let ramp1 = generate_color_ramp(
-        Rgba8::new(0, 0, 0, (dst_alpha * 255.0) as u32),
-        Rgba8::new(0, 0, 255, (dst_alpha * 255.0) as u32),
-        Rgba8::new(0, 255, 0, (dst_alpha * 255.0) as u32),
-        Rgba8::new(255, 0, 0, 0),
+        [0.0, 0.0, 0.0, dst_alpha],
+        [0.0, 0.0, 1.0, dst_alpha],
+        [0.0, 1.0, 0.0, dst_alpha],
+        [1.0, 0.0, 0.0, 0.0],
     );
     let ramp2 = generate_color_ramp(
-        Rgba8::new(0, 0, 0, (src_alpha * 255.0) as u32),
-        Rgba8::new(0, 0, 255, (src_alpha * 255.0) as u32),
-        Rgba8::new(0, 255, 0, (src_alpha * 255.0) as u32),
-        Rgba8::new(255, 0, 0, 0),
+        [0.0, 0.0, 0.0, src_alpha],
+        [0.0, 0.0, 1.0, src_alpha],
+        [0.0, 1.0, 0.0, src_alpha],
+        [1.0, 0.0, 0.0, 0.0],
     );
 
     let mut pf_comp = PixfmtRgba32CompOp::new(&mut ra);
