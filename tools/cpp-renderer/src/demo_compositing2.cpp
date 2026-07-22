@@ -1,5 +1,9 @@
 // compositing2.cpp headless reproduction (default: comp-op src-over, alphas 1.0).
-// Rendered at the demo's initial 600x400 so trans_affine_resizing() is identity.
+// The scene is scaled by the same resize matrix platform_support builds for a
+// window_resize|window_keep_aspect_ratio window (trans_affine_resizing): a
+// trans_viewport mapping the initial 600x400 world onto the current w x h device
+// with aspect_ratio_meet, centered (0.5, 0.5). At 600x400 this is identity, so
+// the fix is a no-op there; at other sizes the whole scene scales like upstream.
 #include <vector>
 
 #include "agg_basics.h"
@@ -10,6 +14,7 @@
 #include "agg_ellipse.h"
 #include "agg_conv_transform.h"
 #include "agg_trans_affine.h"
+#include "agg_trans_viewport.h"
 #include "agg_pixfmt_rgba.h"
 #include "agg_span_allocator.h"
 #include "agg_span_gradient.h"
@@ -95,7 +100,15 @@ int render_compositing2(unsigned w, unsigned h,
                         agg::rgba(0, 0, 0, src_alpha), agg::rgba(0, 0, 1, src_alpha),
                         agg::rgba(0, 1, 0, src_alpha), agg::rgba(1, 0, 0, 0));
 
-    agg::trans_affine resize; // identity at the initial window size
+    // Replicate platform_support::trans_affine_resizing() for the
+    // window_keep_aspect_ratio case (agg_platform_support.h:588-608): a
+    // trans_viewport from the initial 600x400 world to the current w x h device,
+    // centered with aspect_ratio_meet. Identity at 600x400.
+    agg::trans_viewport vp;
+    vp.preserve_aspect_ratio(0.5, 0.5, agg::aspect_ratio_meet);
+    vp.device_viewport(0, 0, w, h);
+    vp.world_viewport(0, 0, 600, 400);
+    agg::trans_affine resize = vp.to_affine();
     agg::rasterizer_scanline_aa<> ras;
     agg::scanline_u8 sl;
 

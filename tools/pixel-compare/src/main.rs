@@ -23,6 +23,7 @@ fn main() {
         "render" => cmd_render(&args[2..]),
         "compare" => cmd_compare(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
+        "bench" => cmd_bench(&args[2..]),
         "list" => cmd_list(),
         _ => {
             eprintln!("Unknown command: {}", args[1]);
@@ -44,6 +45,9 @@ fn print_usage() {
     eprintln!();
     eprintln!("  verify <demo> <width> <height> --cpp <cpp_exe> [params...]");
     eprintln!("      Render both Rust and C++, then compare.");
+    eprintln!();
+    eprintln!("  bench <demo> <width> <height> [params...] [--iters N]");
+    eprintln!("      Time just the render call (default N=10, plus 2 warmups).");
     eprintln!();
     eprintln!("  list");
     eprintln!("      List available demo names.");
@@ -92,6 +96,72 @@ fn cmd_render(args: &[String]) {
 
     save_image(Path::new(&output), &buf).expect("Failed to save image");
     println!("Saved: {}", output);
+}
+
+fn cmd_bench(args: &[String]) {
+    if args.len() < 3 {
+        eprintln!("Usage: pixel-compare bench <demo> <width> <height> [params...] [--iters N]");
+        process::exit(1);
+    }
+
+    let demo = &args[0];
+    let width: u32 = args[1].parse().expect("Invalid width");
+    let height: u32 = args[2].parse().expect("Invalid height");
+
+    // Parse remaining args: params and --iters flag.
+    let mut params = Vec::new();
+    let mut iters: usize = 10;
+    let mut i = 3;
+    while i < args.len() {
+        if args[i] == "--iters" && i + 1 < args.len() {
+            iters = args[i + 1].parse().expect("Invalid --iters (must be a positive integer)");
+            i += 2;
+        } else {
+            params.push(args[i].parse::<f64>().expect("Invalid param (must be f64)"));
+            i += 1;
+        }
+    }
+    if iters == 0 {
+        eprintln!("--iters must be at least 1");
+        process::exit(1);
+    }
+
+    let render = || {
+        pixel_compare::render::render_demo(demo, width, height, &params).unwrap_or_else(|| {
+            eprintln!("Unknown demo: '{}'. Use 'list' to see available demos.", demo);
+            process::exit(1);
+        })
+    };
+
+    // 2 untimed warmup iterations.
+    for _ in 0..2 {
+        let buf = render();
+        std::hint::black_box(&buf);
+    }
+
+    let mut times = Vec::with_capacity(iters);
+    for it in 0..iters {
+        let start = std::time::Instant::now();
+        let buf = render();
+        let elapsed = start.elapsed();
+        // Keep the optimizer from eliding the render work.
+        std::hint::black_box(&buf);
+        let ms = elapsed.as_secs_f64() * 1000.0;
+        times.push(ms);
+        println!("iter {:>3}: {:.2} ms", it + 1, ms);
+    }
+
+    let mut sorted = times.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let best = sorted[0];
+    let n = sorted.len();
+    let median = if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    };
+    let mean = times.iter().sum::<f64>() / n as f64;
+    println!("best= {:.2} ms  median= {:.2} ms  mean= {:.2} ms", best, median, mean);
 }
 
 fn cmd_compare(args: &[String]) {

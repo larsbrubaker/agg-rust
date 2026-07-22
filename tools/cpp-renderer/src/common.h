@@ -48,6 +48,9 @@ struct canvas {
 // callers can propagate a nonzero exit code.
 template <class Pixfmt>
 inline bool write_raw(const char* path, Pixfmt& pixf, unsigned w, unsigned h) {
+    // A null path means "render only, no file output" (used by the bench mode).
+    // The caller has already done all the rendering work by this point.
+    if (path == nullptr) return true;
     FILE* f = fopen(path, "wb");
     if (!f) {
         fprintf(stderr, "Failed to open output '%s'\n", path);
