@@ -722,8 +722,8 @@ function init2(container) {
   }
   function onPointerDown(e) {
     const pos = canvasPos2(e);
-    const useRawForControls = !inControls(pos.agg) && inControls(pos.raw);
-    const p = useRawForControls ? pos.raw : pos.agg;
+    const useRawForControls = false;
+    const p = pos.agg;
     const btn = e.button;
     canvas.setPointerCapture(e.pointerId);
     const g = gammaPoints();
@@ -5561,13 +5561,6 @@ function init49(container) {
     lineWidth = v;
     draw();
   });
-  const canvasControls = [
-    { type: "slider", x1: 5, y1: 5, x2: 150, y2: 12, min: 0, max: 4, sidebarEl: slWidth, onChange: (v) => {
-      lineWidth = v;
-      draw();
-    } }
-  ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
   const cbDiv = document.createElement("div");
   cbDiv.className = "control-group";
   const cb = document.createElement("input");
@@ -5584,6 +5577,17 @@ function init49(container) {
   cbDiv.appendChild(cb);
   cbDiv.appendChild(cbLabel);
   sidebar.appendChild(cbDiv);
+  const canvasControls = [
+    { type: "slider", x1: 5, y1: 5, x2: 150, y2: 12, min: 0, max: 4, sidebarEl: slWidth, onChange: (v) => {
+      lineWidth = v;
+      draw();
+    } },
+    { type: "checkbox", x1: 160, y1: 5, x2: 340, y2: 19, sidebarEl: cb, onChange: (v) => {
+      useScanline = v ? 1 : 0;
+      draw();
+    } }
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
   let dragging = false;
   const onDown = (e) => {
     dragging = true;
@@ -5926,7 +5930,7 @@ function init51(container) {
       e.preventDefault();
       return;
     }
-    const pi = findPoint(p.x, p.y);
+    const pi = findPoint(p.x, H - p.y);
     if (pi >= 0) {
       dragMode = "point";
       dragPointIdx = pi;
@@ -5946,7 +5950,7 @@ function init51(container) {
       sliders[activeSliderIdx].el.dispatchEvent(new Event("input"));
     } else if (dragMode === "point") {
       points[dragPointIdx] = p.x;
-      points[dragPointIdx + 1] = p.y;
+      points[dragPointIdx + 1] = H - p.y;
       draw();
     }
     e.preventDefault();
@@ -6001,13 +6005,6 @@ function init52(container) {
     startAngle = v;
     draw();
   });
-  const canvasControls = [
-    { type: "slider", x1: 10, y1: 14, x2: 490, y2: 22, min: 0.5, max: 10, sidebarEl: slWidth, onChange: (v) => {
-      lineWidth = v;
-      draw();
-    } }
-  ];
-  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
   const cbDiv = document.createElement("div");
   cbDiv.className = "control-group";
   const cb = document.createElement("input");
@@ -6024,6 +6021,17 @@ function init52(container) {
   cbDiv.appendChild(cb);
   cbDiv.appendChild(cbLabel);
   sidebar.appendChild(cbDiv);
+  const canvasControls = [
+    { type: "slider", x1: 10, y1: 14, x2: 490, y2: 22, min: 0.5, max: 10, sidebarEl: slWidth, onChange: (v) => {
+      lineWidth = v;
+      draw();
+    } },
+    { type: "checkbox", x1: 10, y1: 30, x2: 110, y2: 44, sidebarEl: cb, onChange: (v) => {
+      accurateJoins = v ? 1 : 0;
+      draw();
+    } }
+  ];
+  const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
   draw();
   return cleanupCC;
 }
@@ -8127,4 +8135,4 @@ async function navigate(route) {
 window.addEventListener("hashchange", () => navigate(getRoute()));
 navigate(getRoute());
 
-//# debugId=AE2108C5FB149CC564756E2164756E21
+//# debugId=7A0E432630BB7D6364756E2164756E21
