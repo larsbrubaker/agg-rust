@@ -50,9 +50,11 @@ fn print_usage() {
     eprintln!("  bench <demo> <width> <height> [params...] [--iters N]");
     eprintln!("      Time just the render call (default N=10, plus 2 warmups).");
     eprintln!();
-    eprintln!("  bench-compare --cpp <agg_render_exe> [--iters N] [--out <file.md>] [--date <YYYY-MM-DD>]");
+    eprintln!("  bench-compare --cpp <agg_render_exe> [--iters N] [--passes N] [--out <file.md>] [--date <YYYY-MM-DD>]");
     eprintln!("      Benchmark every shared demo in-process (Rust) and via the C++");
     eprintln!("      renderer subprocess, then emit a markdown comparison table.");
+    eprintln!("      --passes N (default 1) runs N full interleaved passes and pools");
+    eprintln!("      all per-iter samples per demo/side before computing best/median.");
     eprintln!();
     eprintln!("  list");
     eprintln!("      List available demo names.");
@@ -217,6 +219,22 @@ fn median_ms(times: &[f64]) -> f64 {
     }
 }
 
+/// Pool the per-iteration samples from every pass into a single sample set and
+/// return `(best, median)` over the pooled samples.
+///
+/// Multi-pass pooling is the benchmark suite's noise-robustness strategy on a
+/// non-quiet machine: the best is the min over *all* pooled samples, so upward
+/// scheduling jitter in any one pass cannot survive it, and the median stabilizes
+/// as the pooled count grows (N passes x M iters => N*M samples). The min and
+/// median of the concatenation are, by definition, the min and median of the
+/// pooled set — so pooling is exactly a flatten followed by `best_ms`/`median_ms`.
+/// Panics only if there are no samples at all (every pass was empty), which the
+/// caller prevents by never invoking this on an absent side.
+fn pooled_best_median(pass_samples: &[Vec<f64>]) -> (f64, f64) {
+    let pooled: Vec<f64> = pass_samples.iter().flatten().copied().collect();
+    (best_ms(&pooled), median_ms(&pooled))
+}
+
 /// A demo included in the Rust-vs-C++ benchmark suite, rendered at the canonical
 /// size and params used by both registries.
 struct BenchCase {
@@ -278,6 +296,7 @@ struct BenchOutcome {
 fn cmd_bench_compare(args: &[String]) {
     let mut cpp_exe: Option<String> = None;
     let mut iters: usize = 10;
+    let mut passes: usize = 1;
     let mut out_path: Option<String> = None;
     let mut date: Option<String> = None;
 
@@ -292,6 +311,12 @@ fn cmd_bench_compare(args: &[String]) {
                 iters = args[i + 1]
                     .parse()
                     .expect("Invalid --iters (must be a positive integer)");
+                i += 2;
+            }
+            "--passes" if i + 1 < args.len() => {
+                passes = args[i + 1]
+                    .parse()
+                    .expect("Invalid --passes (must be a positive integer)");
                 i += 2;
             }
             "--out" if i + 1 < args.len() => {
@@ -313,6 +338,10 @@ fn cmd_bench_compare(args: &[String]) {
         eprintln!("--iters must be at least 1");
         process::exit(1);
     }
+    if passes == 0 {
+        eprintln!("--passes must be at least 1");
+        process::exit(1);
+    }
 
     let cpp_exe = cpp_exe.unwrap_or_else(|| {
         eprintln!("--cpp <path_to_agg_render_exe> is required");
@@ -320,22 +349,76 @@ fn cmd_bench_compare(args: &[String]) {
     });
 
     eprintln!(
-        "Benchmarking {} demos ({} timed iters + {} warmups each)...",
+        "Benchmarking {} demos ({} passes x {} timed iters + {} warmups per pass)...",
         BENCH_CASES.len(),
+        passes,
         iters,
         WARMUP_ITERS
     );
 
-    let mut outcomes = Vec::with_capacity(BENCH_CASES.len());
-    for case in BENCH_CASES {
-        eprintln!("  {} {}x{}", case.name, case.width, case.height);
+    // Per-demo pooled samples: each inner Vec<f64> is one pass's timed iterations.
+    // Every pass appends one entry per side, so `pooled_best_median` sees all
+    // passes together. The Rust-present flag and any C++ error are recorded once.
+    let n = BENCH_CASES.len();
+    let mut rust_passes: Vec<Vec<Vec<f64>>> = vec![Vec::new(); n];
+    let mut cpp_passes: Vec<Vec<Vec<f64>>> = vec![Vec::new(); n];
+    let mut cpp_error: Vec<Option<String>> = vec![None; n];
+    // Presence via the registry's name list rather than a throwaway render, so the
+    // Rust side gets exactly `WARMUP_ITERS` warmups per pass — the same count as
+    // the C++ side (a probe render would give Rust an extra warmup and skew things).
+    let available = pixel_compare::render::available_demos();
+    let rust_present: Vec<bool> = BENCH_CASES.iter().map(|c| available.contains(&c.name)).collect();
 
-        // Check presence via the registry's name list rather than a throwaway
-        // render, so the Rust side gets exactly `WARMUP_ITERS` warmups — the same
-        // count as the C++ side (a probe render would give Rust an extra warmup
-        // and skew the comparison).
-        if !pixel_compare::render::available_demos().contains(&case.name) {
-            eprintln!("    Rust renderer missing '{}', skipping", case.name);
+    // Interleave Rust and C++ per demo within each pass, exactly as the single-pass
+    // path did. Running the full sweep `passes` times (rather than `passes` back-to-
+    // back reps of one demo) spreads each demo's samples across the whole run, so a
+    // transient load spike contaminates one pass of a demo, not all of its samples.
+    for pass in 0..passes {
+        if passes > 1 {
+            eprintln!("Pass {}/{}", pass + 1, passes);
+        }
+        for (idx, case) in BENCH_CASES.iter().enumerate() {
+            eprintln!("  {} {}x{}", case.name, case.width, case.height);
+
+            if !rust_present[idx] {
+                if pass == 0 {
+                    eprintln!("    Rust renderer missing '{}', skipping", case.name);
+                }
+                continue;
+            }
+
+            let rust_times = time_render_loop(
+                || {
+                    pixel_compare::render::render_demo(
+                        case.name, case.width, case.height, case.params,
+                    )
+                    .expect("demo verified present in registry above")
+                },
+                WARMUP_ITERS,
+                iters,
+                false,
+            );
+            rust_passes[idx].push(rust_times);
+
+            // C++ side: run the `agg-render bench` subprocess and parse its per-iter
+            // lines. On any failure, record the first error and simply pool fewer
+            // C++ samples for this demo (the row still reports whatever passes ran).
+            match run_cpp_bench(&cpp_exe, case, iters) {
+                Ok(cpp_times) => cpp_passes[idx].push(cpp_times),
+                Err(e) => {
+                    eprintln!("    C++ bench failed for '{}': {e}", case.name);
+                    if cpp_error[idx].is_none() {
+                        cpp_error[idx] = Some(e);
+                    }
+                }
+            }
+        }
+    }
+
+    // Collapse the pooled per-pass samples into one outcome per demo.
+    let mut outcomes = Vec::with_capacity(n);
+    for (idx, case) in BENCH_CASES.iter().enumerate() {
+        if !rust_present[idx] {
             outcomes.push(BenchOutcome {
                 name: case.name,
                 width: case.width,
@@ -350,27 +433,16 @@ fn cmd_bench_compare(args: &[String]) {
             continue;
         }
 
-        let rust_times = time_render_loop(
-            || {
-                pixel_compare::render::render_demo(case.name, case.width, case.height, case.params)
-                    .expect("demo verified present in registry above")
-            },
-            WARMUP_ITERS,
-            iters,
-            false,
-        );
-        let rust_best = best_ms(&rust_times);
-        let rust_median = median_ms(&rust_times);
-
-        // C++ side: run the `agg-render bench` subprocess and parse its per-iter
-        // lines. Best and median come from the same samples as the Rust side. On
-        // any failure, keep the Rust numbers and mark the row failed.
-        let (cpp_best, cpp_median, error) = match run_cpp_bench(&cpp_exe, case, iters) {
-            Ok(cpp_times) => (Some(best_ms(&cpp_times)), Some(median_ms(&cpp_times)), None),
-            Err(e) => {
-                eprintln!("    C++ bench failed for '{}': {e}", case.name);
-                (None, None, Some(e))
-            }
+        let (rust_best, rust_median) = pooled_best_median(&rust_passes[idx]);
+        let (cpp_best, cpp_median, error) = if cpp_passes[idx].is_empty() {
+            (
+                None,
+                None,
+                Some(cpp_error[idx].clone().unwrap_or_else(|| "C++ bench failed".to_string())),
+            )
+        } else {
+            let (b, m) = pooled_best_median(&cpp_passes[idx]);
+            (Some(b), Some(m), None)
         };
 
         outcomes.push(BenchOutcome {
@@ -386,7 +458,7 @@ fn cmd_bench_compare(args: &[String]) {
         });
     }
 
-    let doc = render_benchmark_doc(&outcomes, iters, &cpp_exe, date.as_deref());
+    let doc = render_benchmark_doc(&outcomes, iters, passes, &cpp_exe, date.as_deref());
 
     print!("{doc}");
 
@@ -480,6 +552,7 @@ fn parse_cpp_bench_output(stdout: &str) -> Vec<f64> {
 fn render_benchmark_doc(
     outcomes: &[BenchOutcome],
     iters: usize,
+    passes: usize,
     cpp_exe: &str,
     date: Option<&str>,
 ) -> String {
@@ -499,7 +572,7 @@ fn render_benchmark_doc(
     s.push_str(&format!("- **Rust compiler:** {rustc}\n"));
     s.push_str(&format!("- **C++ compiler:** {msvc}\n"));
     s.push_str(&format!(
-        "- **Iterations:** {iters} timed + {WARMUP_ITERS} warmups per demo\n\n"
+        "- **Iterations:** {passes} passes x {iters} timed + {WARMUP_ITERS} warmups per pass\n\n"
     ));
 
     s.push_str("## Methodology\n\n");
@@ -517,6 +590,16 @@ Single runs are noise, and differences below roughly ±2 ms are at or under the 
 measurement floor on this machine. Both sides render at identical sizes with \
 identical parameters.\n\n",
     );
+    s.push_str(&format!(
+        "This table is generated with **{passes} passes x {iters} iterations, \
+{WARMUP_ITERS} warmups per pass**; each pass sweeps every demo (interleaving the \
+Rust and C++ measurement of one demo before moving to the next), and the \
+**best and median are computed over all pooled samples** from every pass. \
+Pooling across passes is what makes the numbers robust on a machine that is not \
+perfectly idle: a transient load spike can only inflate the samples in one \
+pass, so it cannot survive the pooled minimum, and the pooled median stabilizes \
+as the sample count grows.\n\n",
+    ));
     s.push_str(
         "Critically, both renderers draw **the same scene** at the same size. \
 Every demo in the table below is byte-identical: a committed pixel-compare \
@@ -542,7 +625,7 @@ the invariant that makes each timing an apples-to-apples comparison.\n\n",
     s.push_str("cmake --build tools/cpp-renderer/build --config Release\n\n");
     s.push_str("# 3. Run the full suite and regenerate this file:\n");
     s.push_str(&format!(
-        "target\\release\\pixel-compare bench-compare \\\n  --cpp tools\\cpp-renderer\\build\\Release\\agg-render.exe \\\n  --date {date} --out docs\\BENCHMARKS.md\n"
+        "target\\release\\pixel-compare bench-compare \\\n  --cpp tools\\cpp-renderer\\build\\Release\\agg-render.exe \\\n  --passes {passes} --iters {iters} --date {date} --out docs\\BENCHMARKS.md\n"
     ));
     s.push_str("```\n");
 
@@ -923,8 +1006,45 @@ fn cmd_verify(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        best_ms, median_ms, parse_cpp_bench_output, params_suffix, time_render_loop, BENCH_CASES,
+        best_ms, median_ms, parse_cpp_bench_output, params_suffix, pooled_best_median,
+        time_render_loop, BENCH_CASES,
     };
+
+    #[test]
+    fn pooled_best_is_min_over_all_passes() {
+        // Best must be the global minimum across every pass, so a fast sample in a
+        // later pass wins even if earlier passes were slow (contaminated).
+        let passes = vec![vec![5.0, 4.0], vec![9.0, 3.0], vec![7.0, 6.0]];
+        let (best, _median) = pooled_best_median(&passes);
+        assert_eq!(best, 3.0);
+    }
+
+    #[test]
+    fn pooled_median_is_over_concatenated_samples() {
+        // Median is taken over all pooled samples, not a median-of-per-pass-medians.
+        // Pooled = [1,2,3,4,5,6] (6 samples) => median = (3+4)/2 = 3.5.
+        let passes = vec![vec![3.0, 1.0], vec![5.0, 2.0], vec![4.0, 6.0]];
+        let (_best, median) = pooled_best_median(&passes);
+        assert_eq!(median, 3.5);
+    }
+
+    #[test]
+    fn pooled_median_odd_total_is_middle_element() {
+        // Pooled = [1,2,3,4,5] (5 samples) => median = middle = 3.0.
+        let passes = vec![vec![3.0, 1.0, 5.0], vec![2.0, 4.0]];
+        let (_best, median) = pooled_best_median(&passes);
+        assert_eq!(median, 3.0);
+    }
+
+    #[test]
+    fn single_pass_pooling_matches_plain_best_median() {
+        // With one pass, pooling must be identical to the pre-existing single-pass
+        // best/median so the default (--passes 1) is a no-op vs the old behavior.
+        let samples = vec![4.0, 1.0, 3.0, 2.0];
+        let (best, median) = pooled_best_median(&[samples.clone()]);
+        assert_eq!(best, best_ms(&samples));
+        assert_eq!(median, median_ms(&samples));
+    }
 
     #[test]
     fn median_odd_count_is_middle_element() {

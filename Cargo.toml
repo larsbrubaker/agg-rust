@@ -26,3 +26,12 @@ ttf-parser = { version = "0.25", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
+
+# Header-only C++ AGG compiles as a single fully-inlined translation unit; without
+# LTO, agg-rust library calls from other workspace crates (pixel-compare, agg-wasm)
+# never inline across the crate boundary. Fat LTO plus a single codegen unit lets the
+# optimizer inline across crates and match the C++ inlining model.
+# Measured ~14% best-of improvement on rasterizers2 alone (at the cost of longer builds).
+[profile.release]
+lto = "fat"
+codegen-units = 1

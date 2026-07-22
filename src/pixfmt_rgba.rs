@@ -144,12 +144,14 @@ impl<'a> RgbaRaw<'a> {
 
     fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8) {
         let row = self.row_mut(y);
-        for i in 0..len as usize {
-            let off = (x as usize + i) * BPP;
-            row[off] = c.r;
-            row[off + 1] = c.g;
-            row[off + 2] = c.b;
-            row[off + 3] = c.a;
+        let start = x as usize * BPP;
+        // Fill a whole pixel at a time via a chunked pattern copy. The C++ equivalent
+        // stores one pixel_type per pixel; writing the 4-byte pattern over
+        // chunks_exact_mut lets the optimizer vectorize the fill instead of emitting
+        // four individually-indexed byte stores per pixel.
+        let pat = [c.r, c.g, c.b, c.a];
+        for px in row[start..start + len as usize * BPP].chunks_exact_mut(BPP) {
+            px.copy_from_slice(&pat);
         }
     }
 }
