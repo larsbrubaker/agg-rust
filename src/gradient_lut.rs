@@ -403,7 +403,11 @@ mod tests {
         let c0 = lut.get(0);
         assert_eq!(c0.r, 255);
         let c255 = lut.get(255);
-        assert!(c255.b >= 252, "c255.b={}", c255.b);
+        // Regression guard for the seg_len endpoint fix on the generic interpolator path:
+        // upstream C++ agg_gradient_lut.h sized segments end - start + 1, so ramps stopped
+        // ~2/255 short of the end color. The endpoint must now be exactly the end color.
+        assert_eq!(c255.b, 255);
+        assert_eq!(c255.r, 0);
     }
 
     #[test]
@@ -445,7 +449,9 @@ mod tests {
 
         // Should still work — stops are sorted internally
         assert_eq!(lut.get(0).r, 255);
-        assert!(lut.get(255).b >= 252, "last.b={}", lut.get(255).b);
+        // Endpoint must equal the end color (seg_len fix; C++ ramps stopped ~2/255 short).
+        assert_eq!(lut.get(255).b, 255);
+        assert_eq!(lut.get(255).r, 0);
     }
 
     #[test]
