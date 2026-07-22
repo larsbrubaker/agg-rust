@@ -2835,13 +2835,19 @@ fn parse_flash_shapes() -> Vec<FlashShape> {
             continue;
         }
         if let Some(rest) = s.strip_prefix("Path ") {
-            let vals: Vec<&str> = rest.split_whitespace().collect();
-            if vals.len() >= 5 {
-                let left = vals[0].parse::<i32>().unwrap_or(-1);
-                let right = vals[1].parse::<i32>().unwrap_or(-1);
-                let line_style = vals[2].parse::<i32>().unwrap_or(-1);
-                let ax = vals[3].parse::<f64>().unwrap_or(0.0);
-                let ay = vals[4].parse::<f64>().unwrap_or(0.0);
+            // Iterate tokens directly instead of collecting into a Vec. Tuple
+            // elements are evaluated left-to-right, so the `next()` calls yield
+            // tokens 0..5 in order; the pattern only matches when at least five
+            // tokens are present, preserving the original `vals.len() >= 5` guard.
+            let mut it = rest.split_whitespace();
+            if let (Some(v0), Some(v1), Some(v2), Some(v3), Some(v4)) =
+                (it.next(), it.next(), it.next(), it.next(), it.next())
+            {
+                let left = v0.parse::<i32>().unwrap_or(-1);
+                let right = v1.parse::<i32>().unwrap_or(-1);
+                let line_style = v2.parse::<i32>().unwrap_or(-1);
+                let ax = v3.parse::<f64>().unwrap_or(0.0);
+                let ay = v4.parse::<f64>().unwrap_or(0.0);
                 let pid = current.path.start_new_path();
                 current.path.move_to(ax, ay);
                 current.styles.push(FlashPathStyle {
@@ -2854,21 +2860,23 @@ fn parse_flash_shapes() -> Vec<FlashShape> {
             continue;
         }
         if let Some(rest) = s.strip_prefix("Curve ") {
-            let vals: Vec<&str> = rest.split_whitespace().collect();
-            if vals.len() >= 4 {
-                let cx = vals[0].parse::<f64>().unwrap_or(0.0);
-                let cy = vals[1].parse::<f64>().unwrap_or(0.0);
-                let ax = vals[2].parse::<f64>().unwrap_or(0.0);
-                let ay = vals[3].parse::<f64>().unwrap_or(0.0);
+            let mut it = rest.split_whitespace();
+            if let (Some(v0), Some(v1), Some(v2), Some(v3)) =
+                (it.next(), it.next(), it.next(), it.next())
+            {
+                let cx = v0.parse::<f64>().unwrap_or(0.0);
+                let cy = v1.parse::<f64>().unwrap_or(0.0);
+                let ax = v2.parse::<f64>().unwrap_or(0.0);
+                let ay = v3.parse::<f64>().unwrap_or(0.0);
                 current.path.curve3(cx, cy, ax, ay);
             }
             continue;
         }
         if let Some(rest) = s.strip_prefix("Line ") {
-            let vals: Vec<&str> = rest.split_whitespace().collect();
-            if vals.len() >= 2 {
-                let ax = vals[0].parse::<f64>().unwrap_or(0.0);
-                let ay = vals[1].parse::<f64>().unwrap_or(0.0);
+            let mut it = rest.split_whitespace();
+            if let (Some(v0), Some(v1)) = (it.next(), it.next()) {
+                let ax = v0.parse::<f64>().unwrap_or(0.0);
+                let ay = v1.parse::<f64>().unwrap_or(0.0);
                 current.path.line_to(ax, ay);
             }
         }
@@ -2877,6 +2885,17 @@ fn parse_flash_shapes() -> Vec<FlashShape> {
         out.push(current);
     }
     out
+}
+
+/// Returns the parsed flash shapes, parsing them exactly once and caching the
+/// result. The source is a compile-time `include_str!` and the parse is
+/// deterministic, so re-parsing on every render call (~2.3ms of the frame)
+/// is pure waste. Callers only ever borrow shapes and clone the individual
+/// `PathStorage` before mutating, so an immutable shared cache is safe.
+/// `OnceLock` is fine on the single-threaded wasm32 target this ships to.
+fn flash_shapes() -> &'static [FlashShape] {
+    static CACHE: std::sync::OnceLock<Vec<FlashShape>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(parse_flash_shapes)
 }
 
 fn flash_rand_byte(state: &mut u32) -> u8 {
@@ -3001,7 +3020,7 @@ fn flash_user_scale(params: &[f64]) -> f64 {
 }
 
 pub fn flash_pick_vertex(demo2: bool, width: u32, height: u32, params: &[f64], x: f64, y: f64, radius: f64) -> i32 {
-    let shapes = parse_flash_shapes();
+    let shapes = flash_shapes();
     if shapes.is_empty() {
         return -1;
     }
@@ -3040,7 +3059,7 @@ pub fn flash_pick_vertex(demo2: bool, width: u32, height: u32, params: &[f64], x
 }
 
 pub fn flash_screen_to_shape(width: u32, height: u32, params: &[f64], x: f64, y: f64) -> Vec<f64> {
-    let shapes = parse_flash_shapes();
+    let shapes = flash_shapes();
     if shapes.is_empty() {
         return vec![x, y];
     }
@@ -3062,7 +3081,7 @@ pub fn flash_screen_to_shape(width: u32, height: u32, params: &[f64], x: f64, y:
 /// Extended params:
 /// [shape_index, m0, m1, m2, m3, m4, m5, hit_x, hit_y, hit_active, ...vertex_overrides(idx,x,y)]
 pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let shapes = parse_flash_shapes();
+    let shapes = flash_shapes();
     if shapes.is_empty() {
         let mut buf = Vec::new();
         let mut ra = RowAccessor::new();
@@ -3164,7 +3183,7 @@ pub fn flash_rasterizer(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Extended params:
 /// [shape_index, m0, m1, m2, m3, m4, m5, _, _, _, ...vertex_overrides(idx,x,y)]
 pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let shapes = parse_flash_shapes();
+    let shapes = flash_shapes();
     if shapes.is_empty() {
         let mut buf = Vec::new();
         let mut ra = RowAccessor::new();

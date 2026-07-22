@@ -17,17 +17,17 @@ Critically, both renderers draw **the same scene** at the same size. Every demo 
 
 | Demo | Size | Byte-identical | C++ best (ms) | Rust best (ms) | Best Rust / C++ | C++ median (ms) | Rust median (ms) | Median Rust / C++ |
 |------|------|----------------|---------------|----------------|-----------------|-----------------|------------------|-------------------|
-| simple_line | 512x512 | yes | 0.42 | 0.74 | 1.76x | 0.47 | 0.81 | 1.71x |
-| lion_outline | 512x512 | yes | 2.67 | 3.21 | 1.20x | 3.10 | 3.28 | 1.06x |
-| rasterizers2 | 500x450 | yes | 1.96 | 2.37 | 1.21x | 2.06 | 2.67 | 1.30x |
-| conv_dash_marker | 500x330 | yes | 1.33 | 1.66 | 1.25x | 1.55 | 1.68 | 1.08x |
-| perspective | 600x600 | yes | 3.01 | 3.78 | 1.26x | 3.35 | 5.15 | 1.54x |
-| image_perspective | 600x600 | yes | 6.24 | 7.20 | 1.15x | 7.61 | 8.36 | 1.10x |
-| image_transforms | 430x340 | yes | 2.29 | 1.80 | 0.79x | 2.42 | 2.02 | 0.83x |
-| image_filters | 430x340 | yes | 3.87 | 3.65 | 0.94x | 4.33 | 3.83 | 0.88x |
-| compositing2 | 600x400 | yes | 4.78 | 4.81 | 1.01x | 6.40 | 5.67 | 0.89x |
-| flash_rasterizer | 655x520 | yes | 2.55 | 4.91 | 1.93x | 2.73 | 5.54 | 2.03x |
-| flash_rasterizer2 | 655x520 | yes | 2.44 | 4.68 | 1.92x | 2.76 | 5.22 | 1.89x |
+| simple_line | 512x512 | yes | 0.39 | 0.72 | 1.84x | 0.49 | 0.80 | 1.63x |
+| lion_outline | 512x512 | yes | 2.65 | 2.67 | 1.01x | 2.69 | 3.08 | 1.14x |
+| rasterizers2 | 500x450 | yes | 1.79 | 2.46 | 1.37x | 1.96 | 3.00 | 1.53x |
+| conv_dash_marker | 500x330 | yes | 1.35 | 1.64 | 1.21x | 1.50 | 2.37 | 1.58x |
+| perspective | 600x600 | yes | 2.98 | 3.55 | 1.19x | 3.26 | 3.90 | 1.20x |
+| image_perspective | 600x600 | yes | 6.04 | 7.15 | 1.18x | 6.22 | 7.81 | 1.26x |
+| image_transforms | 430x340 | yes | 2.37 | 2.16 | 0.91x | 2.73 | 3.55 | 1.30x |
+| image_filters | 430x340 | yes | 3.77 | 3.70 | 0.98x | 4.10 | 7.17 | 1.75x |
+| compositing2 | 600x400 | yes | 4.77 | 5.01 | 1.05x | 4.86 | 5.33 | 1.10x |
+| flash_rasterizer | 655x520 | yes | 2.60 | 2.81 | 1.08x | 2.65 | 3.62 | 1.37x |
+| flash_rasterizer2 | 655x520 | yes | 2.53 | 2.47 | 0.98x | 2.71 | 2.62 | 0.97x |
 
 The **Byte-identical** column records, per row, that the demo's Rust output is pinned byte-for-byte against the C++ reference by a committed test — the invariant that makes each timing an apples-to-apples comparison.
 
