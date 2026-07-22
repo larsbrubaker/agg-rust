@@ -33,7 +33,7 @@ export function init(container: HTMLElement) {
   const cbTranslucent = addCheckbox(sidebar, 'Translucent Mode', false, v => { translucent = v; draw(); });
 
   const canvasControls: CanvasControl[] = [
-    { type: 'radio', x1: 5, y1: 35, x2: 110, y2: 110, numItems: 5, sidebarEls: radioEls, onChange: v => { edgeType = v; draw(); } },
+    { type: 'radio', x1: 5, y1: 35, x2: 110, y2: 110, numItems: 5, textHeight: 8, sidebarEls: radioEls, onChange: v => { edgeType = v; draw(); } },
     { type: 'slider', x1: 190, y1: 8, x2: 390, y2: 15, min: 0, max: 5, sidebarEl: slWidth, onChange: v => { strokeWidth = v; draw(); } },
     { type: 'checkbox', x1: 398, y1: 21, x2: 485, y2: 34, sidebarEl: cbNodes, onChange: v => { drawNodes = v; draw(); } },
     { type: 'checkbox', x1: 488, y1: 21, x2: 575, y2: 34, sidebarEl: cbEdges, onChange: v => { drawEdges = v; draw(); } },

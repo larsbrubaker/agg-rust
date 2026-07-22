@@ -1285,6 +1285,7 @@ function init5(container) {
       x2: 650,
       y2: 195,
       numItems: 9,
+      textHeight: 7,
       sidebarEls: caseTypeEls,
       onChange: (v) => {
         caseType = v;
@@ -1297,15 +1298,15 @@ function init5(container) {
         draw();
       }
     },
-    { type: "radio", x1: 535, y1: 200, x2: 650, y2: 290, numItems: 4, sidebarEls: innerJoinEls, onChange: (v) => {
+    { type: "radio", x1: 535, y1: 200, x2: 650, y2: 290, numItems: 4, textHeight: 8, sidebarEls: innerJoinEls, onChange: (v) => {
       innerJoin = v;
       draw();
     } },
-    { type: "radio", x1: 535, y1: 295, x2: 650, y2: 385, numItems: 5, sidebarEls: lineJoinEls, onChange: (v) => {
+    { type: "radio", x1: 535, y1: 295, x2: 650, y2: 385, numItems: 5, textHeight: 8, sidebarEls: lineJoinEls, onChange: (v) => {
       lineJoin = v;
       draw();
     } },
-    { type: "radio", x1: 535, y1: 395, x2: 650, y2: 455, numItems: 3, sidebarEls: lineCapEls, onChange: (v) => {
+    { type: "radio", x1: 535, y1: 395, x2: 650, y2: 455, numItems: 3, textHeight: 8, sidebarEls: lineCapEls, onChange: (v) => {
       lineCap = v;
       draw();
     } }
@@ -2239,6 +2240,7 @@ function init15(container) {
       x2: 110,
       y2: 210,
       numItems: 17,
+      textHeight: 6,
       sidebarEls: radioEls,
       onChange: (idx) => {
         filterIdx = idx;
@@ -2520,7 +2522,7 @@ function init18(container) {
     draw();
   });
   const canvasControls = [
-    { type: "radio", x1: 5, y1: 35, x2: 110, y2: 110, numItems: 5, sidebarEls: radioEls, onChange: (v) => {
+    { type: "radio", x1: 5, y1: 35, x2: 110, y2: 110, numItems: 5, textHeight: 8, sidebarEls: radioEls, onChange: (v) => {
       edgeType = v;
       draw();
     } },
@@ -2611,7 +2613,7 @@ function init19(container) {
       b = v;
       draw();
     } },
-    { type: "radio", x1: 355, y1: 1, x2: 495, y2: 60, numItems: 3, sidebarEls: radioEls, onChange: (v) => {
+    { type: "radio", x1: 355, y1: 1, x2: 495, y2: 60, numItems: 3, textHeight: 8, sidebarEls: radioEls, onChange: (v) => {
       pattern = v;
       draw();
     } }
@@ -2682,7 +2684,7 @@ function init20(container) {
     draw();
   });
   const canvasControls = [
-    { type: "radio", x1: 0, y1: 0, x2: 110, y2: 210, numItems: 17, sidebarEls: radioEls, onChange: (v) => {
+    { type: "radio", x1: 0, y1: 0, x2: 110, y2: 210, numItems: 17, textHeight: 6, sidebarEls: radioEls, onChange: (v) => {
       filterIdx = v;
       draw();
     } },
@@ -4197,7 +4199,7 @@ function init36(container) {
       radius = v;
       draw();
     } },
-    { type: "radio", x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, sidebarEls: methodInputs, onChange: (i) => {
+    { type: "radio", x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, textHeight: 8, sidebarEls: methodInputs, onChange: (i) => {
       method = i;
       draw();
     } },
@@ -6086,7 +6088,7 @@ function init53(container) {
       dstAlpha = v;
       draw();
     } },
-    { type: "radio", x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES.length, sidebarEls: radiosByCompOp, onChange: (i) => {
+    { type: "radio", x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES.length, textHeight: 6.8, sidebarEls: radiosByCompOp, onChange: (i) => {
       compOp = i;
       draw();
     } }
@@ -6173,7 +6175,7 @@ function init54(container) {
       srcAlpha = v;
       draw();
     } },
-    { type: "radio", x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES2.length, sidebarEls: radiosByCompOp, onChange: (i) => {
+    { type: "radio", x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES2.length, textHeight: 6.8, sidebarEls: radiosByCompOp, onChange: (i) => {
       compOp = i;
       draw();
     } }
@@ -8135,4 +8137,4 @@ async function navigate(route) {
 window.addEventListener("hashchange", () => navigate(getRoute()));
 navigate(getRoute());
 
-//# debugId=F80DA71CEF910A3C64756E2164756E21
+//# debugId=E02BAFC6AB2C331E64756E2164756E21

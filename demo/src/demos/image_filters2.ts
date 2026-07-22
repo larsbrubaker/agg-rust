@@ -36,7 +36,7 @@ export function init(container: HTMLElement) {
   const cbNormalize = addCheckbox(sidebar, 'Normalize Filter', true, v => { normalize = v; draw(); });
 
   const canvasControls: CanvasControl[] = [
-    { type: 'radio', x1: 0, y1: 0, x2: 110, y2: 210, numItems: 17, sidebarEls: radioEls, onChange: v => { filterIdx = v; draw(); } },
+    { type: 'radio', x1: 0, y1: 0, x2: 110, y2: 210, numItems: 17, textHeight: 6, sidebarEls: radioEls, onChange: v => { filterIdx = v; draw(); } },
     { type: 'slider', x1: 115, y1: 5, x2: 495, y2: 11, min: 0.5, max: 3, sidebarEl: slGamma, onChange: v => { gamma = v; draw(); } },
     { type: 'slider', x1: 115, y1: 20, x2: 495, y2: 26, min: 2, max: 8, sidebarEl: slRadius, onChange: v => { radius = v; draw(); } },
     { type: 'checkbox', x1: 8, y1: 215, x2: 180, y2: 228, sidebarEl: cbNormalize, onChange: v => { normalize = v > 0.5; draw(); } },

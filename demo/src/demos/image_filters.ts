@@ -120,8 +120,10 @@ export function init(container: HTMLElement) {
     },
     // Filter radio box at (0, 0, 110, 210) with 17 items
     {
+      // WASM renders this rbox with text_size(6.0); the hit test must use the
+      // same text height (dy = 2*6 = 12) or clicks select the wrong filter.
       type: 'radio', x1: 0, y1: 0, x2: 110, y2: 210,
-      numItems: 17, sidebarEls: radioEls,
+      numItems: 17, textHeight: 6, sidebarEls: radioEls,
       onChange: idx => { filterIdx = idx; numSteps = 0; kpixSec = 0; draw(); },
     },
     // Normalize Filter checkbox at (8, 215) — approx bounds

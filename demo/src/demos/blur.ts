@@ -68,7 +68,7 @@ export function init(container: HTMLElement) {
 
   const canvasControls: CanvasControl[] = [
     { type: 'slider', x1: 140, y1: 14, x2: 430, y2: 22, min: 0, max: 40, sidebarEl: slRadius, onChange: v => { radius = v; draw(); } },
-    { type: 'radio', x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, sidebarEls: methodInputs, onChange: i => { method = i; draw(); } },
+    { type: 'radio', x1: 10, y1: 10, x2: 130, y2: 70, numItems: 3, textHeight: 8, sidebarEls: methodInputs, onChange: i => { method = i; draw(); } },
     { type: 'checkbox', x1: 10, y1: 80, x2: 95, y2: 92, sidebarEl: cbRed, onChange: v => { channelR = v; draw(); } },
     { type: 'checkbox', x1: 10, y1: 95, x2: 95, y2: 107, sidebarEl: cbGreen, onChange: v => { channelG = v; draw(); } },
     { type: 'checkbox', x1: 10, y1: 110, x2: 95, y2: 122, sidebarEl: cbBlue, onChange: v => { channelB = v; draw(); } },
