@@ -116,7 +116,7 @@ fn render_simple_line(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
 
 use agg_rust::basics::{PATH_FLAGS_CLOSE, PATH_FLAGS_CW};
 use agg_rust::color::Rgba8;
-use agg_rust::gamma::linear_to_srgb;
+use agg_rust::gamma::{linear_to_srgb, srgb_to_linear};
 use agg_rust::path_storage::PathStorage;
 
 static LION_DATA: &str = include_str!("../../../../demo/wasm/src/lion.txt");
@@ -130,13 +130,35 @@ fn linear_u8_to_srgb_u8(v: u32) -> u32 {
     (255.0 * linear_to_srgb(v as f64 / 255.0) + 0.5) as u32
 }
 
+/// Convert an sRGB 8-bit value back to linear 8-bit, matching C++ AGG's
+/// `sRGB_lut<int8u>` direct table: `m_dir_table[i] = uround(... sRGB_to_linear ...)`.
+fn srgb_u8_to_linear_u8(v: u32) -> u32 {
+    if v == 0 {
+        return 0;
+    }
+    (255.0 * srgb_to_linear(v as f64 / 255.0) + 0.5) as u32
+}
+
+/// Replicate the C++ lion demo's full color roundtrip.
+///
+/// The C++ demo stores each hex color as linear `rgba8` (`rgb8_packed`), assigns
+/// it into an `srgba8` array (linear -> sRGB), then renders through a pixfmt whose
+/// `color_type` is linear `rgba8` (`pixfmt_bgr24`), which converts the color back
+/// (sRGB -> linear) before blending. The net effect is a *lossy identity*: the
+/// value returns close to the original hex but is off by a bit or two due to the
+/// two 8-bit rounding steps. Both halves must be applied to match byte-for-byte;
+/// applying only the linear->sRGB half leaves colors too light.
+fn lion_color_roundtrip(v: u32) -> u32 {
+    srgb_u8_to_linear_u8(linear_u8_to_srgb_u8(v))
+}
+
 /// Parse the lion vector data into a path storage with colors and path indices.
 ///
 /// The C++ AGG demo (parse_lion.cpp) parses hex colors via `rgb8_packed()` which
-/// returns `rgba8` (linear), then stores into `srgba8` which triggers an implicit
-/// linear-to-sRGB conversion. The renderer then copies the sRGB-encoded bytes
-/// back into `rgba8` for blending. We must replicate this conversion to match
-/// pixel-perfectly.
+/// returns `rgba8` (linear), stores them into an `srgba8` array (linear -> sRGB),
+/// and finally renders through a linear-`rgba8` pixfmt (`pixfmt_bgr24`) which
+/// converts the color back (sRGB -> linear) for blending. We replicate this full
+/// lossy roundtrip via `lion_color_roundtrip` to match pixel-perfectly.
 pub fn parse_lion() -> (PathStorage, Vec<Rgba8>, Vec<usize>) {
     let mut path = PathStorage::new();
     let mut colors: Vec<Rgba8> = Vec::new();
@@ -156,11 +178,11 @@ pub fn parse_lion() -> (PathStorage, Vec<Rgba8>, Vec<usize>) {
             let g = (c >> 8) & 0xFF;
             let b = c & 0xFF;
 
-            // Apply linear-to-sRGB conversion to match C++ AGG's implicit
-            // rgba8 → srgba8 → rgba8 roundtrip in parse_lion.cpp
-            let r = linear_u8_to_srgb_u8(r);
-            let g = linear_u8_to_srgb_u8(g);
-            let b = linear_u8_to_srgb_u8(b);
+            // Apply the full linear -> sRGB -> linear roundtrip to match C++ AGG's
+            // implicit rgba8 -> srgba8 -> rgba8 conversion in the lion demo.
+            let r = lion_color_roundtrip(r);
+            let g = lion_color_roundtrip(g);
+            let b = lion_color_roundtrip(b);
 
             // Must use PATH_FLAGS_CLOSE to match C++ close_polygon() default
             path.close_polygon(PATH_FLAGS_CLOSE);

@@ -135,3 +135,7 @@ The library follows a five-stage pipeline:
 3. **Scanline Rasterizer** — `rasterizer_scanline_aa` (the heart of AGG)
 4. **Scanline Container** — `scanline_u8`, `scanline_p8`, `scanline_bin`
 5. **Renderer** — pixel formats → `renderer_base` → `renderer_scanline_aa_solid` etc.
+
+## Orchestration pattern
+
+The main session (Fable 5) acts as planner and orchestrator only and should not write or edit code directly. All implementation is delegated to the `implementer` subagent, one scoped step at a time. All post-change review is delegated to the `reviewer` subagent. The main session handles only planning, architecture decisions, and synthesizing subagent results.

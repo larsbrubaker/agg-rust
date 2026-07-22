@@ -442,8 +442,12 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgba2
             .interpolator_mut()
             .begin(x as f64 + dx_dbl, y as f64 + dy_dbl, len);
 
-        let filter = self.base.filter().unwrap();
-        let weight_array: Vec<i16> = filter.weight_array().to_vec();
+        // Borrow the LUT weights directly (no per-span heap allocation). C++
+        // holds a raw `const int16*` here; `filter_lut()` yields a slice with the
+        // base's `'a` lifetime so it can coexist with the mutable interpolator
+        // borrow used inside the loop.
+        let filter = self.base.filter_lut().unwrap();
+        let weight_array: &[i16] = filter.weight_array();
         let wa_offset = ((filter.diameter() / 2 - 1) << IMAGE_SUBPIXEL_SHIFT) as usize;
 
         for pixel in span.iter_mut().take(len as usize) {

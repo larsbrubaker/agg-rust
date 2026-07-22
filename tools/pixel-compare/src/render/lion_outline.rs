@@ -109,7 +109,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut s_width = SliderCtrl::new(5.0, 5.0, 150.0, 12.0);
         s_width.range(0.0, 4.0);
         s_width.set_value(line_width);
-        s_width.label("Width=%3.2f");
+        s_width.label("Width %3.2f");
         render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_width);
 
         let mut cbox = CboxCtrl::new(160.0, 5.0, "Use Scanline Rasterizer");
