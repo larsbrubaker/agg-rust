@@ -3,7 +3,7 @@
 //! lion_outline, rasterizers2, line_patterns, line_patterns_clip, compositing, compositing2,
 //! flash_rasterizer, flash_rasterizer2, rasterizer_compound.
 
-use agg_rust::basics::{is_stop, is_vertex, VertexSource};
+use agg_rust::basics::{is_stop, is_vertex, VertexSource, COVER_FULL};
 use agg_rust::blur::stack_blur_rgba32;
 use agg_rust::color::{Gray8, Rgba8};
 use agg_rust::comp_op::{CompOp, PixfmtRgba32CompOp};
@@ -33,6 +33,7 @@ use agg_rust::basics::FillingRule;
 use agg_rust::scanline_boolean_algebra::{SBoolOp, sbool_combine_shapes_aa, sbool_combine_shapes_bin};
 use agg_rust::scanline_storage_aa::ScanlineStorageAa;
 use agg_rust::scanline_storage_bin::ScanlineStorageBin;
+use agg_rust::scanline_bin::ScanlineBin;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::basics::uround;
@@ -2638,6 +2639,17 @@ pub fn compositing2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 }
 
 /// Helper: render compound rasterizer output using per-style solid colors.
+/// Port of C++ `agg::render_scanlines_compound` for the solid-only style
+/// handler used by the flash demos.
+///
+/// The naive approach of blending each style's scanline directly onto the base
+/// renderer is only correct when at most one style touches a given pixel. Where
+/// two styles meet (a boundary pixel claimed partly by the left fill and partly
+/// by the right fill), AGG first composites all contributing styles into a
+/// per-scanline `mix_buffer` using premultiplied additive accumulation
+/// (`color::add`), then blends the finished span onto the base at full cover.
+/// Reproducing that mix-buffer path is required for byte-for-byte parity with
+/// the C++ compound rasterizer on anti-aliased style boundaries.
 fn render_compound(
     rasc: &mut RasterizerCompoundAa,
     rb: &mut RendererBase<PixfmtRgba32>,
@@ -2647,35 +2659,93 @@ fn render_compound(
     if !rasc.rewind_scanlines() {
         return;
     }
+    let min_x = rasc.min_x();
+    let max_x = rasc.max_x();
+    let buf_len = (max_x - min_x + 2).max(0) as usize;
+
+    let color_of = |style_id: u32| -> Rgba8 {
+        let idx = style_id as usize;
+        if idx < colors.len() {
+            colors[idx]
+        } else {
+            colors[colors.len() - 1]
+        }
+    };
+
     let mut sl = ScanlineU8::new();
-    sl.reset(rasc.min_x(), rasc.max_x());
+    let mut sl_bin = ScanlineBin::new();
+    sl.reset(min_x, max_x);
+    sl_bin.reset(min_x, max_x);
+    let mut mix_buffer: Vec<Rgba8> = vec![Rgba8::new(0, 0, 0, 0); buf_len];
+
     loop {
         let num_styles = rasc.sweep_styles();
         if num_styles == 0 {
             break;
         }
-        for s in 0..num_styles {
-            let style_id = rasc.style(s) as usize;
-            if rasc.sweep_scanline(&mut sl, s as i32) {
-                let color = if style_id < colors.len() {
-                    &colors[style_id]
-                } else {
-                    &colors[colors.len() - 1]
-                };
+
+        if num_styles == 1 {
+            // Optimization for a single style (happens often): plain solid fill.
+            if rasc.sweep_scanline(&mut sl, 0) {
+                let color = color_of(rasc.style(0));
                 let y = Scanline::y(&sl);
                 for span in sl.begin() {
-                    let x = span.x;
                     let len = span.len;
                     if len > 0 {
                         rb.blend_solid_hspan(
-                            x,
+                            span.x,
                             y,
                             len,
-                            color,
+                            &color,
                             &sl.covers()[span.cover_offset..span.cover_offset + len as usize],
                         );
                     }
                 }
+            }
+        } else if rasc.sweep_scanline(&mut sl_bin, -1) {
+            let y = Scanline::y(&sl_bin);
+
+            // Clear the mix_buffer over the union (bin) spans of this scanline.
+            for span in sl_bin.begin() {
+                let start = (span.x - min_x) as usize;
+                for c in &mut mix_buffer[start..start + span.len as usize] {
+                    *c = Rgba8::new(0, 0, 0, 0);
+                }
+            }
+
+            // Accumulate each style's contribution into the mix_buffer.
+            for i in 0..num_styles {
+                let color = color_of(rasc.style(i));
+                if rasc.sweep_scanline(&mut sl, i as i32) {
+                    for span in sl.begin() {
+                        let len = span.len as usize;
+                        let start = (span.x - min_x) as usize;
+                        let covers =
+                            &sl.covers()[span.cover_offset..span.cover_offset + len];
+                        for k in 0..len {
+                            let cover = covers[k];
+                            let dst = &mut mix_buffer[start + k];
+                            if cover == COVER_FULL {
+                                *dst = color;
+                            } else {
+                                dst.add(&color, cover as u32);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Emit the blended result as opaque color spans.
+            for span in sl_bin.begin() {
+                let start = (span.x - min_x) as usize;
+                rb.blend_color_hspan(
+                    span.x,
+                    y,
+                    span.len,
+                    &mix_buffer[start..],
+                    &[],
+                    COVER_FULL,
+                );
             }
         }
     }
@@ -2766,21 +2836,28 @@ fn parse_flash_shapes() -> Vec<FlashShape> {
 }
 
 fn flash_rand_byte(state: &mut u32) -> u8 {
-    // LCG variant used by the AGG demo output we're matching.
-    *state = state.wrapping_mul(1103515245).wrapping_add(12345);
+    // The AGG flash demos seed their random palette from the C library `rand()`.
+    // The reference images we match are produced on Windows, where `rand()` is the
+    // MSVC LCG (holdrand = holdrand*214013 + 2531011; return (holdrand >> 16) & 0x7fff).
+    // Masking to 0xFF is unaffected by the extra 0x7fff mask, so we fold it here.
+    // Using the glibc constants instead yields a different palette and breaks the
+    // byte-for-byte match with the C++ reference.
+    *state = state.wrapping_mul(214013).wrapping_add(2531011);
     ((*state >> 16) & 0xFF) as u8
 }
 
 fn flash_palette() -> Vec<Rgba8> {
+    // The flash demos draw an arbitrary random test palette (100 colors, alpha
+    // 230, premultiplied). The three RNG bytes are assigned to (r, g, b) in
+    // that order, matching the logical intent of the AGG example's
+    // rgba8(rand(), rand(), rand(), 230).
     let mut holdrand: u32 = 1;
     let mut colors = vec![Rgba8::new(0, 0, 0, 255); 100];
     for c in &mut colors {
-        *c = Rgba8::new(
-            flash_rand_byte(&mut holdrand) as u32,
-            flash_rand_byte(&mut holdrand) as u32,
-            flash_rand_byte(&mut holdrand) as u32,
-            230,
-        );
+        let r = flash_rand_byte(&mut holdrand) as u32;
+        let g = flash_rand_byte(&mut holdrand) as u32;
+        let b = flash_rand_byte(&mut holdrand) as u32;
+        *c = Rgba8::new(r, g, b, 230);
         c.premultiply();
     }
     colors
@@ -3320,19 +3397,21 @@ mod tests {
 
     #[test]
     fn flash_rand_matches_reference_sequence() {
+        // MSVC `rand()` LCG (the reference platform): holdrand starts at 1,
+        // holdrand = holdrand*214013 + 2531011, byte = (holdrand >> 16) & 0xFF.
         let mut state = 1u32;
         let seq: Vec<u8> = (0..9).map(|_| flash_rand_byte(&mut state)).collect();
-        assert_eq!(seq, vec![198, 126, 129, 107, 75, 251, 226, 251, 84]);
+        assert_eq!(seq, vec![41, 35, 190, 132, 225, 108, 214, 174, 82]);
     }
 
     #[test]
     fn flash_palette_first_entry_matches_cpp_style() {
         let colors = flash_palette();
         assert_eq!(colors[0].a, 230);
-        // First generated RGB before premultiply is (198, 126, 129).
+        // First three random bytes (41, 35, 190) are assigned to (r, g, b).
         // After AGG premultiply with alpha=230:
-        assert_eq!(colors[0].r, 179);
-        assert_eq!(colors[0].g, 114);
-        assert_eq!(colors[0].b, 116);
+        assert_eq!(colors[0].r, 37);
+        assert_eq!(colors[0].g, 32);
+        assert_eq!(colors[0].b, 171);
     }
 }

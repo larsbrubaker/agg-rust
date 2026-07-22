@@ -271,6 +271,63 @@ mod demo_smoke_tests {
     }
 }
 
+/// Byte-for-byte regression tests against the committed C++ AGG reference
+/// renders. The reference `.raw` files use an 8-byte header
+/// `[width:u32-le][height:u32-le]` followed by top-down RGBA pixels, matching
+/// the format written by the headless C++ renderer and read by `load_raw`.
+#[cfg(test)]
+mod flash_reference_tests {
+    use super::render_demo;
+
+    /// Split a reference `.raw` blob into `(width, height, rgba_pixels)`.
+    fn parse_raw(bytes: &[u8]) -> (u32, u32, &[u8]) {
+        let w = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let h = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        (w, h, &bytes[8..])
+    }
+
+    fn assert_matches_reference(demo: &str, reference: &[u8]) {
+        let (w, h, expected) = parse_raw(reference);
+        let out = render_demo(demo, w, h, &[]).expect("demo should render");
+        assert_eq!(out.width, w);
+        assert_eq!(out.height, h);
+        assert_eq!(
+            out.data.len(),
+            expected.len(),
+            "{demo}: rendered byte length mismatch"
+        );
+        if out.data != expected {
+            let first = out
+                .data
+                .iter()
+                .zip(expected.iter())
+                .position(|(a, b)| a != b)
+                .unwrap();
+            let px = first / 4;
+            panic!(
+                "{demo}: differs from C++ reference at byte {first} (pixel {}, {}): \
+                 rust={:?} cpp={:?}",
+                px % w as usize,
+                px / w as usize,
+                &out.data[px * 4..px * 4 + 4],
+                &expected[px * 4..px * 4 + 4],
+            );
+        }
+    }
+
+    #[test]
+    fn flash_rasterizer_matches_cpp_reference() {
+        let reference = include_bytes!("../../../../flash_rasterizer_cpp_655x520.raw");
+        assert_matches_reference("flash_rasterizer", reference);
+    }
+
+    #[test]
+    fn flash_rasterizer2_matches_cpp_reference() {
+        let reference = include_bytes!("../../../../flash_rasterizer2_cpp_655x520.raw");
+        assert_matches_reference("flash_rasterizer2", reference);
+    }
+}
+
 fn parse_path_line(line: &str, path: &mut PathStorage) {
     let mut tokens = line.split_whitespace();
 
