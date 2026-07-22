@@ -32,17 +32,31 @@ impl<'a> PixfmtGray8<'a> {
         Self { rbuf }
     }
 
+    /// Row of pixels at `y` as a byte slice (shared, read-only view).
+    #[inline]
+    fn row(&self, y: i32) -> &[u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
+    /// Row of pixels at `y` as a mutable byte slice.
+    #[inline]
+    fn row_mut(&mut self, y: i32) -> &mut [u8] {
+        unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
+        }
+    }
+
     /// Clear the entire buffer to a solid gray value.
     pub fn clear(&mut self, c: &Gray8) {
-        let w = self.rbuf.width();
         let h = self.rbuf.height();
         for y in 0..h {
-            let row = unsafe {
-                let ptr = self.rbuf.row_ptr(y as i32);
-                std::slice::from_raw_parts_mut(ptr, w as usize * BPP)
-            };
-            for x in 0..w as usize {
-                row[x] = c.v;
+            let row = self.row_mut(y as i32);
+            for px in row.iter_mut() {
+                *px = c.v;
             }
         }
     }
@@ -66,36 +80,24 @@ impl<'a> PixelFormat for PixfmtGray8<'a> {
     }
 
     fn pixel(&self, x: i32, y: i32) -> Gray8 {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row(y);
         Gray8::new(row[x as usize] as u32, 255)
     }
 
     fn copy_pixel(&mut self, x: i32, y: i32, c: &Gray8) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row_mut(y);
         row[x as usize] = c.v;
     }
 
     fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Gray8) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row_mut(y);
         for i in 0..len as usize {
             row[x as usize + i] = c.v;
         }
     }
 
     fn blend_pixel(&mut self, x: i32, y: i32, c: &Gray8, cover: CoverType) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row_mut(y);
         let alpha = Gray8::mult_cover(c.a, cover);
         if alpha == 255 {
             row[x as usize] = c.v;
@@ -105,10 +107,7 @@ impl<'a> PixelFormat for PixfmtGray8<'a> {
     }
 
     fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Gray8, cover: CoverType) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row_mut(y);
         let alpha = Gray8::mult_cover(c.a, cover);
         if alpha == 255 {
             for i in 0..len as usize {
@@ -122,10 +121,7 @@ impl<'a> PixelFormat for PixfmtGray8<'a> {
     }
 
     fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Gray8, covers: &[CoverType]) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row_mut(y);
         for (i, &cov) in covers.iter().enumerate().take(len as usize) {
             let alpha = Gray8::mult_cover(c.a, cov);
             if alpha == 255 {
@@ -145,10 +141,7 @@ impl<'a> PixelFormat for PixfmtGray8<'a> {
         covers: &[CoverType],
         cover: CoverType,
     ) {
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
+        let row = self.row_mut(y);
         if !covers.is_empty() {
             for i in 0..len as usize {
                 let c = &colors[i];
