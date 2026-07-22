@@ -24,8 +24,8 @@
 
 #include "common.h"
 
-void render_image_transforms(unsigned w, unsigned h,
-                             const std::vector<double>& params, const char* out) {
+int render_image_transforms(unsigned w, unsigned h,
+                            const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgra32 pixfmt;
     typedef agg::renderer_base<pixfmt> renderer_base;
     typedef agg::renderer_scanline_aa_solid<renderer_base> renderer_solid;
@@ -44,6 +44,10 @@ void render_image_transforms(unsigned w, unsigned h,
     double poly_cy = params.size() > 10 ? params[10] : H / 2.0;
 
     headless::image_rgba img = headless::load_spheres();
+    if (!img.ok) {
+        fprintf(stderr, "image_transforms: failed to load spheres image\n");
+        return 1;
+    }
     std::vector<unsigned char> img_bytes;
     agg::rendering_buffer img_rbuf;
     headless::pack_image(img, "bgra", img_bytes, img_rbuf);
@@ -182,5 +186,5 @@ void render_image_transforms(unsigned w, unsigned h,
     agg::render_ctrl(ras, sl, rb, m_rotate_image);
     agg::render_ctrl(ras, sl, rb, m_example);
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }

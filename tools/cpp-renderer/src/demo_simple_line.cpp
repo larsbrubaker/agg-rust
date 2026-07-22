@@ -14,8 +14,8 @@
 
 #include "common.h"
 
-void render_simple_line(unsigned w, unsigned h,
-                        const std::vector<double>& /*params*/, const char* out) {
+int render_simple_line(unsigned w, unsigned h,
+                       const std::vector<double>& /*params*/, const char* out) {
     typedef agg::pixfmt_rgba32 pixfmt;
     typedef agg::renderer_base<pixfmt> renderer_base;
     typedef agg::renderer_outline_aa<renderer_base> renderer_type;
@@ -60,5 +60,5 @@ void render_simple_line(unsigned w, unsigned h,
     ren.color(agg::rgba8(0, 0, 0, 255));
     ras.add_path(transformed);
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }

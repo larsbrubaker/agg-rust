@@ -29,8 +29,8 @@
 
 #include "common.h"
 
-void render_image_filters(unsigned w, unsigned h,
-                          const std::vector<double>& params, const char* out) {
+int render_image_filters(unsigned w, unsigned h,
+                         const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_rgba32 pixfmt;
     typedef agg::renderer_base<pixfmt> renderer_base;
 
@@ -45,6 +45,10 @@ void render_image_filters(unsigned w, unsigned h,
     bool skip_controls = params.size() > 5 ? params[5] > 0.5 : false;
 
     headless::image_rgba img = headless::load_spheres();
+    if (!img.ok) {
+        fprintf(stderr, "image_filters: failed to load spheres image\n");
+        return 1;
+    }
     unsigned iw = img.width, ih = img.height;
     std::vector<unsigned char> src_data, dst_data;
     {
@@ -201,5 +205,5 @@ void render_image_filters(unsigned w, unsigned h,
         agg::render_ctrl(ras, sl, rb, c_refresh);
     }
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }

@@ -13,11 +13,12 @@
 
 struct demo_entry {
     const char* name;
-    void (*fn)(unsigned, unsigned, const std::vector<double>&, const char*);
+    // Returns 0 on success, nonzero on failure (asset load or I/O error).
+    int (*fn)(unsigned, unsigned, const std::vector<double>&, const char*);
 };
 
 // Per-demo render functions (defined in their own translation units).
-#define DEMO(n) void render_##n(unsigned, unsigned, const std::vector<double>&, const char*);
+#define DEMO(n) int render_##n(unsigned, unsigned, const std::vector<double>&, const char*);
 DEMO(simple_line)
 DEMO(perspective)
 DEMO(conv_dash_marker)
@@ -62,8 +63,7 @@ int main(int argc, char** argv) {
 
     for (const auto& d : g_demos) {
         if (strcmp(demo, d.name) == 0) {
-            d.fn(width, height, params, out);
-            return 0;
+            return d.fn(width, height, params, out);
         }
     }
     fprintf(stderr, "Unknown demo: %s\n", demo);

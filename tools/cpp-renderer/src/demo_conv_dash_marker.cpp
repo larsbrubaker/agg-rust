@@ -22,8 +22,8 @@
 
 #include "common.h"
 
-void render_conv_dash_marker(unsigned w, unsigned h,
-                             const std::vector<double>& params, const char* out) {
+int render_conv_dash_marker(unsigned w, unsigned h,
+                            const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgr24 pixfmt;
     typedef agg::renderer_base<pixfmt> ren_base;
 
@@ -144,5 +144,5 @@ void render_conv_dash_marker(unsigned w, unsigned h,
     agg::render_ctrl(ras, sl, renb, m_close);
     agg::render_ctrl(ras, sl, renb, m_even_odd);
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }

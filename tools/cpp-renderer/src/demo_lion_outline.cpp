@@ -22,8 +22,8 @@
 
 unsigned parse_lion(agg::path_storage& ps, agg::srgba8* colors, unsigned* path_idx);
 
-void render_lion_outline(unsigned w, unsigned h,
-                         const std::vector<double>& params, const char* out) {
+int render_lion_outline(unsigned w, unsigned h,
+                        const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgr24 pixfmt;
     typedef agg::renderer_base<pixfmt> renderer_base;
     typedef agg::renderer_scanline_aa_solid<renderer_base> renderer_solid;
@@ -95,5 +95,5 @@ void render_lion_outline(unsigned w, unsigned h,
     agg::render_ctrl(g_rasterizer, g_scanline, rb, m_width_slider);
     agg::render_ctrl(g_rasterizer, g_scanline, rb, m_scanline);
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }

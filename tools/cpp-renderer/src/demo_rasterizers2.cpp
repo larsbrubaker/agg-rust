@@ -78,8 +78,8 @@ struct roundoff {
 };
 } // namespace
 
-void render_rasterizers2(unsigned w, unsigned h,
-                         const std::vector<double>& params, const char* out) {
+int render_rasterizers2(unsigned w, unsigned h,
+                        const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgr24 pixfmt;
     typedef agg::pixfmt_bgr24_pre pixfmt_pre;
     typedef agg::renderer_base<pixfmt_pre> renderer_base;
@@ -210,5 +210,5 @@ void render_rasterizers2(unsigned w, unsigned h,
     agg::render_ctrl(ras_aa, sl, ren_base2, m_scale_pattern);
 
     pixfmt pf_out(cv.rbuf);
-    headless::write_raw(out, pf_out, w, h);
+    return headless::write_raw(out, pf_out, w, h) ? 0 : 1;
 }

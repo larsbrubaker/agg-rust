@@ -44,18 +44,21 @@ struct canvas {
 // Write a rendered pixel format out as raw RGBA (top-down) with the header the
 // pixel-compare tool expects. Uses pixf.pixel() so the logical color is emitted
 // regardless of the internal component order (bgr24, bgra32, ...).
+// Returns true on success; false (with a stderr message) on any I/O failure so
+// callers can propagate a nonzero exit code.
 template <class Pixfmt>
-inline void write_raw(const char* path, Pixfmt& pixf, unsigned w, unsigned h) {
+inline bool write_raw(const char* path, Pixfmt& pixf, unsigned w, unsigned h) {
     FILE* f = fopen(path, "wb");
     if (!f) {
         fprintf(stderr, "Failed to open output '%s'\n", path);
-        return;
+        return false;
     }
+    // The u32 header fields are written in host byte order; pixel-compare's
+    // load_raw reads them little-endian, which matches this MSVC x86-64 target.
     uint32_t W = w, H = h;
-    fwrite(&W, 4, 1, f);
-    fwrite(&H, 4, 1, f);
+    bool ok = fwrite(&W, 4, 1, f) == 1 && fwrite(&H, 4, 1, f) == 1;
     std::vector<unsigned char> row(static_cast<size_t>(w) * 4);
-    for (unsigned y = 0; y < h; ++y) {
+    for (unsigned y = 0; ok && y < h; ++y) {
         for (unsigned x = 0; x < w; ++x) {
             typename Pixfmt::color_type c = pixf.pixel(static_cast<int>(x), static_cast<int>(y));
             row[x * 4 + 0] = c.r;
@@ -63,9 +66,11 @@ inline void write_raw(const char* path, Pixfmt& pixf, unsigned w, unsigned h) {
             row[x * 4 + 2] = c.b;
             row[x * 4 + 3] = c.a;
         }
-        fwrite(row.data(), 1, row.size(), f);
+        if (fwrite(row.data(), 1, row.size(), f) != row.size()) ok = false;
     }
-    fclose(f);
+    if (fclose(f) != 0) ok = false;
+    if (!ok) fprintf(stderr, "Failed to write output '%s'\n", path);
+    return ok;
 }
 
 // Loaded image: RGBA bytes, top-down. Callers repack into whatever component

@@ -64,8 +64,8 @@ void radial_shape(agg::rasterizer_scanline_aa<>& ras, agg::scanline_u8& sl,
 }
 } // namespace
 
-void render_compositing2(unsigned w, unsigned h,
-                         const std::vector<double>& params, const char* out) {
+int render_compositing2(unsigned w, unsigned h,
+                        const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgra32 pixfmt;
     typedef agg::comp_op_adaptor_rgba<color, order> blender_type;
     typedef agg::pixfmt_custom_blend_rgba<blender_type, agg::rendering_buffer> pixfmt_comp;
@@ -130,5 +130,5 @@ void render_compositing2(unsigned w, unsigned h,
     agg::render_ctrl(ras, sl, rb2, m_comp_op);
 
     pixfmt pf_out(cv.rbuf);
-    headless::write_raw(out, pf_out, w, h);
+    return headless::write_raw(out, pf_out, w, h) ? 0 : 1;
 }

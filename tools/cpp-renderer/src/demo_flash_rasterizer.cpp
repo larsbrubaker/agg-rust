@@ -30,8 +30,8 @@ static void flash_palette(agg::rgba8* colors) {
     }
 }
 
-void render_flash_rasterizer(unsigned w, unsigned h,
-                             const std::vector<double>& params, const char* out) {
+int render_flash_rasterizer(unsigned w, unsigned h,
+                            const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgra32 pixfmt;
     typedef agg::renderer_base<pixfmt> renderer_base;
     typedef agg::renderer_scanline_aa_solid<renderer_base> renderer_solid;
@@ -44,10 +44,8 @@ void render_flash_rasterizer(unsigned w, unsigned h,
 
     agg::compound_shape shape;
     if (!shape.open(headless::asset_path("shapes.txt").c_str())) {
-        headless::canvas cv(w, h, 4);
-        pixfmt pixf(cv.rbuf);
-        headless::write_raw(out, pixf, w, h);
-        return;
+        fprintf(stderr, "flash_rasterizer: failed to open shapes.txt\n");
+        return 1;
     }
     for (int i = 0; i <= shape_index; ++i) {
         if (!shape.read_next()) break;
@@ -122,5 +120,5 @@ void render_flash_rasterizer(unsigned w, unsigned h,
     ren.color(agg::rgba8(0, 0, 0, 255));
     agg::render_scanlines(ras, sl, ren);
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }

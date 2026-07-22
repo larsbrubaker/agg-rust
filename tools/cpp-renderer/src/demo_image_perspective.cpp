@@ -25,8 +25,8 @@
 
 #include "common.h"
 
-void render_image_perspective(unsigned w, unsigned h,
-                              const std::vector<double>& params, const char* out) {
+int render_image_perspective(unsigned w, unsigned h,
+                             const std::vector<double>& params, const char* out) {
     typedef agg::pixfmt_bgra32 pixfmt;
     typedef agg::renderer_base<pixfmt> renderer_base;
 
@@ -44,6 +44,10 @@ void render_image_perspective(unsigned w, unsigned h,
     int trans_type = params.size() > 8 ? (int)params[8] : 2;
 
     headless::image_rgba img = headless::load_spheres();
+    if (!img.ok) {
+        fprintf(stderr, "image_perspective: failed to load spheres image\n");
+        return 1;
+    }
     std::vector<unsigned char> img_bytes;
     agg::rendering_buffer img_rbuf;
     headless::pack_image(img, "bgra", img_bytes, img_rbuf);
@@ -130,5 +134,5 @@ void render_image_perspective(unsigned w, unsigned h,
     m_trans.cur_item(trans_type);
     agg::render_ctrl(ras, sl, rb, m_trans);
 
-    headless::write_raw(out, pixf, w, h);
+    return headless::write_raw(out, pixf, w, h) ? 0 : 1;
 }
