@@ -130,7 +130,7 @@ export function init(container: HTMLElement) {
     { type: 'checkbox', x1: 250, y1: 35, x2: 450, y2: 50, sidebarEl: cbOutline, onChange: v => { showOutline = v; draw(); } },
     { type: 'radio', x1: 535, y1: 5, x2: 650, y2: 55, numItems: 2, sidebarEls: curveTypeEls, onChange: v => { curveType = v; draw(); } },
     {
-      type: 'radio', x1: 535, y1: 60, x2: 650, y2: 195, numItems: 9, sidebarEls: caseTypeEls, onChange: v => {
+      type: 'radio', x1: 535, y1: 60, x2: 650, y2: 195, numItems: 9, textHeight: 7, sidebarEls: caseTypeEls, onChange: v => {
         caseType = v;
         applyCasePreset(v);
         if (v === 6) {
@@ -141,9 +141,9 @@ export function init(container: HTMLElement) {
         draw();
       },
     },
-    { type: 'radio', x1: 535, y1: 200, x2: 650, y2: 290, numItems: 4, sidebarEls: innerJoinEls, onChange: v => { innerJoin = v; draw(); } },
-    { type: 'radio', x1: 535, y1: 295, x2: 650, y2: 385, numItems: 5, sidebarEls: lineJoinEls, onChange: v => { lineJoin = v; draw(); } },
-    { type: 'radio', x1: 535, y1: 395, x2: 650, y2: 455, numItems: 3, sidebarEls: lineCapEls, onChange: v => { lineCap = v; draw(); } },
+    { type: 'radio', x1: 535, y1: 200, x2: 650, y2: 290, numItems: 4, textHeight: 8, sidebarEls: innerJoinEls, onChange: v => { innerJoin = v; draw(); } },
+    { type: 'radio', x1: 535, y1: 295, x2: 650, y2: 385, numItems: 5, textHeight: 8, sidebarEls: lineJoinEls, onChange: v => { lineJoin = v; draw(); } },
+    { type: 'radio', x1: 535, y1: 395, x2: 650, y2: 455, numItems: 3, textHeight: 8, sidebarEls: lineCapEls, onChange: v => { lineCap = v; draw(); } },
   ];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: 'bottom-left' });
 

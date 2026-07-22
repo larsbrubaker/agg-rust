@@ -39,7 +39,7 @@ export function init(container: HTMLElement) {
   const canvasControls: CanvasControl[] = [
     { type: 'slider', x1: 5, y1: 5, x2: 400, y2: 11, min: 0, max: 1, sidebarEl: slDst, onChange: v => { dstAlpha = v; draw(); } },
     { type: 'slider', x1: 5, y1: 20, x2: 400, y2: 26, min: 0, max: 1, sidebarEl: slSrc, onChange: v => { srcAlpha = v; draw(); } },
-    { type: 'radio', x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES.length, sidebarEls: radiosByCompOp, onChange: i => { compOp = i; draw(); } },
+    { type: 'radio', x1: 420, y1: 5, x2: 590, y2: 340, numItems: COMP_OP_NAMES.length, textHeight: 6.8, sidebarEls: radiosByCompOp, onChange: i => { compOp = i; draw(); } },
   ];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw, { origin: 'bottom-left' });
 

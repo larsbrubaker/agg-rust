@@ -33,7 +33,7 @@ export function init(container: HTMLElement) {
     { type: 'slider', x1: 5, y1: 20, x2: 345, y2: 26, min: 0, max: 1, sidebarEl: slR, onChange: v => { r = v; draw(); } },
     { type: 'slider', x1: 5, y1: 35, x2: 345, y2: 41, min: 0, max: 1, sidebarEl: slG, onChange: v => { g = v; draw(); } },
     { type: 'slider', x1: 5, y1: 50, x2: 345, y2: 56, min: 0, max: 1, sidebarEl: slB, onChange: v => { b = v; draw(); } },
-    { type: 'radio', x1: 355, y1: 1, x2: 495, y2: 60, numItems: 3, sidebarEls: radioEls, onChange: v => { pattern = v; draw(); } },
+    { type: 'radio', x1: 355, y1: 1, x2: 495, y2: 60, numItems: 3, textHeight: 8, sidebarEls: radioEls, onChange: v => { pattern = v; draw(); } },
   ];
   const cleanupCC = setupCanvasControls(canvas, canvasControls, draw);
 
