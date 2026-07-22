@@ -72,6 +72,8 @@ test('lion_outline: clicking the on-canvas Use Scanline Rasterizer checkbox togg
 
   // params = [angle, scale, skewX, skewY, lineWidth, useScanline]; starts 0.
   expect(lastParams[5]).toBe(0);
+  const angleBefore = lastParams[0];
+  const scaleBefore = lastParams[1];
 
   // The WASM CboxCtrl is at AGG (160,5). Click inside its hit region.
   // canvasPos maps clientY -> H - clientY (AGG bottom-left origin), so to click
@@ -81,6 +83,18 @@ test('lion_outline: clicking the on-canvas Use Scanline Rasterizer checkbox togg
   canvas.dispatchEvent(pointer('pointerup', clickX, H - aggY));
 
   expect(lastParams[5]).toBe(1);
+
+  // The checkbox click must NOT also fire the demo's rotation drag handler
+  // (a bubble-phase listener on the same canvas), which would snap
+  // angle/scale to the click point. Caveats: (1) happy-dom non-spec-compliantly
+  // suppresses same-target bubble listeners on stopPropagation(), so this
+  // passes here even without the real fix — do not trust it alone for
+  // real-browser behavior; (2) the real-browser leak is being fixed separately
+  // in canvas-controls.ts (stopImmediatePropagation on control hits). This
+  // assertion documents intent and guards the spec-correct path once that
+  // fix lands.
+  expect(lastParams[0]).toBe(angleBefore);
+  expect(lastParams[1]).toBe(scaleBefore);
 
   // Clicking again toggles it back off.
   canvas.dispatchEvent(pointer('pointerdown', clickX, H - aggY));
