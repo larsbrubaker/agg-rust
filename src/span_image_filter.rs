@@ -54,6 +54,16 @@ impl<'a, I> SpanImageFilterBase<'a, I> {
         self.filter
     }
 
+    /// Return the stored filter reference with the base's own lifetime `'a`.
+    ///
+    /// Unlike [`filter`], the returned borrow is not tied to `&self`, so the
+    /// weight-array slice it yields can be held across a `generate` loop that
+    /// also mutably borrows the interpolator. This avoids cloning the LUT per
+    /// span in hot inner loops.
+    pub fn filter_lut(&self) -> Option<&'a ImageFilterLut> {
+        self.filter
+    }
+
     pub fn filter_dx_int(&self) -> u32 {
         self.dx_int
     }
