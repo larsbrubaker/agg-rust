@@ -56,6 +56,28 @@ const STACK_BLUR8_SHR: [u32; 255] = [
 ];
 
 // ============================================================================
+// Whole-row slice helpers
+// ============================================================================
+
+/// Row of RGBA32 pixels at `y` as a byte slice (shared, read-only view).
+#[inline]
+fn row(rbuf: &RowAccessor, y: i32) -> &[u8] {
+    unsafe {
+        let ptr = rbuf.row_ptr(y);
+        std::slice::from_raw_parts(ptr, rbuf.width() as usize * 4)
+    }
+}
+
+/// Row of RGBA32 pixels at `y` as a mutable byte slice.
+#[inline]
+fn row_mut(rbuf: &mut RowAccessor, y: i32) -> &mut [u8] {
+    unsafe {
+        let ptr = rbuf.row_ptr(y);
+        std::slice::from_raw_parts_mut(ptr, rbuf.width() as usize * 4)
+    }
+}
+
+// ============================================================================
 // Stack blur for RGBA32
 // ============================================================================
 
@@ -88,10 +110,7 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
         let mut stack = vec![[0u8; 4]; div];
 
         for y in 0..h {
-            let row = unsafe {
-                let ptr = rbuf.row_ptr(y as i32);
-                std::slice::from_raw_parts_mut(ptr, w * 4)
-            };
+            let row = row_mut(rbuf, y as i32);
 
             let mut sum_r: u64 = 0;
             let mut sum_g: u64 = 0;
@@ -437,10 +456,7 @@ pub fn recursive_blur_rgba32_x(rbuf: &mut RowAccessor, radius: f64) {
 
     for y in 0..h {
         // Read pixels from row
-        let row = unsafe {
-            let ptr = rbuf.row_ptr(y as i32);
-            std::slice::from_raw_parts(ptr, w * 4)
-        };
+        let row = row(rbuf, y as i32);
 
         let pix = |x: usize| -> Rgba8 {
             let off = x * 4;
@@ -491,10 +507,7 @@ pub fn recursive_blur_rgba32_x(rbuf: &mut RowAccessor, radius: f64) {
         }
 
         // Write back to row
-        let row = unsafe {
-            let ptr = rbuf.row_ptr(y as i32);
-            std::slice::from_raw_parts_mut(ptr, w * 4)
-        };
+        let row = row_mut(rbuf, y as i32);
         for x in 0..w {
             let off = x * 4;
             row[off] = buf[x].r;
@@ -618,10 +631,7 @@ mod tests {
     }
 
     fn set_pixel(ra: &mut RowAccessor, x: usize, y: usize, r: u8, g: u8, b: u8, a: u8) {
-        let row = unsafe {
-            let ptr = ra.row_ptr(y as i32);
-            std::slice::from_raw_parts_mut(ptr, (ra.width() as usize) * 4)
-        };
+        let row = row_mut(ra, y as i32);
         let off = x * 4;
         row[off] = r;
         row[off + 1] = g;
@@ -630,10 +640,7 @@ mod tests {
     }
 
     fn get_pixel(ra: &RowAccessor, x: usize, y: usize) -> [u8; 4] {
-        let row = unsafe {
-            let ptr = ra.row_ptr(y as i32);
-            std::slice::from_raw_parts(ptr, (ra.width() as usize) * 4)
-        };
+        let row = row(ra, y as i32);
         let off = x * 4;
         [row[off], row[off + 1], row[off + 2], row[off + 3]]
     }
