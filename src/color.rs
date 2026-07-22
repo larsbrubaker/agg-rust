@@ -348,10 +348,12 @@ impl Rgba8 {
         }
     }
 
+    #[inline]
     pub fn to_double(a: u8) -> f64 {
         a as f64 / Self::BASE_MASK as f64
     }
 
+    #[inline]
     pub fn from_double(a: f64) -> u8 {
         uround(a * Self::BASE_MASK as f64) as u8
     }

@@ -380,6 +380,7 @@ static ELDER_BIT_TABLE: [i8; 256] = [
 /// Fast integer square root using lookup tables.
 /// No divisions, multiplications, or loops — just bit shifts and table lookups.
 /// Port of C++ `fast_sqrt` (portable C path).
+#[inline]
 pub fn fast_sqrt(val: u32) -> u32 {
     let t = val;
     let mut shift: i32 = 11;

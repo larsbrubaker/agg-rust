@@ -385,9 +385,15 @@ where
     fn prepare(&mut self) {}
 
     fn generate(&mut self, span: &mut [F::Color], x: i32, y: i32, len: u32) {
-        let dd = (self.d2 - self.d1).max(1);
-        self.interpolator.begin(x as f64 + 0.5, y as f64 + 0.5, len);
+        // Hoist the loop-invariant range/size values into locals so the inner loop
+        // touches no `self` fields per pixel. The per-pixel sequence (coordinates →
+        // calculate → scale/clamp → lut get → next) is left byte-for-byte identical.
+        let d1 = self.d1;
+        let d2 = self.d2;
+        let dd = (d2 - d1).max(1);
         let color_size = self.color_function.size() as i32;
+        let color_max = color_size - 1;
+        self.interpolator.begin(x as f64 + 0.5, y as f64 + 0.5, len);
         for pixel in span.iter_mut().take(len as usize) {
             let mut ix = 0i32;
             let mut iy = 0i32;
@@ -395,9 +401,9 @@ where
             let d = self.gradient_function.calculate(
                 ix >> DOWNSCALE_SHIFT,
                 iy >> DOWNSCALE_SHIFT,
-                self.d2,
+                d2,
             );
-            let d = (((d - self.d1) * color_size) / dd).clamp(0, color_size - 1);
+            let d = (((d - d1) * color_size) / dd).clamp(0, color_max);
             *pixel = self.color_function.get(d as usize);
             self.interpolator.next();
         }
