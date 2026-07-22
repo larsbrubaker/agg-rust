@@ -117,6 +117,9 @@ impl LineProfileAa {
         }
     }
 
+    // Mirrors C++ `line_profile_aa::profile_size()`. Kept for API parity and
+    // used by tests; not called by the non-test build.
+    #[allow(dead_code)]
     fn profile_size(&self) -> usize {
         self.profile.len()
     }
@@ -206,6 +209,9 @@ impl Default for LineProfileAa {
 /// Port of C++ `distance_interpolator0`.
 /// Uses `line_mr()` (medium resolution) for dx/dy.
 pub struct DistanceInterpolator0 {
+    // Retained for structural fidelity with C++ `distance_interpolator0::m_dx`
+    // (shifted at construction); not read after construction in this port.
+    #[allow(dead_code)]
     dx: i32,
     dy: i32,
     dist: i32,
@@ -238,8 +244,14 @@ impl DistanceInterpolator0 {
 /// Port of C++ `distance_interpolator00`.
 /// Uses `line_mr()` (medium resolution) for dx/dy.
 pub struct DistanceInterpolator00 {
+    // Retained for structural fidelity with C++ `distance_interpolator00::m_dx1`;
+    // not read after construction in this port.
+    #[allow(dead_code)]
     dx1: i32,
     dy1: i32,
+    // Retained for structural fidelity with C++ `distance_interpolator00::m_dx2`;
+    // not read after construction in this port.
+    #[allow(dead_code)]
     dx2: i32,
     dy2: i32,
     dist1: i32,
@@ -1091,7 +1103,7 @@ where
         x2: i32,
     ) {
         let mut covers = [0u8; MAX_HALF_WIDTH * 2 + 4];
-        let mut p0 = 0usize;
+        let p0 = 0usize;
         let mut p1 = 0usize;
 
         // C++ passes pixel coords << subpixel_shift to DI0
@@ -1181,7 +1193,7 @@ where
         xh2: i32,
     ) {
         let mut covers = [0u8; MAX_HALF_WIDTH * 2 + 4];
-        let mut p0 = 0usize;
+        let p0 = 0usize;
         let mut p1 = 0usize;
 
         let x = xh1 << LINE_SUBPIXEL_SHIFT;
@@ -1357,6 +1369,9 @@ struct LineInterpolatorAa0 {
     old_y: i32,
     count: i32,
     width: i32,
+    // Retained for structural fidelity with C++ `line_interpolator_aa_base::m_max_extent`;
+    // the step-limit checks use the local value in this port, so the stored field is unread.
+    #[allow(dead_code)]
     max_extent: i32,
     len: i32,
     step: i32,
@@ -1517,6 +1532,9 @@ struct LineInterpolatorAa1 {
     old_y: i32,
     count: i32,
     width: i32,
+    // Retained for structural fidelity with C++ `line_interpolator_aa_base::m_max_extent`;
+    // the step-limit checks use the local value in this port, so the stored field is unread.
+    #[allow(dead_code)]
     max_extent: i32,
     len: i32,
     step: i32,
@@ -1744,6 +1762,9 @@ struct LineInterpolatorAa2 {
     old_y: i32,
     count: i32,
     width: i32,
+    // Retained for structural fidelity with C++ `line_interpolator_aa_base::m_max_extent`;
+    // the step-limit checks use the local value in this port, so the stored field is unread.
+    #[allow(dead_code)]
     max_extent: i32,
     len: i32,
     step: i32,
@@ -1911,6 +1932,9 @@ struct LineInterpolatorAa3 {
     old_y: i32,
     count: i32,
     width: i32,
+    // Retained for structural fidelity with C++ `line_interpolator_aa_base::m_max_extent`;
+    // the step-limit checks use the local value in this port, so the stored field is unread.
+    #[allow(dead_code)]
     max_extent: i32,
     len: i32,
     step: i32,

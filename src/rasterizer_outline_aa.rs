@@ -119,10 +119,6 @@ impl VertexSeq {
     fn get(&self, idx: usize) -> &LineAaVertex {
         &self.data[idx]
     }
-
-    fn get_mut(&mut self, idx: usize) -> &mut LineAaVertex {
-        &mut self.data[idx]
-    }
 }
 
 impl std::ops::Index<usize> for VertexSeq {
