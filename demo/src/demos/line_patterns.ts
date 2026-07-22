@@ -84,6 +84,12 @@ export function init(container: HTMLElement) {
     return s.min + t * (s.max - s.min);
   }
 
+  // Control points are stored in AGG bottom-left coords (matching C++ flip_y),
+  // handed straight to the WASM renderer, and the canvas is CSS-mirrored with
+  // scaleY(-1). So a point stored at AGG y=Y is DISPLAYED at screen y = H - Y.
+  // Hit-testing/dragging must therefore convert the top-origin screen y to AGG
+  // y via (H - screenY). The on-canvas sliders are exempt: they were defined
+  // directly in already-flipped screen coords (yTop = H - 12).
   function findPoint(mx: number, my: number): number {
     let bestD2 = GRAB_RADIUS * GRAB_RADIUS;
     let bestIdx = -1;
@@ -117,8 +123,8 @@ export function init(container: HTMLElement) {
       return;
     }
 
-    // Check control points
-    const pi = findPoint(p.x, p.y);
+    // Check control points (hit-test in AGG coords: flip screen y -> H - y)
+    const pi = findPoint(p.x, H - p.y);
     if (pi >= 0) {
       dragMode = 'point';
       dragPointIdx = pi;
@@ -138,8 +144,9 @@ export function init(container: HTMLElement) {
       sliders[activeSliderIdx].el.value = String(v);
       sliders[activeSliderIdx].el.dispatchEvent(new Event('input'));
     } else if (dragMode === 'point') {
+      // Store back in AGG coords: flip screen y -> H - y.
       points[dragPointIdx] = p.x;
-      points[dragPointIdx + 1] = p.y;
+      points[dragPointIdx + 1] = H - p.y;
       draw();
     }
     e.preventDefault();
