@@ -191,6 +191,16 @@ fn time_render_loop<T, F: FnMut() -> T>(
     times
 }
 
+/// Best (minimum) of a slice of per-iteration times, computed identically to the
+/// C++ renderer's `run_bench` `best=` value. The project's benchmark methodology
+/// compares best-of first (the fastest run is the least contaminated by OS
+/// scheduling jitter) and medians second. Panics on an empty slice — callers
+/// always pass at least one sample.
+fn best_ms(times: &[f64]) -> f64 {
+    assert!(!times.is_empty(), "best_ms requires at least one sample");
+    times.iter().copied().fold(f64::INFINITY, f64::min)
+}
+
 /// Median of a slice of per-iteration times, computed identically to the C++
 /// renderer's `run_bench`: sort ascending, take the middle element (odd count)
 /// or the mean of the two middle elements (even count). Panics on an empty
@@ -216,8 +226,7 @@ struct BenchCase {
     params: &'static [f64],
     /// True when a committed test pins the Rust output byte-for-byte against the
     /// C++ reference at this size (see the `byte_verified` note on `BENCH_CASES`).
-    /// When false, the two renderers draw the same scene and match visually, but
-    /// no byte-compare test yet guarantees identical output.
+    /// Every benchmarked demo is currently byte-verified.
     byte_verified: bool,
 }
 
@@ -226,40 +235,42 @@ struct BenchCase {
 /// (e.g. compositing2 600x400, lion_outline 512x512, flash_rasterizer 655x520).
 ///
 /// The Rust-only demos (`compositing`, `truetype_test`) are intentionally
-/// excluded so every row benchmarks the same scene on both sides. `byte_verified`
-/// marks the subset whose Rust output is pinned **byte-for-byte** against the C++
-/// reference by a committed test:
-///   - `lion_outline`, `conv_dash_marker`, `rasterizers2` — via
-///     `tools/pixel-compare/tests/*_reference.rs`
+/// excluded so every row benchmarks the same scene on both sides. Every demo
+/// below has `byte_verified: true`: its Rust output is pinned **byte-for-byte**
+/// against the C++ reference by a committed test:
+///   - `simple_line`, `lion_outline`, `rasterizers2`, `conv_dash_marker`,
+///     `perspective`, `image_perspective`, `image_transforms`, `image_filters`
+///     — via `tools/pixel-compare/tests/*_reference.rs`
 ///   - `compositing2`, `flash_rasterizer`, `flash_rasterizer2` — via the
 ///     reference checks in `src/render/mod.rs`
 ///
-/// The remaining cases (`simple_line`, `perspective`, `image_perspective`,
-/// `image_transforms`, `image_filters`) render the same scene on both sides and
-/// match visually, but are not yet pinned by a byte-compare test. Adding a demo
-/// later is a one-line change here.
+/// Adding a demo later is a one-line change here.
 const BENCH_CASES: &[BenchCase] = &[
-    BenchCase { name: "simple_line", width: 512, height: 512, params: &[], byte_verified: false },
+    BenchCase { name: "simple_line", width: 512, height: 512, params: &[], byte_verified: true },
     BenchCase { name: "lion_outline", width: 512, height: 512, params: &[], byte_verified: true },
     BenchCase { name: "rasterizers2", width: 500, height: 450, params: &[], byte_verified: true },
     BenchCase { name: "conv_dash_marker", width: 500, height: 330, params: &[], byte_verified: true },
-    BenchCase { name: "perspective", width: 600, height: 600, params: &[], byte_verified: false },
-    BenchCase { name: "image_perspective", width: 600, height: 600, params: &[], byte_verified: false },
-    BenchCase { name: "image_transforms", width: 430, height: 340, params: &[], byte_verified: false },
-    BenchCase { name: "image_filters", width: 430, height: 340, params: &[], byte_verified: false },
+    BenchCase { name: "perspective", width: 600, height: 600, params: &[], byte_verified: true },
+    BenchCase { name: "image_perspective", width: 600, height: 600, params: &[], byte_verified: true },
+    BenchCase { name: "image_transforms", width: 430, height: 340, params: &[], byte_verified: true },
+    BenchCase { name: "image_filters", width: 430, height: 340, params: &[], byte_verified: true },
     BenchCase { name: "compositing2", width: 600, height: 400, params: &[], byte_verified: true },
     BenchCase { name: "flash_rasterizer", width: 655, height: 520, params: &[], byte_verified: true },
     BenchCase { name: "flash_rasterizer2", width: 655, height: 520, params: &[], byte_verified: true },
 ];
 
-/// Result of benchmarking one demo on both sides. `cpp_median` is `None` when
-/// the C++ subprocess failed or produced unparseable output for that demo.
+/// Result of benchmarking one demo on both sides. The `cpp_*` fields are `None`
+/// when the C++ subprocess failed or produced unparseable output for that demo.
+/// `best` and `median` are computed from the same per-iteration samples on each
+/// side, so the two ratios are directly comparable.
 struct BenchOutcome {
     name: &'static str,
     width: u32,
     height: u32,
     byte_verified: bool,
+    rust_best: f64,
     rust_median: f64,
+    cpp_best: Option<f64>,
     cpp_median: Option<f64>,
     error: Option<String>,
 }
@@ -330,7 +341,9 @@ fn cmd_bench_compare(args: &[String]) {
                 width: case.width,
                 height: case.height,
                 byte_verified: case.byte_verified,
+                rust_best: f64::NAN,
                 rust_median: f64::NAN,
+                cpp_best: None,
                 cpp_median: None,
                 error: Some("Rust renderer missing".to_string()),
             });
@@ -346,15 +359,17 @@ fn cmd_bench_compare(args: &[String]) {
             iters,
             false,
         );
+        let rust_best = best_ms(&rust_times);
         let rust_median = median_ms(&rust_times);
 
         // C++ side: run the `agg-render bench` subprocess and parse its per-iter
-        // lines. On any failure, keep the Rust number and mark the row failed.
-        let (cpp_median, error) = match run_cpp_bench(&cpp_exe, case, iters) {
-            Ok(cpp_times) => (Some(median_ms(&cpp_times)), None),
+        // lines. Best and median come from the same samples as the Rust side. On
+        // any failure, keep the Rust numbers and mark the row failed.
+        let (cpp_best, cpp_median, error) = match run_cpp_bench(&cpp_exe, case, iters) {
+            Ok(cpp_times) => (Some(best_ms(&cpp_times)), Some(median_ms(&cpp_times)), None),
             Err(e) => {
                 eprintln!("    C++ bench failed for '{}': {e}", case.name);
-                (None, Some(e))
+                (None, None, Some(e))
             }
         };
 
@@ -363,7 +378,9 @@ fn cmd_bench_compare(args: &[String]) {
             width: case.width,
             height: case.height,
             byte_verified: case.byte_verified,
+            rust_best,
             rust_median,
+            cpp_best,
             cpp_median,
             error,
         });
@@ -491,26 +508,29 @@ fn render_benchmark_doc(
 `pixel-compare`) and the original AGG 2.6 C++ library (the `agg-render` \
 subprocess). Timings cover **the render call only** — no process startup, asset \
 loading, or file I/O is included. Each side runs the same number of untimed \
-warmup iterations followed by the same number of timed iterations, and the \
-median of the per-iteration samples is reported (medians resist outliers from \
-OS scheduling jitter). Both sides render at identical sizes with identical \
-parameters.\n\n",
+warmup iterations followed by the same number of timed iterations. From those \
+per-iteration samples both the **best (minimum)** and the **median** are \
+reported, computed identically on both sides. **Compare best-of first** — the \
+fastest run is the least contaminated by OS scheduling jitter, so it is the \
+primary signal; the median is a secondary sanity check that resists outliers. \
+Single runs are noise, and differences below roughly ±2 ms are at or under the \
+measurement floor on this machine. Both sides render at identical sizes with \
+identical parameters.\n\n",
     );
     s.push_str(
-        "Critically, both renderers draw **the same scene** at the same size. For \
-the demos marked byte-identical in the table below, a committed pixel-compare \
+        "Critically, both renderers draw **the same scene** at the same size. \
+Every demo in the table below is byte-identical: a committed pixel-compare \
 reference test pins the Rust output byte-for-byte against the C++ output, so \
-their speed difference reflects the implementation rather than a difference in \
-what is drawn. The remaining demos render the same scene and match visually, but \
-are not yet pinned by a byte-compare test.\n\n",
+each speed difference reflects the implementation rather than a difference in \
+what is drawn.\n\n",
     );
 
     s.push_str("## Results\n\n");
     s.push_str(&render_results_table(outcomes));
     s.push_str(
-        "\nThe **Byte-identical** column marks demos whose Rust output is pinned \
-byte-for-byte against the C++ reference by a committed test. A `—` means the \
-scene matches visually but is not yet covered by a byte-compare test.\n",
+        "\nThe **Byte-identical** column records, per row, that the demo's Rust \
+output is pinned byte-for-byte against the C++ reference by a committed test — \
+the invariant that makes each timing an apples-to-apples comparison.\n\n",
     );
 
     s.push_str("## Regenerating\n\n");
@@ -530,36 +550,60 @@ scene matches visually but is not yet covered by a byte-compare test.\n",
 }
 
 /// Render just the results table (also inlined into the README).
+///
+/// Best-of columns come first (per the project's benchmark methodology: the
+/// fastest run is the least contaminated by OS jitter, so best-of is the primary
+/// comparison and medians are the secondary sanity check). Both `best` and
+/// `median` are computed from the same per-iteration samples on each side, so the
+/// two ratios are directly comparable.
 fn render_results_table(outcomes: &[BenchOutcome]) -> String {
     let mut s = String::new();
-    s.push_str("| Demo | Size | Byte-identical | C++ median (ms) | Rust median (ms) | Rust / C++ |\n");
-    s.push_str("|------|------|----------------|-----------------|------------------|------------|\n");
+    s.push_str("| Demo | Size | Byte-identical | C++ best (ms) | Rust best (ms) | Best Rust / C++ | C++ median (ms) | Rust median (ms) | Median Rust / C++ |\n");
+    s.push_str("|------|------|----------------|---------------|----------------|-----------------|-----------------|------------------|-------------------|\n");
     for o in outcomes {
         let size = format!("{}x{}", o.width, o.height);
         let verified = if o.byte_verified { "yes" } else { "—" };
-        match (o.cpp_median, &o.error) {
-            (Some(cpp), _) => {
-                // Guard against a zero C++ median: the ratio would be inf/NaN.
-                let ratio = if cpp > 0.0 {
-                    format!("{:.2}x", o.rust_median / cpp)
+        match (o.cpp_best, o.cpp_median, &o.error) {
+            (Some(cpp_best), Some(cpp_median), _) => {
+                // Guard against a zero C++ time: the ratio would be inf/NaN.
+                let best_ratio = if cpp_best > 0.0 {
+                    format!("{:.2}x", o.rust_best / cpp_best)
+                } else {
+                    "n/a".to_string()
+                };
+                let median_ratio = if cpp_median > 0.0 {
+                    format!("{:.2}x", o.rust_median / cpp_median)
                 } else {
                     "n/a".to_string()
                 };
                 s.push_str(&format!(
-                    "| {} | {} | {} | {:.2} | {:.2} | {} |\n",
-                    o.name, size, verified, cpp, o.rust_median, ratio
+                    "| {} | {} | {} | {:.2} | {:.2} | {} | {:.2} | {:.2} | {} |\n",
+                    o.name,
+                    size,
+                    verified,
+                    cpp_best,
+                    o.rust_best,
+                    best_ratio,
+                    cpp_median,
+                    o.rust_median,
+                    median_ratio
                 ));
             }
-            (None, err) => {
-                let rust = if o.rust_median.is_nan() {
+            (_, _, err) => {
+                let rust_best = if o.rust_best.is_nan() {
+                    "FAILED".to_string()
+                } else {
+                    format!("{:.2}", o.rust_best)
+                };
+                let rust_median = if o.rust_median.is_nan() {
                     "FAILED".to_string()
                 } else {
                     format!("{:.2}", o.rust_median)
                 };
                 let note = err.as_deref().unwrap_or("failed");
                 s.push_str(&format!(
-                    "| {} | {} | {} | FAILED ({}) | {} | - |\n",
-                    o.name, size, verified, note, rust
+                    "| {} | {} | {} | FAILED ({}) | {} | - | FAILED ({}) | {} | - |\n",
+                    o.name, size, verified, note, rust_best, note, rust_median
                 ));
             }
         }
@@ -879,7 +923,7 @@ fn cmd_verify(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        median_ms, parse_cpp_bench_output, params_suffix, time_render_loop, BENCH_CASES,
+        best_ms, median_ms, parse_cpp_bench_output, params_suffix, time_render_loop, BENCH_CASES,
     };
 
     #[test]
@@ -890,6 +934,21 @@ mod tests {
     #[test]
     fn median_even_count_averages_two_middle() {
         assert_eq!(median_ms(&[4.0, 1.0, 3.0, 2.0]), 2.5);
+    }
+
+    #[test]
+    fn best_is_the_minimum_sample() {
+        assert_eq!(best_ms(&[3.0, 1.0, 2.0]), 1.0);
+        assert_eq!(best_ms(&[5.0]), 5.0);
+    }
+
+    /// Every benchmarked demo is pinned byte-for-byte against the C++ reference;
+    /// a regressed flag would silently reintroduce the "unverified" hedging.
+    #[test]
+    fn all_bench_cases_are_byte_verified() {
+        for c in BENCH_CASES {
+            assert!(c.byte_verified, "BENCH_CASES demo '{}' is not byte_verified", c.name);
+        }
     }
 
     #[test]
