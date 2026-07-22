@@ -69,7 +69,13 @@ struct PremulRgba {
 
 impl PremulRgba {
     /// Read from u8 pixel buffer as premultiplied f64, scaled by cover.
-    #[inline]
+    ///
+    /// `#[inline(always)]`: this sits at the innermost point of every span blend
+    /// loop. Forcing it (and the sibling get/set helpers) to inline lets the
+    /// compiler keep the four f64 channels in XMM registers across the whole blend
+    /// and coalesce the byte loads/stores — the codegen shape MSVC gets on the C++
+    /// raw-pointer walk.
+    #[inline(always)]
     fn get(r: u8, g: u8, b: u8, a: u8, cover: u8) -> Self {
         if cover == 0 {
             return Self {
@@ -95,15 +101,19 @@ impl PremulRgba {
         c
     }
 
-    /// Read from pixel buffer slice (RGBA order) as premultiplied f64.
-    #[inline]
-    fn get_pix(p: &[u8], cover: u8) -> Self {
+    /// Read from a 4-byte pixel (RGBA order) as premultiplied f64.
+    ///
+    /// Taking `&[u8; 4]` (rather than `&[u8]`) makes all four indices provably in
+    /// bounds, so the reads compile to one 32-bit load instead of four
+    /// bounds-checked byte loads.
+    #[inline(always)]
+    fn get_pix(p: &[u8; 4], cover: u8) -> Self {
         Self::get(p[0], p[1], p[2], p[3], cover)
     }
 
-    /// Write premultiplied f64 back to pixel buffer.
-    #[inline]
-    fn set(p: &mut [u8], c: &PremulRgba) {
+    /// Write premultiplied f64 back to a 4-byte pixel.
+    #[inline(always)]
+    fn set(p: &mut [u8; 4], c: &PremulRgba) {
         p[0] = Rgba8::from_double(c.r);
         p[1] = Rgba8::from_double(c.g);
         p[2] = Rgba8::from_double(c.b);
@@ -111,8 +121,8 @@ impl PremulRgba {
     }
 
     /// Write direct RGBA values.
-    #[inline]
-    fn set_rgba(p: &mut [u8], r: u8, g: u8, b: u8, a: u8) {
+    #[inline(always)]
+    fn set_rgba(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8) {
         p[0] = r;
         p[1] = g;
         p[2] = b;
@@ -143,7 +153,7 @@ impl PremulRgba {
 /// Source colors are NON-premultiplied; this function premultiplies them
 /// before dispatching (matching C++ `comp_op_adaptor_rgba`).
 #[inline]
-fn comp_op_blend(op: CompOp, p: &mut [u8], sr: u8, sg: u8, sb: u8, sa: u8, cover: u8) {
+fn comp_op_blend(op: CompOp, p: &mut [u8; 4], sr: u8, sg: u8, sb: u8, sa: u8, cover: u8) {
     // Premultiply source by alpha (matching comp_op_adaptor_rgba)
     let r = Rgba8::multiply(sr, sa);
     let g = Rgba8::multiply(sg, sa);
@@ -180,8 +190,8 @@ fn comp_op_blend(op: CompOp, p: &mut [u8], sr: u8, sg: u8, sb: u8, sa: u8, cover
 }
 
 // ---- Clear: Dca' = 0, Da' = 0
-#[inline]
-fn blend_clear(p: &mut [u8], cover: u8) {
+#[inline(always)]
+fn blend_clear(p: &mut [u8; 4], cover: u8) {
     if cover >= 255 {
         p[0] = 0;
         p[1] = 0;
@@ -194,8 +204,8 @@ fn blend_clear(p: &mut [u8], cover: u8) {
 }
 
 // ---- Src: Dca' = Sca, Da' = Sa
-#[inline]
-fn blend_src(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_src(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     if cover >= 255 {
         PremulRgba::set_rgba(p, r, g, b, a);
     } else {
@@ -222,21 +232,28 @@ fn blend_src(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 // shape overlaps an already-composited (difference) shape. Match the fixed-point
 // path to stay byte-identical. The incoming (r, g, b, a) are already the
 // premultiplied source from `comp_op_blend`.
-#[inline]
-fn blend_src_over(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_src_over(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let cr = Rgba8::mult_cover(r, cover);
     let cg = Rgba8::mult_cover(g, cover);
     let cb = Rgba8::mult_cover(b, cover);
     let ca = Rgba8::mult_cover(a, cover);
-    p[0] = Rgba8::prelerp(p[0], cr, ca);
-    p[1] = Rgba8::prelerp(p[1], cg, ca);
-    p[2] = Rgba8::prelerp(p[2], cb, ca);
-    p[3] = Rgba8::prelerp(p[3], ca, ca);
+    // Load the 4 destination bytes once and store once. Each prelerp still reads
+    // the ORIGINAL channel value (writes never feed a later read here), so this is
+    // bit-identical to the per-channel read-modify-write while giving the compiler
+    // a single 32-bit load and store to schedule.
+    let d = *p;
+    *p = [
+        Rgba8::prelerp(d[0], cr, ca),
+        Rgba8::prelerp(d[1], cg, ca),
+        Rgba8::prelerp(d[2], cb, ca),
+        Rgba8::prelerp(d[3], ca, ca),
+    ];
 }
 
 // ---- DstOver: Dca' = Dca + Sca.(1 - Da)
-#[inline]
-fn blend_dst_over(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_dst_over(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255);
     let d1a = 1.0 - d.a;
@@ -248,8 +265,8 @@ fn blend_dst_over(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- SrcIn: Dca' = Sca.Da
-#[inline]
-fn blend_src_in(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_src_in(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let da = Rgba8::to_double(p[3]);
     if da > 0.0 {
         let s = PremulRgba::get(r, g, b, a, cover);
@@ -263,8 +280,8 @@ fn blend_src_in(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- DstIn: Dca' = Dca.Sa
-#[inline]
-fn blend_dst_in(p: &mut [u8], a: u8, cover: u8) {
+#[inline(always)]
+fn blend_dst_in(p: &mut [u8; 4], a: u8, cover: u8) {
     let sa = Rgba8::to_double(a);
     let mut d = PremulRgba::get_pix(p, 255 - cover);
     let d2 = PremulRgba::get_pix(p, cover);
@@ -276,8 +293,8 @@ fn blend_dst_in(p: &mut [u8], a: u8, cover: u8) {
 }
 
 // ---- SrcOut: Dca' = Sca.(1 - Da)
-#[inline]
-fn blend_src_out(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_src_out(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255 - cover);
     let d1a = 1.0 - Rgba8::to_double(p[3]);
@@ -289,8 +306,8 @@ fn blend_src_out(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- DstOut: Dca' = Dca.(1 - Sa)
-#[inline]
-fn blend_dst_out(p: &mut [u8], a: u8, cover: u8) {
+#[inline(always)]
+fn blend_dst_out(p: &mut [u8; 4], a: u8, cover: u8) {
     let mut d = PremulRgba::get_pix(p, 255 - cover);
     let dc = PremulRgba::get_pix(p, cover);
     let s1a = 1.0 - Rgba8::to_double(a);
@@ -302,8 +319,8 @@ fn blend_dst_out(p: &mut [u8], a: u8, cover: u8) {
 }
 
 // ---- SrcAtop: Dca' = Sca.Da + Dca.(1 - Sa), Da' = Da
-#[inline]
-fn blend_src_atop(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_src_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255);
     let s1a = 1.0 - s.a;
@@ -322,8 +339,8 @@ fn blend_src_atop(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- DstAtop: Dca' = Dca.Sa + Sca.(1 - Da), Da' = Sa
-#[inline]
-fn blend_dst_atop(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_dst_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let sc = PremulRgba::get(r, g, b, a, cover);
     let dc = PremulRgba::get_pix(p, cover);
     let mut d = PremulRgba::get_pix(p, 255 - cover);
@@ -337,8 +354,8 @@ fn blend_dst_atop(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Xor: Dca' = Sca.(1 - Da) + Dca.(1 - Sa)
-#[inline]
-fn blend_xor(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_xor(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255);
     let s1a = 1.0 - s.a;
@@ -351,8 +368,8 @@ fn blend_xor(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Plus: Dca' = Sca + Dca (clamped)
-#[inline]
-fn blend_plus(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_plus(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -366,8 +383,8 @@ fn blend_plus(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Minus: Dca' = Dca - Sca (clamped)
-#[inline]
-fn blend_minus(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_minus(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -381,8 +398,8 @@ fn blend_minus(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Multiply: Dca' = Sca.Dca + Sca.(1 - Da) + Dca.(1 - Sa)
-#[inline]
-fn blend_multiply(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_multiply(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -398,8 +415,8 @@ fn blend_multiply(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Screen: Dca' = Sca + Dca - Sca.Dca
-#[inline]
-fn blend_screen(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_screen(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -422,8 +439,8 @@ fn overlay_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1a: 
     }
 }
 
-#[inline]
-fn blend_overlay(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_overlay(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -440,8 +457,8 @@ fn blend_overlay(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Darken: min(Sca.Da, Dca.Sa) + Sca.(1 - Da) + Dca.(1 - Sa)
-#[inline]
-fn blend_darken(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_darken(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -457,8 +474,8 @@ fn blend_darken(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Lighten: max(Sca.Da, Dca.Sa) + Sca.(1 - Da) + Dca.(1 - Sa)
-#[inline]
-fn blend_lighten(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_lighten(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -485,8 +502,8 @@ fn color_dodge_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s
     }
 }
 
-#[inline]
-fn blend_color_dodge(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_color_dodge(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -518,8 +535,8 @@ fn color_burn_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1
     }
 }
 
-#[inline]
-fn blend_color_burn(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_color_burn(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -549,8 +566,8 @@ fn hard_light_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1
     }
 }
 
-#[inline]
-fn blend_hard_light(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_hard_light(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -583,8 +600,8 @@ fn soft_light_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1
     }
 }
 
-#[inline]
-fn blend_soft_light(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_soft_light(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -605,8 +622,8 @@ fn blend_soft_light(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Difference: Dca' = Sca + Dca - 2.min(Sca.Da, Dca.Sa)
-#[inline]
-fn blend_difference(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_difference(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -620,8 +637,8 @@ fn blend_difference(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 }
 
 // ---- Exclusion: (Sca.Da + Dca.Sa - 2.Sca.Dca) + Sca.(1 - Da) + Dca.(1 - Sa)
-#[inline]
-fn blend_exclusion(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+#[inline(always)]
+fn blend_exclusion(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -634,6 +651,127 @@ fn blend_exclusion(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
         PremulRgba::clip(&mut d);
         PremulRgba::set(p, &d);
     }
+}
+
+// ============================================================================
+// Span-level compositing dispatch
+// ============================================================================
+
+/// Dispatch on the compositing op ONCE per span, binding `$blend` to a per-op
+/// closure so the span loop in `$body` is monomorphized for that single op.
+///
+/// This mirrors the C++ template structure
+/// (`pixfmt_custom_blend_rgba<comp_op_adaptor_rgba<...>>`), where the blend
+/// function is a compile-time type: the inner loop compiles to a tight, fully
+/// inlined sequence instead of re-dispatching a 25-way runtime `match` on every
+/// pixel. The per-pixel `comp_op_blend` path (used by `blend_pixel`) still exists
+/// unchanged for the single-pixel case.
+///
+/// `Dst` expands to nothing: it ignores every source value, so skipping both the
+/// premultiply and the entire loop cannot change output — the C++ counterpart
+/// `comp_op_rgba_dst::blend_pix` has an empty body.
+macro_rules! comp_op_span {
+    ($op:expr, |$blend:ident| $body:block) => {
+        match $op {
+            CompOp::Clear => {
+                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, _a: u8, cover: u8| blend_clear(p, cover);
+                $body
+            }
+            CompOp::Src => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Dst => {}
+            CompOp::SrcOver => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_over(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::DstOver => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_dst_over(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::SrcIn => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_in(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::DstIn => {
+                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, a: u8, cover: u8| blend_dst_in(p, a, cover);
+                $body
+            }
+            CompOp::SrcOut => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_out(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::DstOut => {
+                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, a: u8, cover: u8| blend_dst_out(p, a, cover);
+                $body
+            }
+            CompOp::SrcAtop => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_atop(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::DstAtop => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_dst_atop(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Xor => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_xor(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Plus => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_plus(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Minus => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_minus(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Multiply => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_multiply(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Screen => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_screen(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Overlay => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_overlay(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Darken => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_darken(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Lighten => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_lighten(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::ColorDodge => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_color_dodge(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::ColorBurn => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_color_burn(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::HardLight => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_hard_light(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::SoftLight => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_soft_light(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Difference => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_difference(p, r, g, b, a, cover);
+                $body
+            }
+            CompOp::Exclusion => {
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_exclusion(p, r, g, b, a, cover);
+                $body
+            }
+        }
+    };
 }
 
 // ============================================================================
@@ -749,7 +887,8 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
         };
         let off = x as usize * BPP;
-        comp_op_blend(self.comp_op, &mut row[off..off + BPP], c.r, c.g, c.b, c.a, cover);
+        let px: &mut [u8; 4] = (&mut row[off..off + BPP]).try_into().unwrap();
+        comp_op_blend(self.comp_op, px, c.r, c.g, c.b, c.a, cover);
     }
 
     fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, cover: CoverType) {
@@ -757,10 +896,23 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let ptr = self.rbuf.row_ptr(y);
             std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
         };
-        for i in 0..len as usize {
-            let off = (x as usize + i) * BPP;
-            comp_op_blend(self.comp_op, &mut row[off..off + BPP], c.r, c.g, c.b, c.a, cover);
-        }
+        // Slice the span once so the inner loop carries no per-pixel bounds checks
+        // or index arithmetic — the C++ path walks a raw pointer here.
+        let span = &mut row[x as usize * BPP..(x as usize + len as usize) * BPP];
+        comp_op_span!(self.comp_op, |blend| {
+            // Colour and cover are constant across the span, so the premultiply is
+            // loop-invariant (byte-identical to premultiplying per pixel).
+            let r = Rgba8::multiply(c.r, c.a);
+            let g = Rgba8::multiply(c.g, c.a);
+            let b = Rgba8::multiply(c.b, c.a);
+            let a = c.a;
+            // Iterate fixed [u8; 4] pixels so each blend sees a bounds-check-free
+            // 4-byte array, letting the load/compute/store stay in XMM registers.
+            let (pixels, _rem) = span.as_chunks_mut::<BPP>();
+            for px in pixels {
+                blend(px, r, g, b, a, cover);
+            }
+        });
     }
 
     fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, covers: &[CoverType]) {
@@ -768,10 +920,18 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let ptr = self.rbuf.row_ptr(y);
             std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
         };
-        for (i, &cov) in covers.iter().enumerate().take(len as usize) {
-            let off = (x as usize + i) * BPP;
-            comp_op_blend(self.comp_op, &mut row[off..off + BPP], c.r, c.g, c.b, c.a, cov);
-        }
+        let span = &mut row[x as usize * BPP..(x as usize + len as usize) * BPP];
+        comp_op_span!(self.comp_op, |blend| {
+            // Solid span: constant colour, so premultiply once outside the loop.
+            let r = Rgba8::multiply(c.r, c.a);
+            let g = Rgba8::multiply(c.g, c.a);
+            let b = Rgba8::multiply(c.b, c.a);
+            let a = c.a;
+            let (pixels, _rem) = span.as_chunks_mut::<BPP>();
+            for (px, &cov) in pixels.iter_mut().zip(covers.iter()) {
+                blend(px, r, g, b, a, cov);
+            }
+        });
     }
 
     fn blend_color_hspan(
@@ -787,12 +947,28 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let ptr = self.rbuf.row_ptr(y);
             std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
         };
-        for i in 0..len as usize {
-            let c = &colors[i];
-            let cov = if !covers.is_empty() { covers[i] } else { cover };
-            let off = (x as usize + i) * BPP;
-            comp_op_blend(self.comp_op, &mut row[off..off + BPP], c.r, c.g, c.b, c.a, cov);
-        }
+        let span = &mut row[x as usize * BPP..(x as usize + len as usize) * BPP];
+        comp_op_span!(self.comp_op, |blend| {
+            // Colour differs per pixel here, so the premultiply must stay per pixel
+            // (matching comp_op_adaptor_rgba). The single outer op-dispatch and the
+            // pre-sliced span are what remove the overhead.
+            let (pixels, _rem) = span.as_chunks_mut::<BPP>();
+            if covers.is_empty() {
+                for (px, c) in pixels.iter_mut().zip(colors.iter()) {
+                    let r = Rgba8::multiply(c.r, c.a);
+                    let g = Rgba8::multiply(c.g, c.a);
+                    let b = Rgba8::multiply(c.b, c.a);
+                    blend(px, r, g, b, c.a, cover);
+                }
+            } else {
+                for ((px, c), &cov) in pixels.iter_mut().zip(colors.iter()).zip(covers.iter()) {
+                    let r = Rgba8::multiply(c.r, c.a);
+                    let g = Rgba8::multiply(c.g, c.a);
+                    let b = Rgba8::multiply(c.b, c.a);
+                    blend(px, r, g, b, c.a, cov);
+                }
+            }
+        });
     }
 }
 

@@ -242,6 +242,7 @@ impl ColorFunction for GradientLut {
         self.lut_size
     }
 
+    #[inline]
     fn get(&self, index: usize) -> Rgba8 {
         self.color_lut[index]
     }
