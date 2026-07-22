@@ -218,6 +218,57 @@ mod demo_smoke_tests {
             assert!(demos.contains(&name), "available_demos missing {name}");
         }
     }
+
+    /// Byte-for-byte compare a `compositing2` render against a committed C++ AGG
+    /// reference `.raw` (8-byte `[width:u32][height:u32]` header + RGBA data).
+    fn assert_compositing2_matches(reference: &[u8], params: &[f64]) {
+        let width = u32::from_le_bytes([reference[0], reference[1], reference[2], reference[3]]);
+        let height = u32::from_le_bytes([reference[4], reference[5], reference[6], reference[7]]);
+        assert_eq!((width, height), (600, 400), "reference dimensions");
+        let cpp = &reference[8..];
+
+        let out = render_demo("compositing2", width, height, params)
+            .expect("compositing2 renderer missing");
+        assert_eq!(out.data.len(), cpp.len(), "buffer length");
+
+        let mut mismatches = 0usize;
+        let mut first: Option<usize> = None;
+        for (i, (r, c)) in out.data.iter().zip(cpp.iter()).enumerate() {
+            if r != c {
+                mismatches += 1;
+                if first.is_none() {
+                    first = Some(i);
+                }
+            }
+        }
+        assert_eq!(
+            mismatches, 0,
+            "compositing2 differs from C++ reference (params={params:?}): \
+             {mismatches} byte(s) differ, first at byte {first:?}",
+        );
+    }
+
+    /// Byte-for-byte regression against the C++ AGG reference render of the
+    /// compositing2 demo (600x400, default params: comp-op src-over, alphas 1.0).
+    #[test]
+    fn compositing2_matches_cpp_reference_600x400() {
+        const REF: &[u8] = include_bytes!("../../../../compositing2_cpp_600x400.raw");
+        assert_compositing2_matches(REF, &[]);
+    }
+
+    /// Byte-for-byte regression at a non-default partial alpha (comp-op src-over,
+    /// src alpha = dst alpha = 0.5). This locks in the color-ramp construction: at
+    /// alpha < 1 the double-precision `rgba::gradient` used by the example/harness
+    /// diverges from the fixed-point `rgba8::gradient` (10 segment-3 ramp entries
+    /// differ, ~12260 output bytes), so this guards against a regression to the
+    /// fixed-point path (the default-params test alone cannot catch it, since the
+    /// two paths coincide at alpha = 1.0).
+    #[test]
+    fn compositing2_matches_cpp_reference_600x400_alpha050() {
+        const REF: &[u8] = include_bytes!("../../../../compositing2_cpp_600x400_alpha050.raw");
+        // params: [comp_op = 3 (src-over), src_alpha = 0.5, dst_alpha = 0.5]
+        assert_compositing2_matches(REF, &[3.0, 0.5, 0.5]);
+    }
 }
 
 fn parse_path_line(line: &str, path: &mut PathStorage) {
