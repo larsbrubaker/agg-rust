@@ -79,6 +79,30 @@ export interface CanvasButton {
 
 export type CanvasControl = CanvasSlider | CanvasScale | CanvasCheckbox | CanvasRadio | CanvasButton;
 
+/**
+ * Index of the radio item whose circle contains (x, y), or -1 if none.
+ *
+ * Mirrors AGG rbox_ctrl per-item hit testing exactly: the click counts only
+ * when it lands inside one of the item circles, independent of the control's
+ * bounding box (the box can be smaller than the stack of items — see
+ * image_filters, whose 17-item rbox overflows its (0,0,110,210) box). Shared by
+ * hitTest and the radio branch of onPointerDown so the two cannot drift.
+ */
+function radioItemAt(ctrl: CanvasRadio, x: number, y: number): number {
+  const textHeight = ctrl.textHeight ?? 9.0;
+  const dy = textHeight * 2.0;
+  const cx = ctrl.x1 + 1.0 + dy / 1.3;
+  const radius = textHeight / 1.5;
+  const ys1 = ctrl.y1 + 1.0;
+  for (let i = 0; i < ctrl.numItems; i++) {
+    const cy = ys1 + dy * i + dy / 1.3;
+    if (Math.hypot(x - cx, y - cy) <= radius) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 // ============================================================================
 // Pointer handler — attach to a canvas, process all registered controls
 // ============================================================================
@@ -98,8 +122,13 @@ export function setupCanvasControls(
     // AGG slider has border_extra = (y2-y1)/2 expanding the hit area
     for (const c of controls) {
       const extra = (c.type === 'slider' || c.type === 'scale') ? (c.y2 - c.y1) / 2 : 0;
-      if (x >= c.x1 - extra && x <= c.x2 + extra &&
-          y >= c.y1 - extra && y <= c.y2 + extra) {
+      const inBox = x >= c.x1 - extra && x <= c.x2 + extra &&
+                    y >= c.y1 - extra && y <= c.y2 + extra;
+      // Radio item circles can extend past the control's bounding box (AGG
+      // rbox_ctrl decides purely by the circle test, with no box gate), so a
+      // click inside any item circle also counts as a hit. In-box clicks that
+      // miss every circle still match here and are swallowed exactly as before.
+      if (inBox || (c.type === 'radio' && radioItemAt(c, x, y) >= 0)) {
         return c;
       }
     }
@@ -207,22 +236,7 @@ export function setupCanvasControls(
     } else if (ctrl.type === 'radio') {
       // Match AGG rbox_ctrl hit testing:
       // click only counts when it's inside an item's radio circle.
-      const textHeight = ctrl.textHeight ?? 9.0;
-      const dy = textHeight * 2.0;
-      const xs1 = ctrl.x1 + 1.0;
-      const ys1 = ctrl.y1 + 1.0;
-      const cx = xs1 + dy / 1.3;
-      const radius = textHeight / 1.5;
-      let picked = -1;
-      for (let i = 0; i < ctrl.numItems; i++) {
-        const cy = ys1 + dy * i + dy / 1.3;
-        const dx = pos.x - cx;
-        const dyClick = pos.y - cy;
-        if (Math.hypot(dx, dyClick) <= radius) {
-          picked = i;
-          break;
-        }
-      }
+      const picked = radioItemAt(ctrl, pos.x, pos.y);
       if (picked >= 0 && ctrl.sidebarEls[picked]) {
         ctrl.sidebarEls[picked].checked = true;
         ctrl.sidebarEls[picked].dispatchEvent(new Event('change'));

@@ -342,6 +342,20 @@ function aggPos(canvas, e, options) {
     y: options.origin === "top-left" ? yTop : canvas.height - yTop
   };
 }
+function radioItemAt(ctrl, x, y) {
+  const textHeight = ctrl.textHeight ?? 9;
+  const dy = textHeight * 2;
+  const cx = ctrl.x1 + 1 + dy / 1.3;
+  const radius = textHeight / 1.5;
+  const ys1 = ctrl.y1 + 1;
+  for (let i = 0;i < ctrl.numItems; i++) {
+    const cy = ys1 + dy * i + dy / 1.3;
+    if (Math.hypot(x - cx, y - cy) <= radius) {
+      return i;
+    }
+  }
+  return -1;
+}
 function setupCanvasControls(canvas, controls, redraw, options = {}) {
   let activeSlider = null;
   let activeScale = null;
@@ -350,7 +364,8 @@ function setupCanvasControls(canvas, controls, redraw, options = {}) {
   function hitTest(x, y) {
     for (const c of controls) {
       const extra = c.type === "slider" || c.type === "scale" ? (c.y2 - c.y1) / 2 : 0;
-      if (x >= c.x1 - extra && x <= c.x2 + extra && y >= c.y1 - extra && y <= c.y2 + extra) {
+      const inBox = x >= c.x1 - extra && x <= c.x2 + extra && y >= c.y1 - extra && y <= c.y2 + extra;
+      if (inBox || c.type === "radio" && radioItemAt(c, x, y) >= 0) {
         return c;
       }
     }
@@ -454,22 +469,7 @@ function setupCanvasControls(canvas, controls, redraw, options = {}) {
       e.stopPropagation();
       e.preventDefault();
     } else if (ctrl.type === "radio") {
-      const textHeight = ctrl.textHeight ?? 9;
-      const dy = textHeight * 2;
-      const xs1 = ctrl.x1 + 1;
-      const ys1 = ctrl.y1 + 1;
-      const cx = xs1 + dy / 1.3;
-      const radius = textHeight / 1.5;
-      let picked = -1;
-      for (let i = 0;i < ctrl.numItems; i++) {
-        const cy = ys1 + dy * i + dy / 1.3;
-        const dx = pos.x - cx;
-        const dyClick = pos.y - cy;
-        if (Math.hypot(dx, dyClick) <= radius) {
-          picked = i;
-          break;
-        }
-      }
+      const picked = radioItemAt(ctrl, pos.x, pos.y);
       if (picked >= 0 && ctrl.sidebarEls[picked]) {
         ctrl.sidebarEls[picked].checked = true;
         ctrl.sidebarEls[picked].dispatchEvent(new Event("change"));
@@ -8135,4 +8135,4 @@ async function navigate(route) {
 window.addEventListener("hashchange", () => navigate(getRoute()));
 navigate(getRoute());
 
-//# debugId=7A0E432630BB7D6364756E2164756E21
+//# debugId=F80DA71CEF910A3C64756E2164756E21
