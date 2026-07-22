@@ -2,7 +2,7 @@
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 [![Crates.io](https://img.shields.io/crates/v/agg-rust.svg)](https://crates.io/crates/agg-rust)
-[![Tests](https://img.shields.io/badge/tests-990_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-994_passing-brightgreen.svg)](#)
 [![Modules](https://img.shields.io/badge/modules-88_ported-brightgreen.svg)](#)
 [![Demos](https://img.shields.io/badge/demos-64_interactive-orange.svg)](https://larsbrubaker.github.io/agg-rust/)
 
@@ -130,7 +130,7 @@ render_scanlines_aa_solid(&mut ras, &mut sl, &mut ren_base, &Rgba8::new(200, 80,
 
 ```bash
 cargo build
-cargo test                    # 990 tests
+cargo test --workspace --all-features   # 994 tests
 cargo clippy -- -D warnings
 ```
 
@@ -147,14 +147,14 @@ Then open `http://localhost:3000` in your browser.
 
 ## Project Status & Goals
 
-AGG.rs began as a strict, byte-for-byte port of AGG 2.6: all 88 core library modules are ported, all 64 applicable demos run via WebAssembly, and 990 tests pass. The byte-identity of the rendering pipeline is locked by the reference-test suite — the **Byte-identical** column in the [benchmarks](#benchmarks) below is the proof, with every benchmarked demo matching the C++ output exactly. That port is complete.
+AGG.rs began as a strict, byte-for-byte port of AGG 2.6: all 88 core library modules are ported, all 64 applicable demos run via WebAssembly, and 994 tests pass. The byte-identity of the rendering pipeline is locked by the reference-test suite — the **Byte-identical** column in the [benchmarks](#benchmarks) below is the proof, with every benchmarked demo matching the C++ output exactly. That port is complete.
 
 The project is now **beyond the port**: new features, Rust-idiomatic APIs, performance work, and bug fixes are all welcome. C++ behavioral matching remains the default baseline. A deliberate divergence is allowed only to fix a demonstrable bug inherited from the C++ original, and it must be documented in the code and locked with a regression test (see the gradient-LUT off-by-one fix in `src/gradient_lut.rs` for the model). Contributions that clear that bar — a real-world use case, tests proving correctness, and clean idiomatic design — are exactly the kind the project wants. Performance is an active goal: the benchmark table shows where each demo stands against C++ today.
 
 | Metric | Value |
 |--------|-------|
 | Core modules ported | 88 |
-| Tests passing | 990 |
+| Tests passing | 994 |
 | Interactive demos | 64 |
 | External dependencies | 0 |
 | GPU dependencies | 0 |
