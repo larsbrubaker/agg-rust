@@ -9,7 +9,7 @@
 use pixel_compare::{
     compare_buffers, generate_diff_image, generate_sidebyside, load_image, save_image,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
 fn main() {
@@ -213,6 +213,13 @@ fn cmd_verify(args: &[String]) {
 
     let suffix = params_suffix(&params);
 
+    // Scratch/inspection files go under target/pixel-compare/ rather than the
+    // CWD: the repo root holds committed golden .raw references (embedded via
+    // include_bytes! in the regression tests), and writing here would silently
+    // overwrite them.
+    let out_dir = PathBuf::from("target").join("pixel-compare");
+    std::fs::create_dir_all(&out_dir).expect("Failed to create output directory");
+
     // 1. Render Rust version
     println!("Rendering Rust '{}'...", demo);
     let rust_buf = pixel_compare::render::render_demo(demo, width, height, &params)
@@ -222,19 +229,19 @@ fn cmd_verify(args: &[String]) {
         });
 
     // Save Rust output for inspection
-    let rust_path = format!("{}_rust_{}x{}{}.bmp", demo, width, height, suffix);
-    save_image(Path::new(&rust_path), &rust_buf).expect("Failed to save Rust output");
-    println!("  Saved Rust output: {}", rust_path);
+    let rust_path = out_dir.join(format!("{}_rust_{}x{}{}.bmp", demo, width, height, suffix));
+    save_image(&rust_path, &rust_buf).expect("Failed to save Rust output");
+    println!("  Saved Rust output: {}", rust_path.display());
 
     // 2. Run C++ renderer
-    let cpp_raw_path = format!("{}_cpp_{}x{}{}.raw", demo, width, height, suffix);
+    let cpp_raw_path = out_dir.join(format!("{}_cpp_{}x{}{}.raw", demo, width, height, suffix));
     println!("Rendering C++ '{}'...", demo);
 
     let mut cmd_args = vec![
         demo.clone(),
         width.to_string(),
         height.to_string(),
-        cpp_raw_path.clone(),
+        cpp_raw_path.to_string_lossy().into_owned(),
     ];
     for p in &params {
         cmd_args.push(p.to_string());
@@ -250,15 +257,15 @@ fn cmd_verify(args: &[String]) {
         process::exit(1);
     }
 
-    let cpp_buf = load_image(Path::new(&cpp_raw_path)).expect("Failed to load C++ output");
+    let cpp_buf = load_image(&cpp_raw_path).expect("Failed to load C++ output");
 
     // The headless C++ renderer writes top-down buffers (positive stride),
     // matching Rust's layout, so no row flip is needed here.
 
     // Save C++ output as BMP for inspection
-    let cpp_bmp_path = format!("{}_cpp_{}x{}{}.bmp", demo, width, height, suffix);
-    save_image(Path::new(&cpp_bmp_path), &cpp_buf).expect("Failed to save C++ BMP");
-    println!("  Saved C++ output: {}", cpp_bmp_path);
+    let cpp_bmp_path = out_dir.join(format!("{}_cpp_{}x{}{}.bmp", demo, width, height, suffix));
+    save_image(&cpp_bmp_path, &cpp_buf).expect("Failed to save C++ BMP");
+    println!("  Saved C++ output: {}", cpp_bmp_path.display());
 
     // 3. Compare
     let result = compare_buffers(&rust_buf, &cpp_buf);
@@ -273,9 +280,9 @@ fn cmd_verify(args: &[String]) {
     if !result.identical {
         // Always save side-by-side on failure
         let sbs = generate_sidebyside(&rust_buf, &cpp_buf);
-        let sbs_path = format!("{}_sidebyside_{}x{}{}.bmp", demo, width, height, suffix);
-        save_image(Path::new(&sbs_path), &sbs).expect("Failed to save side-by-side");
-        println!("Side-by-side saved: {}", sbs_path);
+        let sbs_path = out_dir.join(format!("{}_sidebyside_{}x{}{}.bmp", demo, width, height, suffix));
+        save_image(&sbs_path, &sbs).expect("Failed to save side-by-side");
+        println!("Side-by-side saved: {}", sbs_path.display());
 
         // Print histogram of differences
         println!("\nDifference histogram:");
