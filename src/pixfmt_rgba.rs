@@ -328,6 +328,245 @@ impl<'a> PixelFormat for PixfmtRgba32<'a> {
 }
 
 // ============================================================================
+// PixfmtRgba32Pre — premultiplied RGBA, 8 bits per channel
+// ============================================================================
+
+/// Pixel format for premultiplied RGBA32 (4 bytes per pixel).
+///
+/// Port of C++ `pixfmt_alpha_blend_rgba<blender_rgba_pre, rendering_buf>`
+/// (a.k.a. `pixfmt_rgba32_pre`). Component order: R=0, G=1, B=2, A=3.
+///
+/// Blending uses the premultiplied form of Alvy-Ray Smith's compositing
+/// function (`prelerp`) rather than the straight-alpha `lerp` used by
+/// [`PixfmtRgba32`]. The two produce slightly different rounding: `lerp`
+/// rounds a single `(q - p) * a` term, while the premultiplied path rounds
+/// `mult_cover(...)` and `multiply(...)` independently, which can differ by
+/// one least-significant bit. The C++ `rasterizers2` demo draws into a
+/// `*_pre` pixel format, so matching it byte-for-byte requires this format.
+///
+/// Note that for an opaque backdrop the alpha channel is preserved at 255:
+/// `prelerp(255, a, a) == 255` for all `a`, so this format keeps a fully
+/// opaque buffer opaque, matching the RGB (`bgr24_pre`) reference output.
+pub struct PixfmtRgba32Pre<'a> {
+    rbuf: &'a mut RowAccessor,
+}
+
+impl<'a> PixfmtRgba32Pre<'a> {
+    pub fn new(rbuf: &'a mut RowAccessor) -> Self {
+        Self { rbuf }
+    }
+
+    /// Clear the entire buffer to a solid color.
+    pub fn clear(&mut self, c: &Rgba8) {
+        let w = self.rbuf.width();
+        let h = self.rbuf.height();
+        for y in 0..h {
+            let row = unsafe {
+                let ptr = self.rbuf.row_ptr(y as i32);
+                std::slice::from_raw_parts_mut(ptr, (w as usize) * BPP)
+            };
+            for x in 0..w as usize {
+                let off = x * BPP;
+                row[off] = c.r;
+                row[off + 1] = c.g;
+                row[off + 2] = c.b;
+                row[off + 3] = c.a;
+            }
+        }
+    }
+
+    /// Premultiplied blend of a pixel with already-covered (premultiplied)
+    /// color components. Port of `blender_rgba_pre::blend_pix` (no cover).
+    #[inline]
+    fn blend_pix_pre(p: &mut [u8], cr: u8, cg: u8, cb: u8, alpha: u8) {
+        p[0] = Rgba8::prelerp(p[0], cr, alpha);
+        p[1] = Rgba8::prelerp(p[1], cg, alpha);
+        p[2] = Rgba8::prelerp(p[2], cb, alpha);
+        p[3] = Rgba8::prelerp(p[3], alpha, alpha);
+    }
+
+    /// Premultiplied blend folding a coverage value into the color.
+    /// Port of `blender_rgba_pre::blend_pix` (with cover).
+    #[inline]
+    fn blend_pix_cover(p: &mut [u8], c: &Rgba8, cover: CoverType) {
+        Self::blend_pix_pre(
+            p,
+            Rgba8::mult_cover(c.r, cover),
+            Rgba8::mult_cover(c.g, cover),
+            Rgba8::mult_cover(c.b, cover),
+            Rgba8::mult_cover(c.a, cover),
+        );
+    }
+
+    /// Port of `pixfmt_alpha_blend_rgba::copy_or_blend_pix` (with cover).
+    #[inline]
+    fn copy_or_blend_cover(p: &mut [u8], c: &Rgba8, cover: CoverType) {
+        if c.a != 0 {
+            if c.a == 255 && cover == 255 {
+                p[0] = c.r;
+                p[1] = c.g;
+                p[2] = c.b;
+                p[3] = c.a;
+            } else {
+                Self::blend_pix_cover(p, c, cover);
+            }
+        }
+    }
+
+    /// Port of `pixfmt_alpha_blend_rgba::copy_or_blend_pix` (no cover).
+    #[inline]
+    fn copy_or_blend(p: &mut [u8], c: &Rgba8) {
+        if c.a != 0 {
+            if c.a == 255 {
+                p[0] = c.r;
+                p[1] = c.g;
+                p[2] = c.b;
+                p[3] = c.a;
+            } else {
+                Self::blend_pix_pre(p, c.r, c.g, c.b, c.a);
+            }
+        }
+    }
+}
+
+impl<'a> PixelFormat for PixfmtRgba32Pre<'a> {
+    type ColorType = Rgba8;
+
+    fn width(&self) -> u32 {
+        self.rbuf.width()
+    }
+
+    fn height(&self) -> u32 {
+        self.rbuf.height()
+    }
+
+    fn pixel(&self, x: i32, y: i32) -> Rgba8 {
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        let off = x as usize * BPP;
+        Rgba8::new(
+            row[off] as u32,
+            row[off + 1] as u32,
+            row[off + 2] as u32,
+            row[off + 3] as u32,
+        )
+    }
+
+    fn copy_pixel(&mut self, x: i32, y: i32, c: &Rgba8) {
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        let off = x as usize * BPP;
+        row[off] = c.r;
+        row[off + 1] = c.g;
+        row[off + 2] = c.b;
+        row[off + 3] = c.a;
+    }
+
+    fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8) {
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        for i in 0..len as usize {
+            let off = (x as usize + i) * BPP;
+            row[off] = c.r;
+            row[off + 1] = c.g;
+            row[off + 2] = c.b;
+            row[off + 3] = c.a;
+        }
+    }
+
+    fn blend_pixel(&mut self, x: i32, y: i32, c: &Rgba8, cover: CoverType) {
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        let off = x as usize * BPP;
+        Self::copy_or_blend_cover(&mut row[off..off + BPP], c, cover);
+    }
+
+    fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, cover: CoverType) {
+        if c.a == 0 {
+            return;
+        }
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        if c.a == 255 && cover == 255 {
+            for i in 0..len as usize {
+                let off = (x as usize + i) * BPP;
+                row[off] = c.r;
+                row[off + 1] = c.g;
+                row[off + 2] = c.b;
+                row[off + 3] = c.a;
+            }
+        } else {
+            for i in 0..len as usize {
+                let off = (x as usize + i) * BPP;
+                Self::blend_pix_cover(&mut row[off..off + BPP], c, cover);
+            }
+        }
+    }
+
+    fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, covers: &[CoverType]) {
+        if c.a == 0 {
+            return;
+        }
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        for (i, &cov) in covers.iter().enumerate().take(len as usize) {
+            let off = (x as usize + i) * BPP;
+            if c.a == 255 && cov == 255 {
+                row[off] = c.r;
+                row[off + 1] = c.g;
+                row[off + 2] = c.b;
+                row[off + 3] = c.a;
+            } else {
+                Self::blend_pix_cover(&mut row[off..off + BPP], c, cov);
+            }
+        }
+    }
+
+    fn blend_color_hspan(
+        &mut self,
+        x: i32,
+        y: i32,
+        len: u32,
+        colors: &[Rgba8],
+        covers: &[CoverType],
+        cover: CoverType,
+    ) {
+        let row = unsafe {
+            let ptr = self.rbuf.row_ptr(y);
+            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
+        };
+        if !covers.is_empty() {
+            for i in 0..len as usize {
+                let off = (x as usize + i) * BPP;
+                Self::copy_or_blend_cover(&mut row[off..off + BPP], &colors[i], covers[i]);
+            }
+        } else if cover == 255 {
+            for (i, c) in colors.iter().enumerate().take(len as usize) {
+                let off = (x as usize + i) * BPP;
+                Self::copy_or_blend(&mut row[off..off + BPP], c);
+            }
+        } else {
+            for (i, c) in colors.iter().enumerate().take(len as usize) {
+                let off = (x as usize + i) * BPP;
+                Self::copy_or_blend_cover(&mut row[off..off + BPP], c, cover);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
