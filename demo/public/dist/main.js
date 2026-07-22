@@ -1,11 +1,15 @@
 var __defProp = Object.defineProperty;
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: (newValue) => all[name] = () => newValue
+      set: __exportSetter.bind(all, name)
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -1468,6 +1472,15 @@ var exports_aa_demo = {};
 __export(exports_aa_demo, {
   init: () => init8
 });
+function pointInTriangle2(ax, ay, bx, by, cx, cy, px, py) {
+  const sign = (x1, y1, x2, y2, x3, y3) => (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
+  const d1 = sign(px, py, ax, ay, bx, by);
+  const d2 = sign(px, py, bx, by, cx, cy);
+  const d3 = sign(px, py, cx, cy, ax, ay);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
 function init8(container) {
   const { canvas, sidebar, timeEl } = createDemoLayout(container, "AA Demo", "Anti-aliasing visualization — enlarged pixel view of a triangle.");
   const W = 600, H = 400;
@@ -1499,6 +1512,8 @@ function init8(container) {
     canvas,
     vertices,
     threshold: 10,
+    dragAll: true,
+    dragAllHitTest: (x, y, verts) => pointInTriangle2(verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y, x, y),
     onDrag: draw
   });
   const slPixel = addSlider(sidebar, "Pixel Size", 8, 100, 32, 1, (v) => {
@@ -1619,7 +1634,7 @@ var exports_rasterizers = {};
 __export(exports_rasterizers, {
   init: () => init10
 });
-function pointInTriangle2(ax, ay, bx, by, cx, cy, px, py) {
+function pointInTriangle3(ax, ay, bx, by, cx, cy, px, py) {
   const sign = (x1, y1, x2, y2, x3, y3) => (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
   const d1 = sign(px, py, ax, ay, bx, by);
   const d2 = sign(px, py, bx, by, cx, cy);
@@ -1687,8 +1702,8 @@ function init10(container) {
         return;
       }
     }
-    const inRight = pointInTriangle2(vertices[0].x, vertices[0].y, vertices[1].x, vertices[1].y, vertices[2].x, vertices[2].y, pos.x, pos.y);
-    const inLeft = pointInTriangle2(vertices[0].x - 200, vertices[0].y, vertices[1].x - 200, vertices[1].y, vertices[2].x - 200, vertices[2].y, pos.x, pos.y);
+    const inRight = pointInTriangle3(vertices[0].x, vertices[0].y, vertices[1].x, vertices[1].y, vertices[2].x, vertices[2].y, pos.x, pos.y);
+    const inLeft = pointInTriangle3(vertices[0].x - 200, vertices[0].y, vertices[1].x - 200, vertices[1].y, vertices[2].x - 200, vertices[2].y, pos.x, pos.y);
     if (inRight || inLeft) {
       dx = pos.x - vertices[0].x;
       dy = pos.y - vertices[0].y;
@@ -2736,7 +2751,7 @@ function init21(container) {
       timeDisplay: timeEl
     });
   }
-  function pointInTriangle3(px, py, a, b, c) {
+  function pointInTriangle4(px, py, a, b, c) {
     const v0x = c.x - a.x;
     const v0y = c.y - a.y;
     const v1x = b.x - a.x;
@@ -2759,7 +2774,7 @@ function init21(container) {
     threshold: 10,
     onDrag: draw,
     dragAll: true,
-    dragAllHitTest: (x, y, vs) => pointInTriangle3(x, y, vs[0], vs[1], vs[2])
+    dragAllHitTest: (x, y, vs) => pointInTriangle4(x, y, vs[0], vs[1], vs[2])
   });
   const radioEls = addRadioGroup(sidebar, "Cap Style", ["Butt Cap", "Square Cap", "Round Cap"], 0, (v) => {
     capType = v;
@@ -3156,7 +3171,7 @@ function init26(container) {
   ];
   const alphaValues = [0, 0.2, 0.4, 0.6, 0.8, 1];
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  function pointInTriangle3(px, py, a, b, c) {
+  function pointInTriangle4(px, py, a, b, c) {
     const s = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);
     const t = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
     const u = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
@@ -3241,7 +3256,7 @@ function init26(container) {
         return;
       }
     }
-    if (pointInTriangle3(p.x, p.y, vertices[0], vertices[1], vertices[2])) {
+    if (pointInTriangle4(p.x, p.y, vertices[0], vertices[1], vertices[2])) {
       drag = { kind: "all", dx: p.x - vertices[0].x, dy: p.y - vertices[0].y };
       canvas.setPointerCapture(e.pointerId);
     }
@@ -7536,7 +7551,7 @@ function mapDemoStemToRoute(stem, availableRoutes) {
   return null;
 }
 function rustDemoSourceUrl(route) {
-  return `https://github.com/larsbrubaker/agg-rust/blob/master/demo/src/demos/${route}.ts`;
+  return `https://github.com/larsbrubaker/agg-rust/blob/main/demo/src/demos/${route}.ts`;
 }
 function enhanceDemoTable(container) {
   const content = container.querySelector(".legacy-content");
@@ -8112,4 +8127,4 @@ async function navigate(route) {
 window.addEventListener("hashchange", () => navigate(getRoute()));
 navigate(getRoute());
 
-//# debugId=7C3FF4A508B4E35564756E2164756E21
+//# debugId=AE2108C5FB149CC564756E2164756E21
