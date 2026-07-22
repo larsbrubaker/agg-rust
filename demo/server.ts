@@ -4,7 +4,7 @@
 import { join, extname } from "path";
 import { watch } from "fs";
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const ROOT = join(import.meta.dir, "public");
 const PROJECT_ROOT = join(import.meta.dir, "..");
 
