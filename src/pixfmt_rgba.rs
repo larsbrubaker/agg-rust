@@ -780,4 +780,124 @@ mod tests {
         assert_eq!(p.g, 150);
         assert_eq!(p.b, 200);
     }
+
+    // ------------------------------------------------------------------------
+    // PixfmtRgba32Pre — premultiplied blend paths.
+    //
+    // Expected bytes are computed by hand from the C++ `blender_rgba_pre`
+    // formulas (prelerp / mult_cover / multiply) and hard-coded here as
+    // documented constants, so the test verifies the production code rather
+    // than re-deriving prelerp in Rust.
+    // ------------------------------------------------------------------------
+
+    /// blend_pixel with a partly transparent, cover-folded color.
+    ///
+    /// C++ `blender_rgba_pre::blend_pix(p, c, cover)`:
+    ///   q  = mult_cover(c.rgb, cover); a' = mult_cover(c.a, cover)
+    ///   p  = prelerp(p, q, a')  (alpha channel: prelerp(p.a, a', a'))
+    /// backdrop (10,20,30,255), color (100,200,50,200), cover 128:
+    ///   q=(50,100,25), a'=100  ->  (56,112,43,255)
+    #[test]
+    fn test_pre_blend_pixel_cover_folding() {
+        let (_buf, mut ra) = make_buffer(4, 4);
+        let mut pf = PixfmtRgba32Pre::new(&mut ra);
+        pf.copy_pixel(1, 1, &Rgba8::new(10, 20, 30, 255));
+        pf.blend_pixel(1, 1, &Rgba8::new(100, 200, 50, 200), 128);
+        let p = pf.pixel(1, 1);
+        assert_eq!((p.r, p.g, p.b, p.a), (56, 112, 43, 255));
+    }
+
+    /// blend_pixel opaque color with full cover takes the copy shortcut
+    /// (`c.a == 255 && cover == 255` -> `set`).
+    #[test]
+    fn test_pre_blend_pixel_opaque_full_cover_is_copy() {
+        let (_buf, mut ra) = make_buffer(4, 4);
+        let mut pf = PixfmtRgba32Pre::new(&mut ra);
+        pf.copy_pixel(2, 2, &Rgba8::new(240, 240, 230, 255));
+        pf.blend_pixel(2, 2, &Rgba8::new(102, 77, 26, 255), 255);
+        let p = pf.pixel(2, 2);
+        assert_eq!((p.r, p.g, p.b, p.a), (102, 77, 26, 255));
+    }
+
+    /// blend_pixel with a fully transparent color is a no-op (`c.a == 0`
+    /// early return), regardless of cover.
+    #[test]
+    fn test_pre_blend_pixel_transparent_is_noop() {
+        let (_buf, mut ra) = make_buffer(4, 4);
+        let mut pf = PixfmtRgba32Pre::new(&mut ra);
+        let backdrop = Rgba8::new(17, 34, 51, 255);
+        pf.copy_pixel(0, 0, &backdrop);
+        pf.blend_pixel(0, 0, &Rgba8::new(200, 100, 50, 0), 255);
+        let p = pf.pixel(0, 0);
+        assert_eq!((p.r, p.g, p.b, p.a), (17, 34, 51, 255));
+    }
+
+    /// blend_solid_hspan over covers [255, 128, 0] with an opaque color:
+    ///   cover 255 -> copy shortcut -> (102,77,26)
+    ///   cover 128 -> q=(51,39,13), a'=mult_cover(255,128)=128 ->
+    ///                prelerp on (240,240,230) -> (171,159,128)
+    ///   cover 0   -> prelerp(p, 0, 0) == p -> unchanged (240,240,230)
+    #[test]
+    fn test_pre_blend_solid_hspan_covers_and_zero_noop() {
+        let (_buf, mut ra) = make_buffer(8, 4);
+        let mut pf = PixfmtRgba32Pre::new(&mut ra);
+        let backdrop = Rgba8::new(240, 240, 230, 255);
+        for x in 0..3 {
+            pf.copy_pixel(x, 0, &backdrop);
+        }
+        let color = Rgba8::new(102, 77, 26, 255);
+        pf.blend_solid_hspan(0, 0, 3, &color, &[255, 128, 0]);
+        assert_eq!(
+            {
+                let p = pf.pixel(0, 0);
+                (p.r, p.g, p.b, p.a)
+            },
+            (102, 77, 26, 255)
+        );
+        assert_eq!(
+            {
+                let p = pf.pixel(1, 0);
+                (p.r, p.g, p.b, p.a)
+            },
+            (171, 159, 128, 255)
+        );
+        assert_eq!(
+            {
+                let p = pf.pixel(2, 0);
+                (p.r, p.g, p.b, p.a)
+            },
+            (240, 240, 230, 255)
+        );
+    }
+
+    /// blend_color_hspan with a non-empty covers slice folds each pixel's
+    /// cover into its (premultiplied) color via copy_or_blend_pix.
+    /// backdrop black (0,0,0,255), color (60,40,20,180), cover 64:
+    ///   q=(15,10,5), a'=mult_cover(180,64)=45 -> prelerp -> (15,10,5,255)
+    #[test]
+    fn test_pre_blend_color_hspan_with_covers_slice() {
+        let (_buf, mut ra) = make_buffer(8, 4);
+        let mut pf = PixfmtRgba32Pre::new(&mut ra);
+        let backdrop = Rgba8::new(0, 0, 0, 255);
+        pf.copy_pixel(0, 0, &backdrop);
+        let colors = [Rgba8::new(60, 40, 20, 180)];
+        pf.blend_color_hspan(0, 0, 1, &colors, &[64], 0);
+        let p = pf.pixel(0, 0);
+        assert_eq!((p.r, p.g, p.b, p.a), (15, 10, 5, 255));
+    }
+
+    /// blend_color_hspan with an empty covers slice and full uniform cover
+    /// blends a premultiplied, partly transparent color with prelerp (no
+    /// cover folding). backdrop (200,100,50,255), color (40,20,10,128):
+    ///   prelerp -> (140,70,35,255).
+    #[test]
+    fn test_pre_blend_color_hspan_full_cover_premultiplied() {
+        let (_buf, mut ra) = make_buffer(8, 4);
+        let mut pf = PixfmtRgba32Pre::new(&mut ra);
+        pf.copy_pixel(0, 0, &Rgba8::new(200, 100, 50, 255));
+        let colors = [Rgba8::new(40, 20, 10, 128)];
+        pf.blend_color_hspan(0, 0, 1, &colors, &[], 255);
+        let p = pf.pixel(0, 0);
+        assert_eq!((p.r, p.g, p.b, p.a), (140, 70, 35, 255));
+    }
 }
