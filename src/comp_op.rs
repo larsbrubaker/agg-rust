@@ -119,13 +119,18 @@ impl PremulRgba {
         p[3] = a;
     }
 
-    /// Clamp all components to [0, 1].
+    /// Clamp `a` to [0, 1], then clamp each of `r`, `g`, `b` to [0, a].
+    ///
+    /// Matches C++ `clip` at agg_pixfmt_rgba.h:37-44 exactly: alpha is clamped
+    /// first, and the upper bound for the color channels is the (already
+    /// clamped) alpha — not 1.0. This differs for destinations that are not
+    /// premultiply-valid (a color channel exceeding alpha).
     #[inline]
     fn clip(c: &mut PremulRgba) {
-        c.r = c.r.clamp(0.0, 1.0);
-        c.g = c.g.clamp(0.0, 1.0);
-        c.b = c.b.clamp(0.0, 1.0);
         c.a = c.a.clamp(0.0, 1.0);
+        c.r = c.r.clamp(0.0, c.a);
+        c.g = c.g.clamp(0.0, c.a);
+        c.b = c.b.clamp(0.0, c.a);
     }
 }
 
@@ -304,7 +309,14 @@ fn blend_src_atop(p: &mut [u8], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s1a = 1.0 - s.a;
     d.r = s.r * d.a + d.r * s1a;
     d.g = s.g * d.a + d.g * s1a;
-    d.b = s.b * d.a + d.b * s1a;
+    // Replicates the upstream AGG 2.6 typo at agg_pixfmt_rgba.h:530, where the
+    // blue channel is computed from `d.g` (green) instead of `d.b` (blue).
+    // C++ executes these three assignments sequentially, so by the time the
+    // blue line runs, `d.g` has already been overwritten by the previous
+    // statement — we must use that just-updated `d.g` here. The port
+    // guarantees byte-identity with the compiled C++ renderer, so the typo is
+    // preserved deliberately rather than "fixed".
+    d.b = s.b * d.a + d.g * s1a;
     // Da' = Da (unchanged)
     PremulRgba::set(p, &d);
 }
@@ -1035,5 +1047,73 @@ mod tests {
         assert_eq!(p.r, 255);
         assert_eq!(p.g, 255);
         assert_eq!(p.b, 255);
+    }
+
+    /// Locks in replication of the upstream AGG 2.6 typo in
+    /// `comp_op_rgba_src_atop::blend_pix` (agg_pixfmt_rgba.h:530), where the
+    /// blue channel is computed from the *already-updated* green (`d.g`)
+    /// rather than blue. Because C++ executes the three assignments
+    /// sequentially, by the time `d.b = s.b*d.a + d.g*s1a` runs, `d.g` has
+    /// already been overwritten by the previous statement. Byte-identity with
+    /// the compiled C++ renderer requires the port to carry this typo.
+    ///
+    /// Derivation (C++ double-precision formula, verified by hand + scratch):
+    ///   dest raw bytes = (10, 200, 40, 200); note green (200) differs strongly
+    ///   from blue (40), making the typo observable.
+    ///   src (80, 60, 20, 100), cover 255. comp_op_adaptor premultiplies src:
+    ///     r = multiply(80,100) = 31, g = multiply(60,100) = 24,
+    ///     b = multiply(20,100) = 8, a = 100.
+    ///   s = (31,24,8,100)/255 ; d = (10,200,40,200)/255 ; s1a = 1 - 100/255.
+    ///     d.r = s.r*d.a + d.r*s1a = (31*200 + 10*155)/255^2 -> from_double = 30
+    ///     d.g = s.g*d.a + d.g*s1a = (24*200 + 200*155)/255^2 -> from_double = 140
+    ///     d.b = s.b*d.a + d.g_UPDATED*s1a  (uses the new d.g = 35800/255^2)
+    ///         = 1600/255^2 + (35800/255^2)*(155/255) -> from_double = 92
+    ///   alpha unchanged: from_double(200/255) = 200.
+    #[test]
+    fn test_src_atop_replicates_cpp_blue_channel_typo() {
+        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut pf = PixfmtRgba32CompOp::new(&mut ra);
+        // Premultiplied buffer bytes written directly (green 200 vs blue 40).
+        pf.copy_pixel(0, 0, &Rgba8::new(10, 200, 40, 200));
+
+        pf.set_comp_op(CompOp::SrcAtop);
+        pf.blend_pixel(0, 0, &Rgba8::new(80, 60, 20, 100), 255);
+        let p = pf.pixel(0, 0);
+        assert_eq!(p.r, 30);
+        assert_eq!(p.g, 140);
+        assert_eq!(p.b, 92);
+        assert_eq!(p.a, 200);
+    }
+
+    /// Locks in C++ `clip` semantics for the `minus` op (agg_pixfmt_rgba.h:37-44):
+    /// after clamping alpha to [0,1], r/g/b are clamped to [0, alpha] — the upper
+    /// bound is the (already-clamped) alpha, not 1.0. With a destination whose
+    /// red exceeds its alpha (not premul-valid, but reachable since callers can
+    /// write arbitrary buffer bytes), the red channel must clamp down to the new
+    /// alpha rather than staying at its large value.
+    ///
+    /// Derivation (C++ double-precision formula + C++ clip):
+    ///   dest raw bytes = (250, 10, 10, 40); src (0,0,0,100), cover 255.
+    ///   premul src = (0,0,0,100); s = (0,0,0,100)/255 ; d = (250,10,10,40)/255.
+    ///     d.a' = d.a + s.a - s.a*d.a
+    ///          = 40/255 + 100/255 - (100/255)(40/255) -> from_double = 124
+    ///     r,g,b = max(d - s, 0): d.r = 250/255, d.g = 10/255, d.b = 10/255.
+    ///   C++ clip: a -> [0,1] (0.4875.. unchanged); then
+    ///     r > a  => d.r clamps to a  -> from_double(a) = 124
+    ///     g,b < a => unchanged        -> from_double(10/255) = 10
+    #[test]
+    fn test_minus_clip_clamps_rgb_to_alpha() {
+        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut pf = PixfmtRgba32CompOp::new(&mut ra);
+        // Deliberately not premul-valid: red (250) > alpha (40).
+        pf.copy_pixel(0, 0, &Rgba8::new(250, 10, 10, 40));
+
+        pf.set_comp_op(CompOp::Minus);
+        pf.blend_pixel(0, 0, &Rgba8::new(0, 0, 0, 100), 255);
+        let p = pf.pixel(0, 0);
+        assert_eq!(p.a, 124);
+        assert_eq!(p.r, 124); // clamped down to the new alpha, not left at 250
+        assert_eq!(p.g, 10);
+        assert_eq!(p.b, 10);
     }
 }
