@@ -190,7 +190,15 @@ impl GradientLut {
         // Interpolate between stops
         for i in 1..self.color_profile.len() {
             let end = uround(self.color_profile[i].offset * size as f64) as usize;
-            let seg_len = if end > start { end - start + 1 } else { 1 };
+            // The loops below write entries `start..end` (that's `end - start` of them),
+            // calling `color()` then `inc()` each time, so the LAST written entry uses
+            // step index `end - start - 1`. A DdaLineInterpolator sized `count` only
+            // reaches its end color after `count` steps, so to land the segment's end
+            // color exactly on that last entry the interpolator must be sized
+            // `end - start - 1`. The previous `end - start + 1` sized it two steps too
+            // long, so every segment stopped ~2/255 short of its end color (a
+            // black->white ramp ended at 253, not 255).
+            let seg_len = if end > start { (end - start - 1).max(1) } else { 1 };
 
             if self.use_fast_interpolator {
                 let mut ci = ColorInterpolatorRgba8::new(
@@ -299,21 +307,59 @@ mod tests {
         lut.add_color(1.0, Rgba8::new(0, 0, 255, 255));
         lut.build_lut();
 
-        // First should be red
+        // First should be exactly red
         let c0 = lut.get(0);
         assert_eq!(c0.r, 255);
         assert_eq!(c0.b, 0);
 
-        // Last should be nearly blue (DDA with seg_len=257 over 256 entries
-        // doesn't quite reach the endpoint — matches C++ AGG behavior)
+        // Last entry must land EXACTLY on the end color (the interpolator is now sized
+        // so the ramp reaches its endpoint instead of stopping ~2/255 short).
         let c255 = lut.get(255);
-        assert!(c255.r <= 3, "c255.r={}", c255.r);
-        assert!(c255.b >= 252, "c255.b={}", c255.b);
+        assert_eq!(c255.r, 0, "c255.r={}", c255.r);
+        assert_eq!(c255.b, 255, "c255.b={}", c255.b);
 
         // Middle should be roughly equal
         let c128 = lut.get(128);
         assert!(c128.r > 50 && c128.r < 200, "Mid r={}", c128.r);
         assert!(c128.b > 50 && c128.b < 200, "Mid b={}", c128.b);
+    }
+
+    /// Regression test for the gradient-LUT interpolator length off-by-one.
+    ///
+    /// `build_lut` fills entries `start..end` (that's `end - start` of them), writing the
+    /// interpolator's current color then stepping it once per entry — so the LAST entry
+    /// is written at step index `end - start - 1`. A `DdaLineInterpolator` reaches its end
+    /// color only after `count` steps, so `count` must be `end - start - 1` for that last
+    /// entry to land on the end color.
+    ///
+    /// The interpolator used to be sized `end - start + 1`. For a single black→white
+    /// segment over the whole 256-entry table (`start = 0`, `end = 256`) that made the
+    /// last entry land at step 255 of a 257-step ramp:
+    ///
+    ///     255 * 255 / 257 ≈ 253
+    ///
+    /// so `get(255)` came back as (253, 253, 253) instead of pure white — every
+    /// multi-stop gradient's endpoint was tinted ~2/255 toward the start color. With the
+    /// interpolator sized `end - start - 1`, a segment whose length divides the color
+    /// range (here 255 over 255 steps) reaches the endpoint exactly.
+    #[test]
+    fn gradient_lut_two_stop_ramp_reaches_its_end_color_exactly() {
+        let mut lut = GradientLut::new_default();
+        lut.add_color(0.0, Rgba8::new(0, 0, 0, 255)); // black
+        lut.add_color(1.0, Rgba8::new(255, 255, 255, 255)); // white
+        lut.build_lut();
+
+        // Start is pure black.
+        let first = lut.get(0);
+        assert_eq!((first.r, first.g, first.b), (0, 0, 0), "first = {first:?}");
+
+        // End is pure white. Pre-fix this was ~(253, 253, 253) — the bug this guards.
+        let last = lut.get(255);
+        assert_eq!(
+            (last.r, last.g, last.b),
+            (255, 255, 255),
+            "the ramp must reach pure white; got {last:?}",
+        );
     }
 
     #[test]
@@ -324,10 +370,12 @@ mod tests {
         lut.add_color(1.0, Rgba8::new(0, 0, 255, 255));
         lut.build_lut();
 
-        // Start: red
+        // Start: exactly red
         assert_eq!(lut.get(0).r, 255);
-        // End: nearly blue (multi-segment has ~2% error from DDA)
-        assert!(lut.get(255).b >= 248, "last.b={}", lut.get(255).b);
+        // End: blue within 1 LSB. Here the last segment spans 127 entries over a range
+        // of 255, which integer DDA can't divide exactly, so it lands at 254 — but that
+        // is the residual rounding error, not the old ~2/255 endpoint shortfall.
+        assert!(lut.get(255).b >= 254, "last.b={}", lut.get(255).b);
         // Middle: should be mostly green
         let mid = lut.get(128);
         assert!(mid.g > 128, "Mid green={}", mid.g);
