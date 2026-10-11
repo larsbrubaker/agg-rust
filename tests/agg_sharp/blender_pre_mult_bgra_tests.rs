@@ -1,12 +1,8 @@
 //! Port of agg-sharp `BlenderPreMultBGRATests` (Tests/Agg.Tests/Agg/BlenderPreMultBGRATests.cs):
 //! `PixfmtRgba32Pre` against C++ blender_rgba_pre.
 //!
-//! Not ported:
-//! - `StraightAlphaColorSaturatesInsteadOfWrapping` asserts agg-sharp's saturating sum (red 255);
-//!   C++ `prelerp` computes in `value_type` and wraps (red 63) for that non-premultiplied input,
-//!   and this crate keeps the C++ result.
-//! - `PolyColorFullCoverIsExactSourceOver` drives agg-sharp's `BlenderPolyColorPreMultBGRA`, which
-//!   has no C++ AGG counterpart.
+//! Not ported: `PolyColorFullCoverIsExactSourceOver` drives agg-sharp's
+//! `BlenderPolyColorPreMultBGRA`, which has no C++ AGG counterpart.
 
 use crate::support::Image;
 use agg_rust::color::Rgba8;
@@ -27,6 +23,16 @@ fn partial_cover_scales_an_opaque_color() {
     let result = blend_one([255; 4], Rgba8::new(200, 100, 50, 255), &[128], 255);
 
     assert_eq!(result, Rgba8::new(227, 177, 152, 255));
+}
+
+/// A straight-alpha color (red above its alpha) is not valid premultiplied input, but it must not
+/// wrap: red sums to 319 and saturates at 255 rather than wrapping to 63 (as C++ `prelerp` does in
+/// `value_type`), a dark speck.
+#[test]
+fn straight_alpha_color_saturates_instead_of_wrapping() {
+    let result = blend_one([255; 4], Rgba8::new(255, 0, 0, 128), &[128], 255);
+
+    assert_eq!(result, Rgba8::new(255, 191, 191, 255));
 }
 
 /// The same with one cover for the whole span.

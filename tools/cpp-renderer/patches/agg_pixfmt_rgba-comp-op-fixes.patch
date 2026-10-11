@@ -1,0 +1,25 @@
+C++ AGG 2.6 comp-op bug fixes that agg-rust carries (src_atop blue typo, color_burn
+black-over-white). Apply from the repo root to render the patched C++ references:
+  patch -p0 < tools/cpp-renderer/patches/agg_pixfmt_rgba-comp-op-fixes.patch
+then revert with patch -R -p0 so cpp-references stays pristine.
+
+--- cpp-references/agg-src/include/agg_pixfmt_rgba.h	2026-10-11 09:23:53
++++ cpp-references/agg-src/include/agg_pixfmt_rgba.h	2026-10-11 09:26:06
+@@ -527,7 +527,7 @@
+             double s1a = 1 - s.a;
+             d.r = s.r * d.a + d.r * s1a;
+             d.g = s.g * d.a + d.g * s1a;
+-            d.b = s.b * d.a + d.g * s1a;
++            d.b = s.b * d.a + d.b * s1a;
+             set(p, d);
+         }
+     };
+@@ -860,7 +860,7 @@
+         static AGG_INLINE double calc(double dca, double sca, double da, double sa, double sada, double d1a, double s1a)
+         {
+             if (sca > 0) return sada * (1 - sd_min(1.0, (1 - dca / da) * sa / sca)) + sca * d1a + dca * s1a;
+-            if (dca > da) return sada + dca * s1a;
++            if (dca >= da) return sada + dca * s1a;
+             return dca * s1a;
+         }
+ 

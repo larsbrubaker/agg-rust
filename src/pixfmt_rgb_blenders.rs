@@ -27,7 +27,8 @@ pub trait RgbBlender {
 
 /// Port of C++ `blender_rgb_pre`: the premultiplied form of Alvy-Ray Smith's
 /// compositing function. Color channels are expected premultiplied by alpha;
-/// like C++, a channel above its alpha wraps (`prelerp` in `value_type`).
+/// a channel above its alpha saturates at 255 where C++ wraps (see
+/// [`Rgba8::prelerp`]).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BlenderRgbPre;
 

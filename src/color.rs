@@ -411,9 +411,20 @@ impl Rgba8 {
     }
 
     /// Interpolate p to q by a, assuming q is premultiplied by a.
+    ///
+    /// Divergence from C++ AGG 2.6 (`rgba8T::prelerp`, agg_color_rgba.h): C++
+    /// computes `p + q - multiply(p, a)` in `value_type` and wraps when `q`
+    /// exceeds `a`, which is what a straight-alpha color pushed through a
+    /// premultiplied blender looks like: red 255 at alpha 128 over white sums to
+    /// 319 and wraps to 63, a dark speck where the color should be brightest.
+    /// The sum saturates at 255 instead, as agg-sharp's does. Valid premultiplied
+    /// input never reaches the clamp (`q <= a` keeps the sum at most 255) and the
+    /// sum cannot go below zero (`multiply(p, a) <= p`), so every in-range result
+    /// is unchanged. Pinned by `rust_only_prelerp_saturates_instead_of_wrapping`.
     #[inline]
     pub fn prelerp(p: u8, q: u8, a: u8) -> u8 {
-        p.wrapping_add(q).wrapping_sub(Self::multiply(p, a))
+        let sum = p as u32 + q as u32 - Self::multiply(p, a) as u32;
+        sum.min(Self::BASE_MASK) as u8
     }
 
     /// Interpolate p to q by a.
@@ -1223,5 +1234,26 @@ mod tests {
         assert_eq!(OrderBgra::G, 1);
         assert_eq!(OrderBgra::R, 2);
         assert_eq!(OrderBgra::A, 3);
+    }
+
+    /// C++ `rgba8T::prelerp` wraps in `value_type` when q exceeds a (a
+    /// straight-alpha color in a premultiplied blender); this crate saturates.
+    /// Red 255 at alpha 64 over white: 255 + 255 - multiply(255, 64) = 446,
+    /// which C++ wraps to 190.
+    #[test]
+    fn rust_only_prelerp_saturates_instead_of_wrapping() {
+        assert_eq!(Rgba8::prelerp(255, 255, 64), 255);
+        assert_eq!(Rgba8::prelerp(255, 128, 64), 255);
+        assert_eq!(Rgba8::prelerp(200, 200, 0), 255);
+        // Every in-range sum is unchanged: valid premultiplied input (q <= a).
+        for p in 0..=255u32 {
+            for a in 0..=255u32 {
+                for q in [0, a / 2, a] {
+                    let exact = p + q - Rgba8::multiply(p as u8, a as u8) as u32;
+                    assert!(exact <= 255);
+                    assert_eq!(Rgba8::prelerp(p as u8, q as u8, a as u8) as u32, exact);
+                }
+            }
+        }
     }
 }

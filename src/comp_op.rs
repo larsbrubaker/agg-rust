@@ -326,14 +326,16 @@ fn blend_src_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
     let s1a = 1.0 - s.a;
     d.r = s.r * d.a + d.r * s1a;
     d.g = s.g * d.a + d.g * s1a;
-    // Replicates the upstream AGG 2.6 typo at agg_pixfmt_rgba.h:530, where the
-    // blue channel is computed from `d.g` (green) instead of `d.b` (blue).
-    // C++ executes these three assignments sequentially, so by the time the
-    // blue line runs, `d.g` has already been overwritten by the previous
-    // statement — we must use that just-updated `d.g` here. The port
-    // guarantees byte-identity with the compiled C++ renderer, so the typo is
-    // preserved deliberately rather than "fixed".
-    d.b = s.b * d.a + d.g * s1a;
+    // Divergence from C++ AGG 2.6 (a fixed typo): agg_pixfmt_rgba.h:530 computes
+    // blue from the destination's green, `d.b = s.b * d.a + d.g * s1a`, after
+    // `d.g` has already been overwritten by the line above, so every translucent
+    // SrcAtop blend tinted blue by the green channel. SVG's
+    // Dca' = Sca.Da + Dca.(1 - Sa) uses each channel's own destination; so do we.
+    // agg-sharp fixes the same typo (BlenderCompOpBGRATests.BlendMatchesCppAgg);
+    // pinned by `rust_only_src_atop_blends_blue_with_destination_blue` and the
+    // compositing2 src-atop reference rendered by C++ with
+    // tools/cpp-renderer/patches/agg_pixfmt_rgba-comp-op-fixes.patch applied.
+    d.b = s.b * d.a + d.b * s1a;
     // Da' = Da (unchanged)
     PremulRgba::set(p, &d);
 }
@@ -528,7 +530,13 @@ fn blend_color_dodge(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 fn color_burn_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1a: f64) -> f64 {
     if sca > 0.0 {
         sada * (1.0 - (1.0f64).min((1.0 - dca / da) * sa / sca)) + sca * d1a + dca * s1a
-    } else if dca > da {
+    } else if dca >= da {
+        // Divergence from C++ AGG 2.6 (agg_pixfmt_rgba.h:863): C++ tests
+        // `dca > da` for SVG's "Sca == 0 and Dca == Da" case, but a premultiplied
+        // channel never exceeds its alpha, so the branch was dead and a full
+        // channel under a black source burned to 0: black over white gave black
+        // instead of white. `>=` reaches the case the formula describes, as
+        // agg-sharp does; pinned by `rust_only_color_burn_black_over_white_stays_white`.
         sada + dca * s1a
     } else {
         dca * s1a
@@ -1223,28 +1231,25 @@ mod tests {
         assert_eq!(p.b, 255);
     }
 
-    /// Locks in replication of the upstream AGG 2.6 typo in
-    /// `comp_op_rgba_src_atop::blend_pix` (agg_pixfmt_rgba.h:530), where the
-    /// blue channel is computed from the *already-updated* green (`d.g`)
-    /// rather than blue. Because C++ executes the three assignments
-    /// sequentially, by the time `d.b = s.b*d.a + d.g*s1a` runs, `d.g` has
-    /// already been overwritten by the previous statement. Byte-identity with
-    /// the compiled C++ renderer requires the port to carry this typo.
+    /// `comp_op_rgba_src_atop::blend_pix` in C++ AGG 2.6 (agg_pixfmt_rgba.h:530)
+    /// computes blue from the *already-updated* green: `d.b = s.b*d.a + d.g*s1a`.
+    /// This crate blends blue with the destination's blue, SVG's
+    /// Dca' = Sca.Da + Dca.(1 - Sa).
     ///
-    /// Derivation (C++ double-precision formula, verified by hand + scratch):
-    ///   dest raw bytes = (10, 200, 40, 200); note green (200) differs strongly
-    ///   from blue (40), making the typo observable.
+    /// Derivation (C++'s double-precision formula):
+    ///   dest raw bytes = (10, 200, 40, 200); green (200) differs strongly from
+    ///   blue (40), so the typo is observable.
     ///   src (80, 60, 20, 100), cover 255. comp_op_adaptor premultiplies src:
     ///     r = multiply(80,100) = 31, g = multiply(60,100) = 24,
     ///     b = multiply(20,100) = 8, a = 100.
-    ///   s = (31,24,8,100)/255 ; d = (10,200,40,200)/255 ; s1a = 1 - 100/255.
-    ///     d.r = s.r*d.a + d.r*s1a = (31*200 + 10*155)/255^2 -> from_double = 30
-    ///     d.g = s.g*d.a + d.g*s1a = (24*200 + 200*155)/255^2 -> from_double = 140
-    ///     d.b = s.b*d.a + d.g_UPDATED*s1a  (uses the new d.g = 35800/255^2)
-    ///         = 1600/255^2 + (35800/255^2)*(155/255) -> from_double = 92
-    ///   alpha unchanged: from_double(200/255) = 200.
+    ///   s = (31,24,8,100)/255 ; d = (10,200,40,200)/255 ; s1a = 155/255.
+    ///     d.r = (31*200 + 10*155)/255^2                  -> from_double = 30
+    ///     d.g = (24*200 + 200*155)/255^2                 -> from_double = 140
+    ///     d.b = (8*200 + 40*155)/255^2 = 7800/255^2      -> from_double = 31
+    ///       (C++'s typo uses the new d.g instead and gives 92)
+    ///   alpha unchanged: 200.
     #[test]
-    fn test_src_atop_replicates_cpp_blue_channel_typo() {
+    fn rust_only_src_atop_blends_blue_with_destination_blue() {
         let (_buf, mut ra) = make_buffer(10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // Premultiplied buffer bytes written directly (green 200 vs blue 40).
@@ -1255,8 +1260,24 @@ mod tests {
         let p = pf.pixel(0, 0);
         assert_eq!(p.r, 30);
         assert_eq!(p.g, 140);
-        assert_eq!(p.b, 92);
+        assert_eq!(p.b, 31);
         assert_eq!(p.a, 200);
+    }
+
+    /// `comp_op_rgba_color_burn::calc` in C++ AGG 2.6 (agg_pixfmt_rgba.h:863)
+    /// tests `dca > da` for SVG's "Sca == 0 and Dca == Da" case, which a
+    /// premultiplied channel never reaches, so opaque black burned an opaque
+    /// white destination to black (Dca' = Dca.(1 - Sa) = 0). The SVG case gives
+    /// Dca' = Sa.Da + Dca.(1 - Sa) = 1: white stays white.
+    #[test]
+    fn rust_only_color_burn_black_over_white_stays_white() {
+        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut pf = PixfmtRgba32CompOp::new(&mut ra);
+        pf.copy_pixel(0, 0, &Rgba8::new(255, 255, 255, 255));
+
+        pf.set_comp_op(CompOp::ColorBurn);
+        pf.blend_pixel(0, 0, &Rgba8::new(0, 0, 0, 255), 255);
+        assert_eq!(pf.pixel(0, 0), Rgba8::new(255, 255, 255, 255));
     }
 
     /// Locks in C++ `clip` semantics for the `minus` op (agg_pixfmt_rgba.h:37-44):

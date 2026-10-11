@@ -1,9 +1,5 @@
 //! Port of agg-sharp `BlenderPreMultBGRTests` (Tests/Agg.Tests/Agg/BlenderPreMultBGRTests.cs):
 //! `PixfmtRgb24Pre` against C++ blender_rgb_pre.
-//!
-//! Not ported: `StraightAlphaColorSaturatesInsteadOfWrapping` asserts agg-sharp's saturating sum
-//! (255, 127, 127); C++ `prelerp` computes in `value_type` and wraps, giving red 126 for that
-//! non-premultiplied input, and this crate keeps the C++ result.
 
 use crate::support::Image;
 use agg_rust::color::Rgba8;
@@ -33,4 +29,16 @@ fn partial_first_cover_for_all_scales_an_opaque_color() {
     pf.blend_color_hspan(0, 0, 2, &colors, &[], 128);
 
     assert_eq!(pf.pixel(1, 0), Rgba8::new(227, 177, 152, 255));
+}
+
+/// A straight-alpha color saturates at 255 rather than wrapping to a dark speck (C++ `prelerp`
+/// wraps red to 126).
+#[test]
+fn straight_alpha_color_saturates_instead_of_wrapping() {
+    let mut image = Image::new(1, 1, 3, 255);
+    let mut pf = PixfmtRgb24Pre::new(&mut image.rows);
+
+    pf.blend_pixel(0, 0, &Rgba8::new(255, 0, 0, 128), 255);
+
+    assert_eq!(pf.pixel(0, 0), Rgba8::new(255, 127, 127, 255));
 }
