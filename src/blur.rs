@@ -145,8 +145,8 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
             let src_b = row[2] as u64;
             let src_a = row[3] as u64;
 
-            for i in 0..=rx {
-                stack[i] = [row[0], row[1], row[2], row[3]];
+            for (i, slot) in stack.iter_mut().take(rx + 1).enumerate() {
+                *slot = [row[0], row[1], row[2], row[3]];
                 let w = (i + 1) as u64;
                 sum_r += src_r * w;
                 sum_g += src_g * w;
@@ -279,8 +279,8 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
             let mut sum_out_a: u64 = 0;
 
             let src_pix = unsafe { std::slice::from_raw_parts(base_ptr, 4) };
-            for i in 0..=ry {
-                stack[i] = [src_pix[0], src_pix[1], src_pix[2], src_pix[3]];
+            for (i, slot) in stack.iter_mut().take(ry + 1).enumerate() {
+                *slot = [src_pix[0], src_pix[1], src_pix[2], src_pix[3]];
                 let w = (i + 1) as u64;
                 sum_r += src_pix[0] as u64 * w;
                 sum_g += src_pix[1] as u64 * w;

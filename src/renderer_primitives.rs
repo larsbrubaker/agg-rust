@@ -1,13 +1,123 @@
 //! Basic shape primitives renderer.
 //!
 //! Port of `agg_renderer_primitives.h` — draws simple shapes (rectangles,
-//! ellipses, lines) directly into a renderer without anti-aliasing.
+//! ellipses, lines) directly into a renderer without anti-aliasing. Like C++,
+//! it is generic over the base renderer it draws through ([`BaseRenderer`]:
+//! `RendererBase` or `RendererMclip`); `renderer_markers` builds on it.
 
-use crate::basics::{iround, COVER_FULL};
+use crate::basics::{iround, CoverType, RectI, COVER_FULL};
 use crate::dda_line::{self, LineBresenhamInterpolator};
 use crate::ellipse_bresenham::EllipseBresenhamInterpolator;
 use crate::pixfmt_rgba::PixelFormat;
 use crate::renderer_base::RendererBase;
+use crate::renderer_mclip::RendererMclip;
+
+// ============================================================================
+// BaseRenderer
+// ============================================================================
+
+/// The base-renderer calls `renderer_primitives` and `renderer_markers` draw
+/// through: C++'s `BaseRenderer` template parameter, implemented by
+/// [`RendererBase`] and [`RendererMclip`].
+pub trait BaseRenderer {
+    /// The pixel format drawn into.
+    type PixFmt: PixelFormat;
+
+    fn blend_pixel(
+        &mut self,
+        x: i32,
+        y: i32,
+        c: &<Self::PixFmt as PixelFormat>::ColorType,
+        cover: CoverType,
+    );
+    /// A horizontal run from `x1` to `x2` inclusive.
+    fn blend_hline(
+        &mut self,
+        x1: i32,
+        y: i32,
+        x2: i32,
+        c: &<Self::PixFmt as PixelFormat>::ColorType,
+        cover: CoverType,
+    );
+    /// A vertical run from `y1` to `y2` inclusive.
+    fn blend_vline(
+        &mut self,
+        x: i32,
+        y1: i32,
+        y2: i32,
+        c: &<Self::PixFmt as PixelFormat>::ColorType,
+        cover: CoverType,
+    );
+    /// A filled box, corners inclusive.
+    fn blend_bar(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        c: &<Self::PixFmt as PixelFormat>::ColorType,
+        cover: CoverType,
+    );
+    /// The box that holds every pixel a draw can touch.
+    fn bounding_clip_box(&self) -> RectI;
+}
+
+impl<PF: PixelFormat> BaseRenderer for RendererBase<PF> {
+    type PixFmt = PF;
+
+    fn blend_pixel(&mut self, x: i32, y: i32, c: &PF::ColorType, cover: CoverType) {
+        RendererBase::blend_pixel(self, x, y, c, cover);
+    }
+    fn blend_hline(&mut self, x1: i32, y: i32, x2: i32, c: &PF::ColorType, cover: CoverType) {
+        RendererBase::blend_hline(self, x1, y, x2, c, cover);
+    }
+    fn blend_vline(&mut self, x: i32, y1: i32, y2: i32, c: &PF::ColorType, cover: CoverType) {
+        RendererBase::blend_vline(self, x, y1, y2, c, cover);
+    }
+    fn blend_bar(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        c: &PF::ColorType,
+        cover: CoverType,
+    ) {
+        RendererBase::blend_bar(self, x1, y1, x2, y2, c, cover);
+    }
+    /// C++ `renderer_base::bounding_clip_box`: its one clip box.
+    fn bounding_clip_box(&self) -> RectI {
+        *self.clip_box()
+    }
+}
+
+impl<PF: PixelFormat> BaseRenderer for RendererMclip<PF> {
+    type PixFmt = PF;
+
+    fn blend_pixel(&mut self, x: i32, y: i32, c: &PF::ColorType, cover: CoverType) {
+        RendererMclip::blend_pixel(self, x, y, c, cover);
+    }
+    fn blend_hline(&mut self, x1: i32, y: i32, x2: i32, c: &PF::ColorType, cover: CoverType) {
+        RendererMclip::blend_hline(self, x1, y, x2, c, cover);
+    }
+    fn blend_vline(&mut self, x: i32, y1: i32, y2: i32, c: &PF::ColorType, cover: CoverType) {
+        RendererMclip::blend_vline(self, x, y1, y2, c, cover);
+    }
+    fn blend_bar(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        c: &PF::ColorType,
+        cover: CoverType,
+    ) {
+        RendererMclip::blend_bar(self, x1, y1, x2, y2, c, cover);
+    }
+    fn bounding_clip_box(&self) -> RectI {
+        *RendererMclip::bounding_clip_box(self)
+    }
+}
 
 // ============================================================================
 // RendererPrimitives
@@ -19,20 +129,22 @@ use crate::renderer_base::RendererBase;
 /// `RendererBase` without anti-aliasing. Maintains separate fill and line
 /// colors and a current position for line_to operations.
 ///
-/// Port of C++ `renderer_primitives<BaseRenderer>`.
-pub struct RendererPrimitives<'a, PF: PixelFormat> {
-    ren: &'a mut RendererBase<PF>,
+/// Port of C++ `renderer_primitives<BaseRenderer>`. `R` is the base renderer
+/// (`RendererBase<PF>` unless given), `PF` its pixel format.
+pub struct RendererPrimitives<'a, PF: PixelFormat, R: BaseRenderer<PixFmt = PF> = RendererBase<PF>>
+{
+    ren: &'a mut R,
     fill_color: PF::ColorType,
     line_color: PF::ColorType,
     curr_x: i32,
     curr_y: i32,
 }
 
-impl<'a, PF: PixelFormat> RendererPrimitives<'a, PF>
+impl<'a, PF: PixelFormat, R: BaseRenderer<PixFmt = PF>> RendererPrimitives<'a, PF, R>
 where
     PF::ColorType: Default + Clone,
 {
-    pub fn new(ren: &'a mut RendererBase<PF>) -> Self {
+    pub fn new(ren: &'a mut R) -> Self {
         Self {
             ren,
             fill_color: PF::ColorType::default(),
@@ -231,17 +343,17 @@ where
         self.curr_y = y;
     }
 
-    pub fn ren(&self) -> &RendererBase<PF> {
+    pub fn ren(&self) -> &R {
         self.ren
     }
 
-    pub fn ren_mut(&mut self) -> &mut RendererBase<PF> {
+    pub fn ren_mut(&mut self) -> &mut R {
         self.ren
     }
 }
 
-impl<'a, PF: PixelFormat> crate::rasterizer_outline::RendererPrimitivesLike
-    for RendererPrimitives<'a, PF>
+impl<'a, PF: PixelFormat, R: BaseRenderer<PixFmt = PF>>
+    crate::rasterizer_outline::RendererPrimitivesLike for RendererPrimitives<'a, PF, R>
 where
     PF::ColorType: Default + Clone,
 {

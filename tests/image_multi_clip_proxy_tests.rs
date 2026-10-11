@@ -59,3 +59,50 @@ fn copy_hline_takes_a_length_and_copies_into_every_box() {
     }
     assert_eq!(row_alphas(&data, 10, 0), "0110001100");
 }
+
+/// A square marker drawn through the multi-clip renderer fills its part of every box, the bar
+/// included (renderer_mclip::blend_bar); after `reset_clipping(false)` nothing is visible, and
+/// after `reset_clipping(true)` everything is.
+#[test]
+fn marker_bar_fills_every_box_and_visibility_resets() {
+    use agg_rust::pixfmt_rgba::PixelFormat;
+    use agg_rust::renderer_markers::{MarkerType, RendererMarkers};
+
+    // '0' for each transparent pixel of row `y`, '1' for each other one, read from the pixel
+    // format (renderer_base's own `pixel` answers only inside its current clip box).
+    fn alphas(clipped: &RendererMclip<PixfmtRgba32>, y: i32) -> String {
+        (0..10)
+            .map(|x| {
+                if clipped.ren().ren().pixel(x, y).a == 0 {
+                    '0'
+                } else {
+                    '1'
+                }
+            })
+            .collect()
+    }
+
+    let mut data = vec![0u8; 10 * 10 * 4];
+    let mut rbuf = attach(&mut data, 10, 10);
+    let mut clipped = RendererMclip::new(RendererBase::new(PixfmtRgba32::new(&mut rbuf)));
+    clipped.reset_clipping(false);
+    clipped.add_clip_box(0, 0, 3, 9);
+    clipped.add_clip_box(6, 0, 9, 9);
+    {
+        let mut markers = RendererMarkers::new(&mut clipped);
+        markers.set_line_color(black());
+        markers.set_fill_color(black());
+
+        markers.marker(5, 5, 4, MarkerType::Square);
+    }
+
+    assert_eq!(alphas(&clipped, 5), "0111001111");
+
+    clipped.reset_clipping(false);
+    clipped.blend_hline(0, 0, 9, &black(), 255);
+    assert_eq!(alphas(&clipped, 0), "0000000000");
+
+    clipped.reset_clipping(true);
+    clipped.blend_hline(0, 0, 9, &black(), 255);
+    assert_eq!(alphas(&clipped, 0), "1111111111");
+}

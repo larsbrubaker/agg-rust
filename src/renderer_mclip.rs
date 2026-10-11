@@ -197,6 +197,26 @@ impl<PF: PixelFormat> RendererMclip<PF> {
         }
     }
 
+    /// C++ `renderer_mclip::blend_bar`: the bar blended into every clip box.
+    pub fn blend_bar(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        c: &PF::ColorType,
+        cover: CoverType,
+    ) {
+        if self.first_clip_box() {
+            loop {
+                self.ren.blend_bar(x1, y1, x2, y2, c, cover);
+                if !self.next_clip_box() {
+                    break;
+                }
+            }
+        }
+    }
+
     pub fn blend_solid_hspan(
         &mut self,
         x: i32,

@@ -103,6 +103,7 @@ pub mod trans_perspective;
 pub mod ellipse_bresenham;
 pub mod rasterizer_outline;
 pub mod renderer_primitives;
+pub mod renderer_markers;
 pub mod span_converter;
 pub mod span_image_filter_rgba;
 pub mod span_interpolator_trans;
