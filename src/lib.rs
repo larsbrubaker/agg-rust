@@ -62,6 +62,7 @@ pub mod scanline_u;
 pub mod pixfmt_gray;
 pub mod pixfmt_lcd;
 pub mod pixfmt_rgb;
+pub mod pixfmt_rgb_blenders;
 pub mod pixfmt_rgba;
 pub mod renderer_base;
 pub mod renderer_scanline;

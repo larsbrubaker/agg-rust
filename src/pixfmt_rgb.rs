@@ -64,6 +64,32 @@ impl<'a> PixfmtRgb24<'a> {
         }
     }
 
+    /// Apply forward gamma to every pixel's R, G and B.
+    ///
+    /// Port of C++ `pixfmt_alpha_blend_rgb::apply_gamma_dir` (`apply_gamma_dir_rgb`).
+    pub fn apply_gamma_dir(&mut self, gamma: &crate::gamma::GammaLut) {
+        for y in 0..self.rbuf.height() as i32 {
+            for p in self.row_mut(y).chunks_exact_mut(BPP) {
+                p[0] = gamma.dir(p[0]);
+                p[1] = gamma.dir(p[1]);
+                p[2] = gamma.dir(p[2]);
+            }
+        }
+    }
+
+    /// Apply inverse gamma to every pixel's R, G and B.
+    ///
+    /// Port of C++ `pixfmt_alpha_blend_rgb::apply_gamma_inv` (`apply_gamma_inv_rgb`).
+    pub fn apply_gamma_inv(&mut self, gamma: &crate::gamma::GammaLut) {
+        for y in 0..self.rbuf.height() as i32 {
+            for p in self.row_mut(y).chunks_exact_mut(BPP) {
+                p[0] = gamma.inv(p[0]);
+                p[1] = gamma.inv(p[1]);
+                p[2] = gamma.inv(p[2]);
+            }
+        }
+    }
+
     /// Blend a single pixel (internal helper, no bounds checking).
     /// Non-premultiplied blending of R, G, B channels only.
     #[inline]
