@@ -51,7 +51,7 @@ pub fn line_coord(x: f64) -> i32 {
 #[inline]
 pub fn line_coord_sat(x: f64) -> i32 {
     let v = iround(x * LINE_SUBPIXEL_SCALE as f64);
-    v.max(-LINE_MAX_COORD).min(LINE_MAX_COORD)
+    v.clamp(-LINE_MAX_COORD, LINE_MAX_COORD)
 }
 
 // ============================================================================

@@ -181,16 +181,14 @@ impl LineProfileAa {
         }
 
         // Mirror to the left (C++: *--ch = *ch_center++)
-        let mut src = ch_center;
         let mut dst = ch_center;
-        for _ in 0..(PROFILE_SUBPIXEL_SCALE as usize * 2) {
+        for src in ch_center..ch_center + PROFILE_SUBPIXEL_SCALE as usize * 2 {
             if dst == 0 || src >= self.profile.len() {
                 break;
             }
             dst -= 1;
             let v = self.profile[src];
             self.profile[dst] = v;
-            src += 1;
         }
     }
 }
@@ -260,6 +258,7 @@ pub struct DistanceInterpolator00 {
 }
 
 impl DistanceInterpolator00 {
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ signature
     pub fn new(xc: i32, yc: i32, x1: i32, y1: i32, x2: i32, y2: i32, x: i32, y: i32) -> Self {
         let mut dx1 = line_mr(x1) - line_mr(xc);
         let mut dy1 = line_mr(y1) - line_mr(yc);
@@ -393,6 +392,7 @@ pub struct DistanceInterpolator2 {
 
 impl DistanceInterpolator2 {
     /// Start join variant.
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ signature
     pub fn new_start(x1: i32, y1: i32, x2: i32, y2: i32, sx: i32, sy: i32, x: i32, y: i32) -> Self {
         let mut dx = x2 - x1;
         let mut dy = y2 - y1;
@@ -419,6 +419,7 @@ impl DistanceInterpolator2 {
     }
 
     /// End join variant.
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ signature
     pub fn new_end(x1: i32, y1: i32, x2: i32, y2: i32, ex: i32, ey: i32, x: i32, y: i32) -> Self {
         let mut dx = x2 - x1;
         let mut dy = y2 - y1;
@@ -546,6 +547,7 @@ pub struct DistanceInterpolator3 {
 }
 
 impl DistanceInterpolator3 {
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ signature
     pub fn new(
         x1: i32,
         y1: i32,
@@ -834,7 +836,7 @@ where
     fn draw_line0_hor(&mut self, mut li: LineInterpolatorAa0, lp: &LineParameters) {
         while let Some(span) = li.step_hor(self.profile, lp) {
             let x = li.x();
-            let y = li.y() - span.offset as i32 + 1;
+            let y = li.y() - span.offset + 1;
             self.ren.blend_solid_vspan(
                 x,
                 y,
@@ -847,7 +849,7 @@ where
 
     fn draw_line0_ver(&mut self, mut li: LineInterpolatorAa0, lp: &LineParameters) {
         while let Some(span) = li.step_ver(self.profile, lp) {
-            let x = li.x() - span.offset as i32 + 1;
+            let x = li.x() - span.offset + 1;
             let y = li.y();
             self.ren.blend_solid_hspan(
                 x,
@@ -903,7 +905,7 @@ where
         while let Some(span) = li.step_hor(self.profile, lp) {
             self.ren.blend_solid_vspan(
                 li.x(),
-                li.y() - span.offset as i32 + 1,
+                li.y() - span.offset + 1,
                 span.len as i32,
                 &self.color,
                 &li.covers[span.p0..span.p0 + span.len],
@@ -914,7 +916,7 @@ where
     fn draw_line1_ver(&mut self, mut li: LineInterpolatorAa1, lp: &LineParameters) {
         while let Some(span) = li.step_ver(self.profile, lp) {
             self.ren.blend_solid_hspan(
-                li.x() - span.offset as i32 + 1,
+                li.x() - span.offset + 1,
                 li.y(),
                 span.len as i32,
                 &self.color,
@@ -966,7 +968,7 @@ where
         while let Some(span) = li.step_hor(self.profile, lp) {
             self.ren.blend_solid_vspan(
                 li.x(),
-                li.y() - span.offset as i32 + 1,
+                li.y() - span.offset + 1,
                 span.len as i32,
                 &self.color,
                 &li.covers[span.p0..span.p0 + span.len],
@@ -977,7 +979,7 @@ where
     fn draw_line2_ver(&mut self, mut li: LineInterpolatorAa2, lp: &LineParameters) {
         while let Some(span) = li.step_ver(self.profile, lp) {
             self.ren.blend_solid_hspan(
-                li.x() - span.offset as i32 + 1,
+                li.x() - span.offset + 1,
                 li.y(),
                 span.len as i32,
                 &self.color,
@@ -1040,7 +1042,7 @@ where
         while let Some(span) = li.step_hor(self.profile, lp) {
             self.ren.blend_solid_vspan(
                 li.x(),
-                li.y() - span.offset as i32 + 1,
+                li.y() - span.offset + 1,
                 span.len as i32,
                 &self.color,
                 &li.covers[span.p0..span.p0 + span.len],
@@ -1051,7 +1053,7 @@ where
     fn draw_line3_ver(&mut self, mut li: LineInterpolatorAa3, lp: &LineParameters) {
         while let Some(span) = li.step_ver(self.profile, lp) {
             self.ren.blend_solid_hspan(
-                li.x() - span.offset as i32 + 1,
+                li.x() - span.offset + 1,
                 li.y(),
                 span.len as i32,
                 &self.color,
@@ -1063,8 +1065,7 @@ where
     /// Render a semi-circular dot (for round caps).
     /// Port of C++ `semidot`.
     pub fn semidot<F: Fn(i32) -> bool>(&mut self, cmp: F, xc1: i32, yc1: i32, xc2: i32, yc2: i32) {
-        let r =
-            ((self.profile.subpixel_width() + LINE_SUBPIXEL_MASK) >> LINE_SUBPIXEL_SHIFT) as i32;
+        let r = (self.profile.subpixel_width() + LINE_SUBPIXEL_MASK) >> LINE_SUBPIXEL_SHIFT;
         if r < 1 {
             return;
         }
@@ -1096,6 +1097,7 @@ where
 
     /// Port of C++ `semidot_hline`.
     /// x1, y1, x2 are in pixel coordinates; xc1/yc1/xc2/yc2 are subpixel.
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ signature
     fn semidot_hline<F: Fn(i32) -> bool>(
         &mut self,
         cmp: &F,
@@ -1149,8 +1151,7 @@ where
     /// Render a pie slice (for round joins between two line segments).
     /// Port of C++ `pie`.
     pub fn pie(&mut self, xc: i32, yc: i32, x1: i32, y1: i32, x2: i32, y2: i32) {
-        let r =
-            ((self.profile.subpixel_width() + LINE_SUBPIXEL_MASK) >> LINE_SUBPIXEL_SHIFT) as i32;
+        let r = (self.profile.subpixel_width() + LINE_SUBPIXEL_MASK) >> LINE_SUBPIXEL_SHIFT;
         if r < 1 {
             return;
         }
@@ -1182,6 +1183,7 @@ where
 
     /// Port of C++ `pie_hline`.
     /// xh1, yh1, xh2 are in pixel coordinates; xc/yc/xp1/yp1/xp2/yp2 are subpixel.
+    #[allow(clippy::too_many_arguments)] // mirrors the C++ signature
     fn pie_hline(
         &mut self,
         xc: i32,
@@ -1452,7 +1454,7 @@ impl LineInterpolatorAa0 {
         let mut p0 = center;
         let mut p1 = center;
 
-        self.covers[p1] = profile.value(s1) as u8;
+        self.covers[p1] = profile.value(s1);
         p1 += 1;
 
         let mut dy = 1usize;
@@ -1464,7 +1466,7 @@ impl LineInterpolatorAa0 {
             if dist > self.width {
                 break;
             }
-            self.covers[p1] = profile.value(dist) as u8;
+            self.covers[p1] = profile.value(dist);
             p1 += 1;
             dy += 1;
         }
@@ -1479,7 +1481,7 @@ impl LineInterpolatorAa0 {
                 break;
             }
             p0 -= 1;
-            self.covers[p0] = profile.value(dist) as u8;
+            self.covers[p0] = profile.value(dist);
             dy += 1;
         }
 
@@ -1514,7 +1516,7 @@ impl LineInterpolatorAa0 {
         let mut p0 = center;
         let mut p1 = center;
 
-        self.covers[p1] = profile.value(s1) as u8;
+        self.covers[p1] = profile.value(s1);
         p1 += 1;
 
         let mut dx = 1usize;
@@ -1526,7 +1528,7 @@ impl LineInterpolatorAa0 {
             if dist > self.width {
                 break;
             }
-            self.covers[p1] = profile.value(dist) as u8;
+            self.covers[p1] = profile.value(dist);
             p1 += 1;
             dx += 1;
         }
@@ -1541,7 +1543,7 @@ impl LineInterpolatorAa0 {
                 break;
             }
             p0 -= 1;
-            self.covers[p0] = profile.value(dist) as u8;
+            self.covers[p0] = profile.value(dist);
             dx += 1;
         }
 
@@ -1737,7 +1739,7 @@ impl LineInterpolatorAa1 {
 
         self.covers[p1] = 0;
         if dist_start <= 0 {
-            self.covers[p1] = profile.value(s1) as u8;
+            self.covers[p1] = profile.value(s1);
         }
         p1 += 1;
 
@@ -1753,7 +1755,7 @@ impl LineInterpolatorAa1 {
             dist_start -= self.di.dx_start();
             self.covers[p1] = 0;
             if dist_start <= 0 {
-                self.covers[p1] = profile.value(dist) as u8;
+                self.covers[p1] = profile.value(dist);
             }
             p1 += 1;
             dy += 1;
@@ -1773,7 +1775,7 @@ impl LineInterpolatorAa1 {
             p0 -= 1;
             self.covers[p0] = 0;
             if dist_start <= 0 {
-                self.covers[p0] = profile.value(dist) as u8;
+                self.covers[p0] = profile.value(dist);
             }
             dy += 1;
         }
@@ -1811,7 +1813,7 @@ impl LineInterpolatorAa1 {
 
         self.covers[p1] = 0;
         if dist_start <= 0 {
-            self.covers[p1] = profile.value(s1) as u8;
+            self.covers[p1] = profile.value(s1);
         }
         p1 += 1;
 
@@ -1827,7 +1829,7 @@ impl LineInterpolatorAa1 {
             dist_start += self.di.dy_start();
             self.covers[p1] = 0;
             if dist_start <= 0 {
-                self.covers[p1] = profile.value(dist) as u8;
+                self.covers[p1] = profile.value(dist);
             }
             p1 += 1;
             dx += 1;
@@ -1847,7 +1849,7 @@ impl LineInterpolatorAa1 {
             p0 -= 1;
             self.covers[p0] = 0;
             if dist_start <= 0 {
-                self.covers[p0] = profile.value(dist) as u8;
+                self.covers[p0] = profile.value(dist);
             }
             dx += 1;
         }
@@ -1951,7 +1953,7 @@ impl LineInterpolatorAa2 {
         let mut npix = 0;
         self.covers[p1] = 0;
         if dist_end > 0 {
-            self.covers[p1] = profile.value(s1) as u8;
+            self.covers[p1] = profile.value(s1);
             npix += 1;
         }
         p1 += 1;
@@ -1968,7 +1970,7 @@ impl LineInterpolatorAa2 {
             dist_end -= self.di.dx_end();
             self.covers[p1] = 0;
             if dist_end > 0 {
-                self.covers[p1] = profile.value(dist) as u8;
+                self.covers[p1] = profile.value(dist);
                 npix += 1;
             }
             p1 += 1;
@@ -1989,7 +1991,7 @@ impl LineInterpolatorAa2 {
             p0 -= 1;
             self.covers[p0] = 0;
             if dist_end > 0 {
-                self.covers[p0] = profile.value(dist) as u8;
+                self.covers[p0] = profile.value(dist);
                 npix += 1;
             }
             dy += 1;
@@ -2032,7 +2034,7 @@ impl LineInterpolatorAa2 {
         let mut npix = 0;
         self.covers[p1] = 0;
         if dist_end > 0 {
-            self.covers[p1] = profile.value(s1) as u8;
+            self.covers[p1] = profile.value(s1);
             npix += 1;
         }
         p1 += 1;
@@ -2049,7 +2051,7 @@ impl LineInterpolatorAa2 {
             dist_end += self.di.dy_end();
             self.covers[p1] = 0;
             if dist_end > 0 {
-                self.covers[p1] = profile.value(dist) as u8;
+                self.covers[p1] = profile.value(dist);
                 npix += 1;
             }
             p1 += 1;
@@ -2070,7 +2072,7 @@ impl LineInterpolatorAa2 {
             p0 -= 1;
             self.covers[p0] = 0;
             if dist_end > 0 {
-                self.covers[p0] = profile.value(dist) as u8;
+                self.covers[p0] = profile.value(dist);
                 npix += 1;
             }
             dx += 1;
@@ -2277,7 +2279,7 @@ impl LineInterpolatorAa3 {
         self.covers[p1] = 0;
         if dist_end > 0 {
             if dist_start <= 0 {
-                self.covers[p1] = profile.value(s1) as u8;
+                self.covers[p1] = profile.value(s1);
             }
             npix += 1;
         }
@@ -2296,7 +2298,7 @@ impl LineInterpolatorAa3 {
             dist_end -= self.di.dx_end();
             self.covers[p1] = 0;
             if dist_end > 0 && dist_start <= 0 {
-                self.covers[p1] = profile.value(dist) as u8;
+                self.covers[p1] = profile.value(dist);
                 npix += 1;
             }
             p1 += 1;
@@ -2319,7 +2321,7 @@ impl LineInterpolatorAa3 {
             p0 -= 1;
             self.covers[p0] = 0;
             if dist_end > 0 && dist_start <= 0 {
-                self.covers[p0] = profile.value(dist) as u8;
+                self.covers[p0] = profile.value(dist);
                 npix += 1;
             }
             dy += 1;
@@ -2364,7 +2366,7 @@ impl LineInterpolatorAa3 {
         self.covers[p1] = 0;
         if dist_end > 0 {
             if dist_start <= 0 {
-                self.covers[p1] = profile.value(s1) as u8;
+                self.covers[p1] = profile.value(s1);
             }
             npix += 1;
         }
@@ -2383,7 +2385,7 @@ impl LineInterpolatorAa3 {
             dist_end += self.di.dy_end();
             self.covers[p1] = 0;
             if dist_end > 0 && dist_start <= 0 {
-                self.covers[p1] = profile.value(dist) as u8;
+                self.covers[p1] = profile.value(dist);
                 npix += 1;
             }
             p1 += 1;
@@ -2406,7 +2408,7 @@ impl LineInterpolatorAa3 {
             p0 -= 1;
             self.covers[p0] = 0;
             if dist_end > 0 && dist_start <= 0 {
-                self.covers[p0] = profile.value(dist) as u8;
+                self.covers[p0] = profile.value(dist);
                 npix += 1;
             }
             dx += 1;

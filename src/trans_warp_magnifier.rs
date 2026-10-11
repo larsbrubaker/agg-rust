@@ -16,6 +16,12 @@ pub struct TransWarpMagnifier {
     pub radius: f64,
 }
 
+impl Default for TransWarpMagnifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransWarpMagnifier {
     pub fn new() -> Self {
         Self {

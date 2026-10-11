@@ -50,6 +50,12 @@ pub struct SpanInterpolatorPerspExact {
     scale_y: Dda2LineInterpolator,
 }
 
+impl Default for SpanInterpolatorPerspExact {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpanInterpolatorPerspExact {
     pub fn new() -> Self {
         Self {
@@ -167,6 +173,12 @@ pub struct SpanInterpolatorPerspLerp {
     coord_y: Dda2LineInterpolator,
     scale_x: Dda2LineInterpolator,
     scale_y: Dda2LineInterpolator,
+}
+
+impl Default for SpanInterpolatorPerspLerp {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SpanInterpolatorPerspLerp {

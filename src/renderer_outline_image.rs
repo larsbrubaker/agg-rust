@@ -202,6 +202,12 @@ pub struct LineImagePattern<F: PatternFilter> {
     offset_y_hr: i32,
 }
 
+impl<F: PatternFilter> Default for LineImagePattern<F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<F: PatternFilter> LineImagePattern<F> {
     /// Create an empty pattern with the specified filter type.
     pub fn new() -> Self {
@@ -321,6 +327,12 @@ impl<F: PatternFilter> LineImagePattern<F> {
 pub struct LineImagePatternPow2<F: PatternFilter> {
     base: LineImagePattern<F>,
     mask: u32,
+}
+
+impl<F: PatternFilter> Default for LineImagePatternPow2<F> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<F: PatternFilter> LineImagePatternPow2<F> {
@@ -634,7 +646,9 @@ impl DistanceInterpolator4 {
     pub fn dy_end(&self) -> i32 {
         self.dy_end
     }
+    /// C++ `len()`: the line length, not a collection size.
     #[inline]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> i32 {
         self.len
     }
@@ -1290,9 +1304,9 @@ mod tests {
         let lp = LineParameters::new(10 * 256, 50 * 256, 90 * 256, 50 * 256, 80 * 256);
         ren.line3(
             &lp,
-            10 * 256 + (0),
+            10 * 256,
             50 * 256 - (80 * 256),
-            90 * 256 + (0),
+            90 * 256,
             50 * 256 - (80 * 256),
         );
 

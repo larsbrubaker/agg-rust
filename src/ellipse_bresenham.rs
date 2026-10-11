@@ -170,6 +170,8 @@ mod tests {
 
         assert!(steps > 0);
         assert!(dy >= 0);
+        // The quarter arc from (0, -ry) ends at x = rx.
+        assert_eq!(dx, 3);
     }
 
     #[test]

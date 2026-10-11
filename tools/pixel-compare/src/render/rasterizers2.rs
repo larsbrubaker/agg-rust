@@ -338,7 +338,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         let mut s_step = SliderCtrl::new(10.0, 14.0, 150.0, 22.0);
         s_step.range(0.0, 2.0);
-        s_step.set_value(params.get(0).copied().unwrap_or(0.1));
+        s_step.set_value(params.first().copied().unwrap_or(0.1));
         s_step.label("Step=%1.2f");
         render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_step);
 

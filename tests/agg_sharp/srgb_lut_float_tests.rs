@@ -9,6 +9,7 @@ use agg_rust::color_rgba32::Rgba32;
 /// bit to a trace built against the reference renderer's headers.
 #[test]
 fn rgba32_from_srgba8_matches_cpp() {
+    #[allow(clippy::type_complexity)] // a literal table of C++ cases
     let cases: [(u32, u32, u32, u32, u32, u32, u32, u32); 7] = [
         (
             0xFD, 0xF0, 0x6F, 255, 0x3F7B74C6, 0x3F5F11EA, 0x3E22C6A1, 0x3F800000,
@@ -47,6 +48,7 @@ fn rgba32_from_srgba8_matches_cpp() {
 /// ends), alpha `int8u(0.5 + a * 255)`.
 #[test]
 fn srgba8_from_rgba32_matches_cpp() {
+    #[allow(clippy::type_complexity)] // a literal table of C++ cases
     let cases: [(u32, u32, u32, u32, u8, u8, u8, u8); 6] = [
         (0x00000000, 0x00000000, 0x00000000, 0x00000000, 0, 0, 0, 0),
         (

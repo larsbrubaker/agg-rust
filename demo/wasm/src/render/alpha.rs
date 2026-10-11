@@ -65,7 +65,7 @@ pub fn bspline_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let h = height as f64;
 
     // 6 control points
-    let px0 = params.get(0).copied().unwrap_or(100.0);
+    let px0 = params.first().copied().unwrap_or(100.0);
     let py0 = params.get(1).copied().unwrap_or(h - 100.0);
     let px1 = params.get(2).copied().unwrap_or(w - 100.0);
     let py1 = params.get(3).copied().unwrap_or(h - 100.0);
@@ -183,7 +183,7 @@ pub fn image_perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8
     let w = width as f64;
     let h = height as f64;
 
-    let q0x = params.get(0).copied().unwrap_or(100.0);
+    let q0x = params.first().copied().unwrap_or(100.0);
     let q0y = params.get(1).copied().unwrap_or(100.0);
     let q1x = params.get(2).copied().unwrap_or(w - 100.0);
     let q1y = params.get(3).copied().unwrap_or(100.0);
@@ -345,8 +345,8 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let cy = (msvc_rand(&mut seed) % height.max(1)) as f64;
             let rx = (msvc_rand(&mut seed) % 100 + 20) as f64;
             let ry = (msvc_rand(&mut seed) % 100 + 20) as f64;
-            let gray = (msvc_rand(&mut seed) & 0xFF) as u32;
-            let alpha = (msvc_rand(&mut seed) & 0xFF) as u32;
+            let gray = msvc_rand(&mut seed) & 0xFF;
+            let alpha = msvc_rand(&mut seed) & 0xFF;
 
             let mut ell = Ellipse::new(cx, cy, rx, ry, 100, false);
             mask_ras.reset();
@@ -435,7 +435,7 @@ pub fn alpha_gradient(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
 
-    let x0 = params.get(0).copied().unwrap_or(257.0);
+    let x0 = params.first().copied().unwrap_or(257.0);
     let y0 = params.get(1).copied().unwrap_or(60.0);
     let x1 = params.get(2).copied().unwrap_or(369.0);
     let y1 = params.get(3).copied().unwrap_or(170.0);
@@ -480,8 +480,8 @@ pub fn alpha_gradient(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // C++ uses spline_ctrl with fixed X points and draggable Y values.
     // Build the same control so the rendered widget and alpha LUT match.
     let mut alpha_ctrl = SplineCtrl::new(2.0, 2.0, 200.0, 30.0, 6);
-    for i in 0..6 {
-        alpha_ctrl.point(i, i as f64 / 5.0, a[i]);
+    for (i, &ai) in a.iter().enumerate().take(6) {
+        alpha_ctrl.point(i, i as f64 / 5.0, ai);
     }
     alpha_ctrl.update_spline();
     let alpha_lut = alpha_ctrl.spline8().to_vec();
@@ -516,6 +516,8 @@ pub fn alpha_gradient(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
     impl SpanConverterFunction for AlphaConverter {
         type Color = Rgba8;
+        // C++'s index loop over the caller's `len`.
+        #[allow(clippy::needless_range_loop)]
         fn convert(&mut self, span: &mut [Rgba8], x: i32, y: i32, len: u32) {
             for i in 0..len as usize {
                 let mut px = (x + i as i32) as f64;
@@ -1244,7 +1246,7 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     let w = width as f64;
     let h = height as f64;
 
-    let poly_angle = params.get(0).copied().unwrap_or(0.0);
+    let poly_angle = params.first().copied().unwrap_or(0.0);
     let poly_scale = params.get(1).copied().unwrap_or(1.0);
     let img_angle = params.get(2).copied().unwrap_or(0.0);
     let img_scale = params.get(3).copied().unwrap_or(1.0);
@@ -1292,7 +1294,7 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
             star.line_to(poly_cx + dx * r2, poly_cy + dy * r2);
         }
     }
-    star.close_polygon(PATH_FLAGS_CCW as u32);
+    star.close_polygon(PATH_FLAGS_CCW);
 
     let pa = poly_angle.to_radians();
     let mut poly_mtx = TransAffine::new();
@@ -1487,7 +1489,7 @@ struct Molecule {
     avr_len: f64,
 }
 
-fn get_field<'a>(line: &'a str, pos: usize, len: usize) -> &'a str {
+fn get_field(line: &str, pos: usize, len: usize) -> &str {
     let start = pos.saturating_sub(1);
     if start >= line.len() {
         return "";
@@ -1498,7 +1500,6 @@ fn get_field<'a>(line: &'a str, pos: usize, len: usize) -> &'a str {
 
 fn get_int(line: &str, pos: usize, len: usize) -> i32 {
     let token = get_field(line, pos, len)
-        .trim_start()
         .split_whitespace()
         .next()
         .unwrap_or("0");
@@ -1507,7 +1508,6 @@ fn get_int(line: &str, pos: usize, len: usize) -> i32 {
 
 fn get_dbl(line: &str, pos: usize, len: usize) -> f64 {
     let token = get_field(line, pos, len)
-        .trim_start()
         .split_whitespace()
         .next()
         .unwrap_or("0");
@@ -1516,7 +1516,6 @@ fn get_dbl(line: &str, pos: usize, len: usize) -> f64 {
 
 fn get_str(line: &str, pos: usize, len: usize) -> String {
     get_field(line, pos, len)
-        .trim_start()
         .split_whitespace()
         .next()
         .unwrap_or("")
@@ -1843,7 +1842,7 @@ impl VertexSource for DashedWedge {
 
     fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
         if self.vertex < self.num_dashes * 4 {
-            if (self.vertex % 4) == 0 {
+            if self.vertex.is_multiple_of(4) {
                 let k1 = (self.vertex / 4) as f64 / self.num_dashes as f64;
                 let k2 = k1 + 0.4 / self.num_dashes as f64;
                 self.xd[0] = self.x1 + (self.xt2 - self.x1) * k1;
@@ -2016,7 +2015,7 @@ impl VertexSource for BondVertexGenerator<'_> {
 pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
-    let mol_idx = params.get(0).copied().unwrap_or(0.0).max(0.0) as usize;
+    let mol_idx = params.first().copied().unwrap_or(0.0).max(0.0) as usize;
     let thickness_ctrl = params.get(1).copied().unwrap_or(0.5);
     let text_size_ctrl = params.get(2).copied().unwrap_or(0.5);
     let angle = params.get(3).copied().unwrap_or(0.0);
@@ -2161,7 +2160,7 @@ pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[1] = blur factor (0.5-2.0, default 1.0)
 /// params[2..9] = quad corners (x0,y0,x1,y1,x2,y2,x3,y3)
 pub fn image_resample_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let mode = params.get(0).copied().unwrap_or(0.0) as u32;
+    let mode = params.first().copied().unwrap_or(0.0) as u32;
     let blur = params.get(1).copied().unwrap_or(1.0).clamp(0.5, 2.0);
 
     let w = width as f64;
@@ -2317,7 +2316,7 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         (*state >> 16) & 0x7FFF
     }
 
-    let num_ellipses = params.get(0).copied().unwrap_or(10.0).clamp(5.0, 100.0) as u32;
+    let num_ellipses = params.first().copied().unwrap_or(10.0).clamp(5.0, 100.0) as u32;
     let angle = params.get(1).copied().unwrap_or(0.0);
     let scale = params.get(2).copied().unwrap_or(1.0).max(0.01);
     let skew_x = params.get(3).copied().unwrap_or(0.0);
@@ -2353,8 +2352,8 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let cy = (msvc_rand15(&mut rng_state) % height) as f64;
             let rx = (msvc_rand15(&mut rng_state) % 100 + 20) as f64;
             let ry = (msvc_rand15(&mut rng_state) % 100 + 20) as f64;
-            let v = ((msvc_rand15(&mut rng_state) & 127) + 128) as u32;
-            let a = ((msvc_rand15(&mut rng_state) & 127) + 128) as u32;
+            let v = (msvc_rand15(&mut rng_state) & 127) + 128;
+            let a = (msvc_rand15(&mut rng_state) & 127) + 128;
 
             let mut ell = Ellipse::new(cx, cy, rx, ry, 100, false);
             ras.reset();
@@ -2402,16 +2401,16 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut prim = RendererPrimitives::new(&mut temp_rb);
             for _ in 0..50 {
                 let line_color = Rgba8::new(
-                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                    ((msvc_rand15(&mut rng_state) & 0x7F) + 0x7F) as u32,
+                    msvc_rand15(&mut rng_state) & 0x7F,
+                    msvc_rand15(&mut rng_state) & 0x7F,
+                    msvc_rand15(&mut rng_state) & 0x7F,
+                    (msvc_rand15(&mut rng_state) & 0x7F) + 0x7F,
                 );
                 let fill_color = Rgba8::new(
-                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                    (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                    ((msvc_rand15(&mut rng_state) & 0x7F) + 0x7F) as u32,
+                    msvc_rand15(&mut rng_state) & 0x7F,
+                    msvc_rand15(&mut rng_state) & 0x7F,
+                    msvc_rand15(&mut rng_state) & 0x7F,
+                    (msvc_rand15(&mut rng_state) & 0x7F) + 0x7F,
                 );
                 prim.set_line_color(line_color);
                 prim.set_fill_color(fill_color);
@@ -2453,10 +2452,10 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             stroke.set_width(5.0);
             stroke.set_line_cap(LineCap::Round);
             let color = Rgba8::new(
-                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                ((msvc_rand15(&mut rng_state) & 0x7F) + 0x7F) as u32,
+                msvc_rand15(&mut rng_state) & 0x7F,
+                msvc_rand15(&mut rng_state) & 0x7F,
+                msvc_rand15(&mut rng_state) & 0x7F,
+                (msvc_rand15(&mut rng_state) & 0x7F) + 0x7F,
             );
             ras.reset();
             ras.add_path(&mut stroke, 0);
@@ -2469,9 +2468,9 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let y = (msvc_rand15(&mut rng_state) % height) as f64;
             let r = (msvc_rand15(&mut rng_state) % 10 + 5) as f64;
             let color = Rgba8::new(
-                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
-                (msvc_rand15(&mut rng_state) & 0x7F) as u32,
+                msvc_rand15(&mut rng_state) & 0x7F,
+                msvc_rand15(&mut rng_state) & 0x7F,
+                msvc_rand15(&mut rng_state) & 0x7F,
                 255,
             );
             let mut ell = Ellipse::new(x, y, r, r, 32, false);
@@ -2504,8 +2503,6 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             }
         }
     }
-
-    drop(rb);
 
     // Step 4: Render C++ slider control on top.
     {

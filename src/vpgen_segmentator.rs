@@ -23,6 +23,12 @@ pub struct VpgenSegmentator {
     cmd: u32,
 }
 
+impl Default for VpgenSegmentator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VpgenSegmentator {
     pub fn new() -> Self {
         Self {

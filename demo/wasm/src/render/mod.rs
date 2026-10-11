@@ -60,7 +60,7 @@ pub(super) fn load_spheres_image() -> (u32, u32, Vec<u8>) {
     let h = u32::from_le_bytes([d[22], d[23], d[24], d[25]]);
     let bpp = u16::from_le_bytes([d[28], d[29]]) as usize;
     let bytes_pp = bpp / 8;
-    let row_size = ((w as usize * bytes_pp + 3) / 4) * 4;
+    let row_size = (w as usize * bytes_pp).div_ceil(4) * 4;
     let mut rgba = vec![255u8; (w * h * 4) as usize];
     for y in 0..h as usize {
         let src_y = h as usize - 1 - y;
@@ -89,7 +89,7 @@ pub(super) fn load_spheres_image_native() -> (u32, u32, Vec<u8>) {
     let h = u32::from_le_bytes([d[22], d[23], d[24], d[25]]);
     let bpp = u16::from_le_bytes([d[28], d[29]]) as usize;
     let bytes_pp = bpp / 8;
-    let row_size = ((w as usize * bytes_pp + 3) / 4) * 4;
+    let row_size = (w as usize * bytes_pp).div_ceil(4) * 4;
     let mut rgba = vec![255u8; (w * h * 4) as usize];
     for y in 0..h as usize {
         // No flip: BMP row y maps directly to output row y (bottom-up order)

@@ -734,9 +734,9 @@ mod tests {
 
         // Total cover across all cells should equal dy in subpixel units
         let total_cover: i32 = ras.cells.iter().map(|c| c.cover).sum();
-        assert_eq!(total_cover, (y2 - y1) >> 0); // dy in subpixel = 3*256 = 768
-                                                 // Actually, cover is accumulated in subpixel units within each cell row
-                                                 // The total should be 3 * POLY_SUBPIXEL_SCALE = 768
+        assert_eq!(total_cover, (y2 - y1)); // dy in subpixel = 3*256 = 768
+                                            // Actually, cover is accumulated in subpixel units within each cell row
+                                            // The total should be 3 * POLY_SUBPIXEL_SCALE = 768
         assert_eq!(total_cover, 3 * POLY_SUBPIXEL_SCALE as i32);
     }
 

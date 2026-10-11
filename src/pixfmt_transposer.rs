@@ -78,6 +78,9 @@ impl<PF: PixelFormat> PixelFormat for PixfmtTransposer<PF> {
         }
     }
 
+    // C++'s index loop over the caller's `len`: a short `colors`/`covers` slice
+    // stays a panic rather than a silent truncation.
+    #[allow(clippy::needless_range_loop)]
     fn blend_color_hspan(
         &mut self,
         x: i32,

@@ -1135,7 +1135,7 @@ mod tests {
         // With one pass, pooling must be identical to the pre-existing single-pass
         // best/median so the default (--passes 1) is a no-op vs the old behavior.
         let samples = vec![4.0, 1.0, 3.0, 2.0];
-        let (best, median) = pooled_best_median(&[samples.clone()]);
+        let (best, median) = pooled_best_median(std::slice::from_ref(&samples));
         assert_eq!(best, best_ms(&samples));
         assert_eq!(median, median_ms(&samples));
     }

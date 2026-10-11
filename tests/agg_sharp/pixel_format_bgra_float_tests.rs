@@ -75,7 +75,6 @@ fn assert_sequence_matches<B: BlenderRgbaF32>(expected: &[u32]) {
     pf2.blend_color_hspan(1, 2, 6, &cs, &[], 255);
     ren.blend_from(ren2.ren(), None, 0, 0, 191);
     ren.blend_from(ren2.ren(), None, 1, 1, 255);
-    drop(ren);
 
     assert_eq!(buf.len(), expected.len());
     for (i, (v, e)) in buf.iter().zip(expected).enumerate() {

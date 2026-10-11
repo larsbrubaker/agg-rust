@@ -1949,6 +1949,8 @@ pub fn make_gb_poly(ps: &mut PathStorage) {
 
 /// Build the arrow shapes into a PathStorage.
 /// Port of make_arrows() from make_arrows.cpp.
+// make_arrows.cpp's literals, kept verbatim.
+#[allow(clippy::excessive_precision)]
 pub fn make_arrows(ps: &mut PathStorage) {
     ps.move_to(1330.599999999999909, 1282.399999999999864);
     ps.line_to(1377.400000000000091, 1282.399999999999864);

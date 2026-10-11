@@ -59,10 +59,10 @@ use agg_rust::trans_affine::TransAffine;
 pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // params[0] = radius (2.0-8.0, default 4.0)
     // params[1..17] = 16 checkbox states (0 or 1)
-    let radius = params.get(0).copied().unwrap_or(4.0).clamp(2.0, 8.0);
+    let radius = params.first().copied().unwrap_or(4.0).clamp(2.0, 8.0);
     let mut enabled = [false; 16];
-    for i in 0..16 {
-        enabled[i] = params.get(1 + i).copied().unwrap_or(0.0) > 0.5;
+    for (i, e) in enabled.iter_mut().enumerate() {
+        *e = params.get(1 + i).copied().unwrap_or(0.0) > 0.5;
     }
 
     let mut buf = Vec::new();
@@ -204,8 +204,8 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     // For each enabled filter, plot its 3 curves
-    for i in 0..16 {
-        if !enabled[i] {
+    for (i, &on) in enabled.iter().enumerate() {
+        if !on {
             continue;
         }
         match i {
@@ -277,7 +277,7 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 ///
 /// params: [angle_deg, scale]
 pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let angle_deg = params.get(0).copied().unwrap_or(0.0);
+    let angle_deg = params.first().copied().unwrap_or(0.0);
     let scale = params.get(1).copied().unwrap_or(1.0).max(0.1);
 
     let mut buf = Vec::new();
@@ -410,12 +410,13 @@ struct ImageFiltersCache {
 }
 
 thread_local! {
-    static FILTERS_CACHE: RefCell<Option<ImageFiltersCache>> = RefCell::new(None);
+    static FILTERS_CACHE: RefCell<Option<ImageFiltersCache>> = const { RefCell::new(None) };
 }
 
 /// Apply a single image rotation transform through an ellipse clip.
 /// Image buffers use negative stride (matching C++ AGG convention with flip_y=true).
 /// After this call, `src` contains the result (src and dst are swapped internally).
+#[allow(clippy::too_many_arguments)] // mirrors the C++ example's helper
 fn apply_image_transform(
     src: &mut Vec<u8>,
     dst: &mut Vec<u8>,
@@ -494,7 +495,7 @@ fn apply_image_transform(
             let mut rb = RendererBase::new(pf);
             render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut alloc, &mut sg);
         }
-        5 | 6 | 7 => {
+        5..=7 => {
             let mut lut = ImageFilterLut::new();
             match filter_idx {
                 5 => lut.calculate(&ImageFilterHanning, normalize),
@@ -547,7 +548,7 @@ fn apply_image_transform(
 /// params[5] = kpix_sec (default 0.0 = don't display)
 /// params[6] = incremental (0/1, default 0 — when 1, do only one step from cache)
 pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let filter_idx = params.get(0).copied().unwrap_or(1.0) as usize;
+    let filter_idx = params.first().copied().unwrap_or(1.0) as usize;
     let step_deg = params.get(1).copied().unwrap_or(5.0).clamp(1.0, 10.0);
     let normalize = params.get(2).copied().unwrap_or(1.0) > 0.5;
     let radius = params.get(3).copied().unwrap_or(4.0).clamp(2.0, 8.0);
@@ -764,7 +765,7 @@ pub fn gradient_focal(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let h = height as f64;
     let cx = w / 2.0;
     let cy = h / 2.0;
-    let focal_x = params.get(0).copied().unwrap_or(cx);
+    let focal_x = params.first().copied().unwrap_or(cx);
     let focal_y = params.get(1).copied().unwrap_or(cy);
     let _gamma = params.get(2).copied().unwrap_or(1.0);
 
@@ -854,7 +855,7 @@ pub fn gradient_focal(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[4] = angle delta (default 0.01, for display)
 /// params[5] = rotate enabled (0 or 1, default 0)
 pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let angle_deg = params.get(0).copied().unwrap_or(0.0);
+    let angle_deg = params.first().copied().unwrap_or(0.0);
     let even_odd = params.get(1).copied().unwrap_or(0.0) > 0.5;
     let _draft = params.get(2).copied().unwrap_or(0.0) > 0.5;
     let roundoff = params.get(3).copied().unwrap_or(0.0) > 0.5;
@@ -1147,6 +1148,7 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ];
 
     // Group paths by attribute: (polygons, attr_index)
+    #[allow(clippy::type_complexity)] // a literal table, clearest spelled out
     let groups: [(&[&[(f64, f64)]], usize); 3] = [
         (&[poly_bulb], 0),
         (&[poly_beam1, poly_beam2, poly_beam3, poly_beam4], 1),
@@ -1320,7 +1322,7 @@ fn generate_graph(num_nodes: usize, num_edges: usize) -> (Vec<GraphNode>, Vec<Gr
 /// params[4] = draft mode (0 or 1, default 0)
 /// params[5] = translucent (0 or 1, default 0)
 pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let edge_type = params.get(0).copied().unwrap_or(0.0) as usize;
+    let edge_type = params.first().copied().unwrap_or(0.0) as usize;
     let stroke_width = params.get(1).copied().unwrap_or(2.0);
     let draw_nodes = params.get(2).copied().unwrap_or(1.0) > 0.5;
     let draw_edges = params.get(3).copied().unwrap_or(1.0) > 0.5;
@@ -1377,7 +1379,7 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let r = edge_rng.next() & 0x7F;
             let g = edge_rng.next() & 0x7F;
             let b = edge_rng.next() & 0x7F;
-            let edge_color = Rgba8::new(r, g, b, alpha as u32);
+            let edge_color = Rgba8::new(r, g, b, alpha);
 
             match edge_type {
                 0 => {
@@ -1532,7 +1534,7 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Gamma tuner — gradient background + alpha pattern with gamma correction.
 /// Matches C++ gamma_tuner.cpp.
 pub fn gamma_tuner(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let gamma_val = params.get(0).copied().unwrap_or(2.2);
+    let gamma_val = params.first().copied().unwrap_or(2.2);
     let r_val = params.get(1).copied().unwrap_or(1.0);
     let g_val = params.get(2).copied().unwrap_or(1.0);
     let b_val = params.get(3).copied().unwrap_or(1.0);
@@ -1725,7 +1727,7 @@ pub fn gamma_tuner(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Image filters 2 — 4x4 test image filtered through 17 types.
 /// Matches C++ image_filters2.cpp.
 pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let filter_idx = params.get(0).copied().unwrap_or(1.0) as usize;
+    let filter_idx = params.first().copied().unwrap_or(1.0) as usize;
     let gamma_val = params.get(1).copied().unwrap_or(1.0);
     let radius = params.get(2).copied().unwrap_or(4.0);
     let normalize = params.get(3).copied().unwrap_or(1.0) > 0.5;
@@ -1922,7 +1924,7 @@ pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Conv dash marker — dashed stroke with cap styles.
 /// Matches C++ conv_dash_marker.cpp, including marker arrows.
 pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let x0 = params.get(0).copied().unwrap_or(157.0);
+    let x0 = params.first().copied().unwrap_or(157.0);
     let y0 = params.get(1).copied().unwrap_or(60.0);
     let x1 = params.get(2).copied().unwrap_or(469.0);
     let y1 = params.get(3).copied().unwrap_or(170.0);
@@ -2211,7 +2213,7 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
 /// AA test — radial dashes, ellipses, gradient lines, gradient triangles.
 /// Matches C++ aa_test.cpp.
 pub fn aa_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let gamma_val = params.get(0).copied().unwrap_or(1.6);
+    let gamma_val = params.first().copied().unwrap_or(1.6);
 
     let w = width as f64;
     let h = height as f64;

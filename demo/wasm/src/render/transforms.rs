@@ -540,16 +540,16 @@ pub fn multi_clip(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     };
 
     for _ in 0..50 {
-        let cx = (rng() % width as u32) as f64;
-        let cy = (rng() % height as u32) as f64;
+        let cx = (rng() % width) as f64;
+        let cy = (rng() % height) as f64;
         let radius = (rng() % 10 + 5) as f64;
 
         let mut ell = Ellipse::new(cx, cy, radius, radius, 32, false);
         let color = Rgba8::new(
-            (rng() & 0x7F) as u32,
-            (rng() & 0x7F) as u32,
-            (rng() & 0x7F) as u32,
-            ((rng() & 0x7F) + 0x7F) as u32,
+            rng() & 0x7F,
+            rng() & 0x7F,
+            rng() & 0x7F,
+            (rng() & 0x7F) + 0x7F,
         );
         ras.reset();
         ras.add_path(&mut ell, 0);
@@ -630,7 +630,6 @@ pub fn simple_blur(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         ren_oaa.set_color(colors[i]);
         ras_oaa.add_path(&mut transformed, start, &mut ren_oaa);
     }
-    drop(ren_oaa);
 
     // Two concentric strokes around the blur area.
     let mut ell = Ellipse::new(blur_cx, blur_cy, 100.0, 100.0, 100, false);
@@ -727,7 +726,7 @@ fn apply_simple_blur_ellipse(
                 }
                 let (sr, sg, sb) = sample_simple_blur_rgb24(&src_rgb, width, height, x, y);
                 let cov = covers[span.cover_offset + i] as u32;
-                let di = ((y as usize * width as usize + x as usize) * 4) as usize;
+                let di = (y as usize * width as usize + x as usize) * 4;
                 let dr = buf[di] as u32;
                 let dg = buf[di + 1] as u32;
                 let db = buf[di + 2] as u32;
@@ -814,6 +813,7 @@ fn transform_path_vertices<F: FnMut(&mut f64, &mut f64)>(path: &mut PathStorage,
     }
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the C++ example's helper
 fn blur_subrect(
     buf: &mut [u8],
     width: u32,
@@ -926,9 +926,9 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     let defaults_quad = [sx1, sy1, sx2, sy1, sx2, sy2, sx1, sy2];
     let mut shadow_quad = defaults_quad;
-    for i in 0..8 {
+    for (i, q) in shadow_quad.iter_mut().enumerate() {
         if let Some(v) = params.get(5 + i) {
-            shadow_quad[i] = *v;
+            *q = *v;
         }
     }
 
@@ -2413,6 +2413,7 @@ organic light emitting diodes and other display technologies.";
 ///
 /// Port of C++ `draw_text()` from truetype_lcd.cpp.
 /// Returns the final y position after rendering all lines.
+#[allow(clippy::too_many_arguments)] // mirrors the C++ example's helper
 fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
     ras: &mut RasterizerScanlineAa,
     sl: &mut ScanlineU8,

@@ -185,6 +185,8 @@ mod tests {
     // Glyph data: width=2, then 1 byte per row (2 rows)
     // Row 0: 0b11000000 = both pixels on
     // Row 1: 0b01000000 = only second pixel on
+    // One annotated push per font byte reads like the C++ font table.
+    #[allow(clippy::vec_init_then_push)]
     fn make_test_font() -> Vec<u8> {
         let mut font = Vec::new();
         // Header

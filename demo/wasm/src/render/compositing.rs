@@ -52,6 +52,9 @@ use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
 use agg_rust::trans_viewport::{AspectRatio, TransViewport};
 
+/// One bezier curve of line_patterns.cpp: start, two control points, end.
+type Curve = (f64, f64, f64, f64, f64, f64, f64, f64);
+
 // ============================================================================
 // Blend Color — shape with blurred shadow
 // ============================================================================
@@ -814,13 +817,13 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             mtx1.multiply(&TransAffine::new_translation(-1150.0, -1150.0));
             mtx1.multiply(&TransAffine::new_scaling_uniform(2.0));
 
-            let mut mtx2 = mtx1.clone();
+            let mut mtx2 = mtx1;
             mtx2.multiply(&TransAffine::new_translation(
                 mouse_x - initial_width / 2.0,
                 mouse_y - initial_height / 2.0,
             ));
 
-            let mut trans_gb_poly = ConvTransform::new(&mut gb_poly, mtx1.clone());
+            let mut trans_gb_poly = ConvTransform::new(&mut gb_poly, mtx1);
             let mut trans_arrows = ConvTransform::new(&mut arrows, mtx2);
 
             ras2.add_path(&mut trans_gb_poly, 0);
@@ -1014,7 +1017,7 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         // Render timing/spans text (use GsvText for display)
         {
-            let label = format!("Combine=N/A\n\nRender=N/A\n\nnum_spans=N/A");
+            let label = "Combine=N/A\n\nRender=N/A\n\nnum_spans=N/A".to_string();
             let mut txt = GsvText::new();
             txt.size(8.0, 0.0);
             txt.start_point(420.0, 40.0);
@@ -1361,6 +1364,8 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[0..8] = quad vertices
 /// params[8] = gamma (0.5-3.0, default 1.0)
 /// params[9] = blur (0.5-2.0, default 1.0)
+// The pattern image uses a literal 6.28; TAU would change its pixels.
+#[allow(clippy::approx_constant)]
 pub fn pattern_resample(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
@@ -1400,13 +1405,13 @@ pub fn pattern_resample(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let dx = u - 0.5;
             let dy = v - 0.5;
             let d = (dx * dx + dy * dy).sqrt() * 4.0;
-            let r = ((128.0 + 127.0 * (d * 6.28).sin()) as f64)
+            let r = (128.0 + 127.0 * (d * 6.28).sin())
                 .powf(gamma_val)
                 .clamp(0.0, 255.0);
-            let g = ((128.0 + 127.0 * (d * 6.28 + 2.1).sin()) as f64)
+            let g = (128.0 + 127.0 * (d * 6.28 + 2.1).sin())
                 .powf(gamma_val)
                 .clamp(0.0, 255.0);
-            let b = ((128.0 + 127.0 * (d * 6.28 + 4.2).sin()) as f64)
+            let b = (128.0 + 127.0 * (d * 6.28 + 4.2).sin())
                 .powf(gamma_val)
                 .clamp(0.0, 255.0);
             img_buf[off] = r as u8;
@@ -1537,9 +1542,6 @@ pub fn lion_outline(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             ren_oaa.set_color(colors[i]);
             ras_oaa.add_path(&mut transformed, start, &mut ren_oaa);
         }
-
-        // Need to get rb back from ren_oaa for controls
-        drop(ren_oaa);
     }
 
     // Controls
@@ -1883,7 +1885,7 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         let mut s_step = SliderCtrl::new(10.0, 14.0, 150.0, 22.0);
         s_step.range(0.0, 2.0);
-        s_step.set_value(params.get(0).copied().unwrap_or(0.1));
+        s_step.set_value(params.first().copied().unwrap_or(0.1));
         s_step.label("Step=%1.2f");
         render_ctrl(&mut ras, &mut sl, &mut rb, &mut s_step);
 
@@ -2053,7 +2055,7 @@ pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     use agg_rust::pattern_filters_rgba::PatternFilterBilinearRgba;
     use agg_rust::renderer_outline_image::{LineImagePattern, RendererOutlineImage};
 
-    let scale_x = params.get(0).copied().unwrap_or(1.0).clamp(0.2, 3.0);
+    let scale_x = params.first().copied().unwrap_or(1.0).clamp(0.2, 3.0);
     let start_x = params.get(1).copied().unwrap_or(0.0).clamp(0.0, 10.0);
 
     let mut buf = Vec::new();
@@ -2065,7 +2067,7 @@ pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     rb.clear(&Rgba8::new(255, 255, 242, 255));
 
     // Default bezier curve control points — exact match of C++ line_patterns.cpp
-    let defaults: [(f64, f64, f64, f64, f64, f64, f64, f64); 9] = [
+    let defaults: [Curve; 9] = [
         (64.0, 19.0, 14.0, 126.0, 118.0, 266.0, 19.0, 265.0),
         (112.0, 113.0, 178.0, 32.0, 200.0, 132.0, 125.0, 438.0),
         (401.0, 24.0, 326.0, 149.0, 285.0, 11.0, 177.0, 77.0),
@@ -2079,12 +2081,12 @@ pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Read control points from params[2..74] if provided (from interactive JS drag),
     // otherwise use the C++ defaults.
-    let curves: [(f64, f64, f64, f64, f64, f64, f64, f64); 9] = if params.len() >= 74 {
+    let curves: [Curve; 9] = if params.len() >= 74 {
         let p = &params[2..];
         let mut c = defaults;
-        for i in 0..9 {
+        for (i, ci) in c.iter_mut().enumerate() {
             let o = i * 8;
-            c[i] = (
+            *ci = (
                 p[o],
                 p[o + 1],
                 p[o + 2],
@@ -2205,7 +2207,7 @@ pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[1] = accurate_joins (0 or 1)
 /// params[2] = start_angle (degrees)
 pub fn line_patterns_clip(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let line_width = params.get(0).copied().unwrap_or(3.0).max(0.1);
+    let line_width = params.first().copied().unwrap_or(3.0).max(0.1);
     let accurate_joins = params.get(1).copied().unwrap_or(0.0) > 0.5;
     let start_angle = params.get(2).copied().unwrap_or(0.0).to_radians();
 
@@ -2339,6 +2341,7 @@ fn gradient_affine(x1: f64, y1: f64, x2: f64, y2: f64, d2: f64) -> TransAffine {
     mtx
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the C++ example's helper
 fn render_circle_gradient(
     rb: &mut RendererBase<PixfmtRgba32>,
     x1: f64,
@@ -2481,11 +2484,11 @@ fn parse_p6_ppm(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 }
 
 fn draw_checkerboard(rb: &mut RendererBase<PixfmtRgba32>) {
-    let h = rb.height() as u32;
-    let w = rb.width() as u32;
+    let h = rb.height();
+    let w = rb.width();
     let mut y = 0u32;
     while y < h {
-        let mut x = (((y >> 3) & 1) << 3) as u32;
+        let mut x = ((y >> 3) & 1) << 3;
         while x < w {
             rb.blend_bar(
                 x as i32,
@@ -2723,6 +2726,8 @@ impl ColorFunction for ColorRamp {
 /// double-precision path, so example, harness, and this port now all agree —
 /// verified byte-identical at both `alpha = 1.0` and `alpha = 0.5` (see the
 /// `compositing2_matches_cpp_reference_*` regression tests).
+// The three ramp segments read clearest as index ranges.
+#[allow(clippy::needless_range_loop)]
 fn generate_color_ramp(c1: [f64; 4], c2: [f64; 4], c3: [f64; 4], c4: [f64; 4]) -> ColorRamp {
     let grad = |a: [f64; 4], b: [f64; 4], k: f64| -> Rgba8 {
         Rgba8::new(
@@ -2757,7 +2762,6 @@ pub fn compositing2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
-    drop(rb);
 
     let resize_mtx = build_resize_mtx(width, height, true);
     let ramp1 = generate_color_ramp(
@@ -2819,7 +2823,6 @@ pub fn compositing2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         cx + 270.0,
         cy + 270.0,
     );
-    drop(rb_comp);
 
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
@@ -3541,7 +3544,7 @@ fn compose_rasterizer_compound_path(path: &mut PathStorage) {
 /// params[4] = alpha4 (0..1)
 /// params[5] = invert layer order (0/1)
 pub fn rasterizer_compound(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let stroke_width = params.get(0).copied().unwrap_or(10.0).clamp(-20.0, 50.0);
+    let stroke_width = params.first().copied().unwrap_or(10.0).clamp(-20.0, 50.0);
     let alpha1 = params.get(1).copied().unwrap_or(1.0).clamp(0.0, 1.0);
     let alpha2 = params.get(2).copied().unwrap_or(1.0).clamp(0.0, 1.0);
     let alpha3 = params.get(3).copied().unwrap_or(1.0).clamp(0.0, 1.0);
@@ -3563,10 +3566,10 @@ pub fn rasterizer_compound(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let k = x as f64 / w.max(1.0);
             let c = Rgba8::new(255, 255, 0, 255).gradient(&Rgba8::new(0, 255, 255, 255), k);
             let i = (y * width as usize + x) * 4;
-            buf[i] = c.r as u8;
-            buf[i + 1] = c.g as u8;
-            buf[i + 2] = c.b as u8;
-            buf[i + 3] = c.a as u8;
+            buf[i] = c.r;
+            buf[i + 1] = c.g;
+            buf[i + 2] = c.b;
+            buf[i + 3] = c.a;
         }
     }
 

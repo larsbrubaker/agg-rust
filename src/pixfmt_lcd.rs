@@ -281,7 +281,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
         }
 
         // Step 2: Adjust start position (distribution extends 2 subpixels before)
-        let mut sp_start = x as i32 - 2;
+        let mut sp_start = x - 2;
         let mut c3_offset = 0usize;
         let mut remaining = dist_len;
 

@@ -398,6 +398,8 @@ impl TransAffine {
     /// to match its behavior exactly. Using full-precision FRAC_1_SQRT_2 would
     /// produce a slightly different result that causes the line profile width
     /// computation to take a different branch, amplifying the difference.
+    // C++'s literal truncated constant, kept on purpose (see above).
+    #[allow(clippy::approx_constant)]
     pub fn get_scale(&self) -> f64 {
         let x = 0.707106781_f64 * self.sx + 0.707106781_f64 * self.shx;
         let y = 0.707106781_f64 * self.shy + 0.707106781_f64 * self.sy;

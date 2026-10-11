@@ -58,6 +58,8 @@ impl<Src: ImageSource> SpanGenerator for SpanPatternRgba<Src> {
 
     fn prepare(&mut self) {}
 
+    // C++'s index loop over the caller's `len` (a short span stays a panic).
+    #[allow(clippy::needless_range_loop)]
     fn generate(&mut self, span: &mut [Rgba8], x: i32, y: i32, len: u32) {
         let sx = x + self.offset_x as i32;
         let sy = y + self.offset_y as i32;

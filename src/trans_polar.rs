@@ -19,6 +19,12 @@ pub struct TransPolar {
     pub spiral: f64,
 }
 
+impl Default for TransPolar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransPolar {
     pub fn new() -> Self {
         Self {

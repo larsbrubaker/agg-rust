@@ -19,12 +19,13 @@ use crate::rendering_buffer::RowAccessor;
 ///
 /// Port of C++ `comp_op_e`. Each variant corresponds to a specific
 /// alpha-compositing formula from the SVG Compositing specification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum CompOp {
     Clear = 0,
     Src = 1,
     Dst = 2,
+    #[default]
     SrcOver = 3,
     DstOver = 4,
     SrcIn = 5,
@@ -47,12 +48,6 @@ pub enum CompOp {
     SoftLight = 22,
     Difference = 23,
     Exclusion = 24,
-}
-
-impl Default for CompOp {
-    fn default() -> Self {
-        CompOp::SrcOver
-    }
 }
 
 // ============================================================================
@@ -250,7 +245,7 @@ pub(crate) fn comp_op_blend<T: CompChannel>(
 // ---- Clear: Dca' = 0, Da' = 0
 #[inline(always)]
 fn blend_clear<T: CompChannel>(p: &mut [T; 4], cover: u8) {
-    if cover >= 255 {
+    if cover == 255 {
         p[0] = T::ZERO;
         p[1] = T::ZERO;
         p[2] = T::ZERO;
@@ -264,7 +259,7 @@ fn blend_clear<T: CompChannel>(p: &mut [T; 4], cover: u8) {
 // ---- Src: Dca' = Sca, Da' = Sa
 #[inline(always)]
 fn blend_src<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
-    if cover >= 255 {
+    if cover == 255 {
         PremulRgba::set_rgba(p, r, g, b, a);
     } else {
         let s = PremulRgba::get(r, g, b, a, cover);
@@ -1024,6 +1019,8 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let a = c.a;
             // Iterate fixed [u8; 4] pixels so each blend sees a bounds-check-free
             // 4-byte array, letting the load/compute/store stay in XMM registers.
+            #[allow(clippy::incompatible_msrv)]
+            // slice::as_chunks_mut is 1.88; reported against rust-version 1.70
             let (pixels, _rem) = span.as_chunks_mut::<BPP>();
             for px in pixels {
                 blend(px, r, g, b, a, cover);
@@ -1041,6 +1038,8 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let g = Rgba8::multiply(c.g, c.a);
             let b = Rgba8::multiply(c.b, c.a);
             let a = c.a;
+            #[allow(clippy::incompatible_msrv)]
+            // slice::as_chunks_mut is 1.88; reported against rust-version 1.70
             let (pixels, _rem) = span.as_chunks_mut::<BPP>();
             for (px, &cov) in pixels.iter_mut().zip(covers.iter()) {
                 blend(px, r, g, b, a, cov);
@@ -1064,6 +1063,8 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             // Colour differs per pixel here, so the premultiply must stay per pixel
             // (matching comp_op_adaptor_rgba). The single outer op-dispatch and the
             // pre-sliced span are what remove the overhead.
+            #[allow(clippy::incompatible_msrv)]
+            // slice::as_chunks_mut is 1.88; reported against rust-version 1.70
             let (pixels, _rem) = span.as_chunks_mut::<BPP>();
             if covers.is_empty() {
                 for (px, c) in pixels.iter_mut().zip(colors.iter()) {
@@ -1101,11 +1102,6 @@ mod tests {
             ra.attach(buf.as_ptr() as *mut u8, w, h, stride);
         }
         (buf, ra)
-    }
-
-    fn get_pixel(buf: &[u8], w: u32, x: u32, y: u32) -> (u8, u8, u8, u8) {
-        let off = (y * w * 4 + x * 4) as usize;
-        (buf[off], buf[off + 1], buf[off + 2], buf[off + 3])
     }
 
     #[test]

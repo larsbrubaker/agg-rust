@@ -715,10 +715,8 @@ mod tests {
                             return true;
                         }
                     }
-                    "b" => {
-                        if p.b > 0 {
-                            return true;
-                        }
+                    "b" if p.b > 0 => {
+                        return true;
                     }
                     _ => {}
                 }

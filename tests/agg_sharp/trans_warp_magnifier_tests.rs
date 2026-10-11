@@ -8,6 +8,8 @@ use agg_rust::span_interpolator_linear::Transformer;
 use agg_rust::trans_warp_magnifier::TransWarpMagnifier;
 
 // Inside the lens, on its rim's far side, far outside, the center itself, and just outside the rim.
+// The traced values are C#'s 17-digit round-trip text, kept verbatim.
+#[allow(clippy::excessive_precision)]
 const TRACED: [(f64, f64, f64, f64, f64, f64); 5] = [
     (210.0, 155.0, 230.0, 165.0, 210.0, 155.0),
     (

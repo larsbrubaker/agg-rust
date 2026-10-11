@@ -81,14 +81,8 @@ impl BezierArc {
     /// Initialize the arc with center, radii, and angle parameters.
     pub fn init(&mut self, x: f64, y: f64, rx: f64, ry: f64, start_angle: f64, sweep_angle: f64) {
         let mut start_angle = start_angle % (2.0 * PI);
-        let mut sweep_angle = sweep_angle;
-
-        if sweep_angle >= 2.0 * PI {
-            sweep_angle = 2.0 * PI;
-        }
-        if sweep_angle <= -2.0 * PI {
-            sweep_angle = -2.0 * PI;
-        }
+        // C++ clamps with two ifs; clamp gives the same value (NaN passes through both).
+        let sweep_angle = sweep_angle.clamp(-2.0 * PI, 2.0 * PI);
 
         if sweep_angle.abs() < 1e-10 {
             self.num_vertices = 4;

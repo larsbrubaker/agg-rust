@@ -28,6 +28,12 @@ pub struct TransSinglePath {
     preserve_x_scale: bool,
 }
 
+impl Default for TransSinglePath {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransSinglePath {
     pub fn new() -> Self {
         Self {

@@ -2119,6 +2119,8 @@ mod tests {
     }
 
     #[test]
+    // 3.14 is a formatting input, not an approximation of PI.
+    #[allow(clippy::approx_constant)]
     fn test_sprintf_format_various() {
         // %1.0f — used by trans_polar demo "Some Value=%1.0f"
         assert_eq!(sprintf_format("Some Value=%1.0f", 40.0), "Some Value=40");

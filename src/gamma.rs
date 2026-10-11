@@ -673,7 +673,7 @@ mod tests {
             assert_eq!(cmd, crate::basics::PATH_CMD_LINE_TO);
             count += 1;
         }
-        assert!(count >= 99 && count <= 101); // ~100 pixels wide box
+        assert!((99..=101).contains(&count)); // ~100 pixels wide box
     }
 
     #[test]

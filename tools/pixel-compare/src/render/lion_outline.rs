@@ -100,8 +100,6 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             ren_oaa.set_color(colors[i]);
             ras_oaa.add_path(&mut transformed, start, &mut ren_oaa);
         }
-
-        drop(ren_oaa);
     }
 
     // Controls — render exactly as the WASM version does

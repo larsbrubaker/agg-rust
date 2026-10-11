@@ -475,7 +475,7 @@ fn downscale(v: i32) -> i32 {
 
 /// Clipping flags for Liang-Barsky line clipping.
 fn clipping_flags(x: i32, y: i32, clip_box: &[i32; 4]) -> u32 {
-    ((x > clip_box[2]) as u32) << 0
+    ((x > clip_box[2]) as u32)
         | ((y > clip_box[3]) as u32) << 1
         | ((x < clip_box[0]) as u32) << 2
         | ((y < clip_box[1]) as u32) << 3
@@ -751,13 +751,8 @@ impl RasterizerCompoundAa {
         }
         self.start_x = upscale(x);
         self.start_y = upscale(y);
-        if self.clipping {
-            self.clip_x1 = self.start_x;
-            self.clip_y1 = self.start_y;
-        } else {
-            self.clip_x1 = self.start_x;
-            self.clip_y1 = self.start_y;
-        }
+        self.clip_x1 = self.start_x;
+        self.clip_y1 = self.start_y;
     }
 
     /// Line to position (f64 coords).
@@ -981,8 +976,8 @@ impl RasterizerCompoundAa {
                 // Pass 2: Distribute cells to styles
                 let cell_indices2: Vec<u32> =
                     self.outline.scanline_cells(self.scan_y as u32).to_vec();
-                for i in 0..num_cells as usize {
-                    let curr_cell = self.outline.cell(cell_indices2[i]);
+                for &cell_index in cell_indices2.iter().take(num_cells as usize) {
+                    let curr_cell = self.outline.cell(cell_index);
 
                     // Left style: add
                     let style_id = if curr_cell.left < 0 {
@@ -1174,15 +1169,19 @@ mod tests {
 
     #[test]
     fn test_cell_style_aa_not_equal() {
-        let mut c1 = CellStyleAa::default();
-        c1.x = 10;
-        c1.y = 20;
-        c1.left = 1;
-        c1.right = 2;
+        let c1 = CellStyleAa {
+            x: 10,
+            y: 20,
+            left: 1,
+            right: 2,
+            ..Default::default()
+        };
 
-        let mut style = CellStyleAa::default();
-        style.left = 1;
-        style.right = 2;
+        let mut style = CellStyleAa {
+            left: 1,
+            right: 2,
+            ..Default::default()
+        };
         // Same position and style
         assert!(!c1.not_equal(10, 20, &style));
         // Different position

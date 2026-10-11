@@ -110,7 +110,6 @@ fn render_simple_line(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     ren_oaa.set_color(Rgba8::new(0, 0, 0, 255));
     ras_oaa.add_path(&mut transformed, 0, &mut ren_oaa);
 
-    drop(ren_oaa);
     buf
 }
 

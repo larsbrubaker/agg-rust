@@ -168,7 +168,7 @@ pub fn gradients(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             (x, y)
         };
 
-    let cx = params.get(0).copied().unwrap_or(CENTER_X);
+    let cx = params.first().copied().unwrap_or(CENTER_X);
     let cy = params.get(1).copied().unwrap_or(CENTER_Y);
     let angle = params.get(2).copied().unwrap_or(0.0);
     let scale = params.get(3).copied().unwrap_or(1.0).max(0.01);
@@ -347,7 +347,7 @@ mod gradients_tests {
 /// params[7] = gamma (default 0.809, currently unused)
 /// params[8] = alpha 0.0–1.0 (default 1.0)
 pub fn gouraud(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(57.0);
+    let vx0 = params.first().copied().unwrap_or(57.0);
     let vy0 = params.get(1).copied().unwrap_or(60.0);
     let vx1 = params.get(2).copied().unwrap_or(369.0);
     let vy1 = params.get(3).copied().unwrap_or(170.0);
@@ -515,7 +515,7 @@ pub fn gouraud(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[8] = stroke width (default 20.0)
 /// params[9] = miter limit (default 4.0)
 pub fn conv_stroke(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(157.0);
+    let vx0 = params.first().copied().unwrap_or(157.0);
     let vy0 = params.get(1).copied().unwrap_or(60.0);
     let vx1 = params.get(2).copied().unwrap_or(469.0);
     let vy1 = params.get(3).copied().unwrap_or(170.0);
@@ -670,7 +670,7 @@ pub fn conv_stroke(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[17]     = line_join (0=Miter,1=MiterRevert,2=Round,3=Bevel,4=MiterRound)
 /// params[18]     = line_cap (0=Butt,1=Square,2=Round)
 pub fn bezier_div(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let p1x = params.get(0).copied().unwrap_or(170.0);
+    let p1x = params.first().copied().unwrap_or(170.0);
     let p1y = params.get(1).copied().unwrap_or(424.0);
     let p2x = params.get(2).copied().unwrap_or(13.0);
     let p2y = params.get(3).copied().unwrap_or(87.0);
@@ -1375,7 +1375,7 @@ mod circles_tests {
 /// params[5] = subpixel offset (default 0)
 /// params[6] = white_on_black (0 or 1, default 0)
 pub fn rounded_rect_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let x1 = params.get(0).copied().unwrap_or(100.0);
+    let x1 = params.first().copied().unwrap_or(100.0);
     let y1 = params.get(1).copied().unwrap_or(80.0);
     let x2 = params.get(2).copied().unwrap_or(400.0);
     let y2 = params.get(3).copied().unwrap_or(280.0);
@@ -1473,7 +1473,7 @@ pub fn rounded_rect_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[0..6] = x0,y0, x1,y1, x2,y2 (triangle in screen coords)
 /// params[6] = pixel_size (default 32)
 pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(57.0);
+    let vx0 = params.first().copied().unwrap_or(57.0);
     let vy0 = params.get(1).copied().unwrap_or(100.0);
     let vx1 = params.get(2).copied().unwrap_or(369.0);
     let vy1 = params.get(3).copied().unwrap_or(170.0);
@@ -1621,7 +1621,7 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[3] = ellipse radius x (default width/3.0)
 /// params[4] = ellipse radius y (default height/3.0)
 pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let thickness = params.get(0).copied().unwrap_or(1.0).clamp(0.0, 3.0);
+    let thickness = params.first().copied().unwrap_or(1.0).clamp(0.0, 3.0);
     let contrast = params.get(1).copied().unwrap_or(1.0).clamp(0.0, 1.0);
     let gamma_val = params.get(2).copied().unwrap_or(1.0).clamp(0.5, 3.0);
     let rx = params
@@ -1763,7 +1763,7 @@ pub fn gamma_correction(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
-    let x0 = params.get(0).copied().unwrap_or(w * 0.05);
+    let x0 = params.first().copied().unwrap_or(w * 0.05);
     let y0 = params.get(1).copied().unwrap_or(h * 0.5);
     let x1 = params.get(2).copied().unwrap_or(w * 0.95);
     let y1 = params.get(3).copied().unwrap_or(h * 0.5);
@@ -1852,7 +1852,7 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[7] = alpha (0..1)
 /// params[8] = test_performance checkbox status (0/1, visual only in WASM)
 pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let vx0 = params.get(0).copied().unwrap_or(220.0);
+    let vx0 = params.first().copied().unwrap_or(220.0);
     let vy0 = params.get(1).copied().unwrap_or(60.0);
     let vx1 = params.get(2).copied().unwrap_or(489.0);
     let vy1 = params.get(3).copied().unwrap_or(170.0);
@@ -1995,7 +1995,7 @@ mod rasterizers_tests {
 /// params[1] = contour width [-100, 100] (default 0)
 /// params[2] = auto_detect orientation (0 or 1, default 1)
 pub fn conv_contour_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    let close_mode = params.get(0).copied().unwrap_or(0.0) as i32;
+    let close_mode = params.first().copied().unwrap_or(0.0) as i32;
     let contour_w = params.get(1).copied().unwrap_or(0.0);
     let auto_detect = params.get(2).copied().unwrap_or(1.0) > 0.5;
 
@@ -2151,7 +2151,7 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let ox = (w - (bbox.x2 - bbox.x1)) / 2.0 - bbox.x1;
     let oy = (h - (bbox.y2 - bbox.y1)) / 2.0 - bbox.y1;
 
-    let q0x = params.get(0).copied().unwrap_or(bbox.x1 + ox);
+    let q0x = params.first().copied().unwrap_or(bbox.x1 + ox);
     let q0y = params.get(1).copied().unwrap_or(bbox.y1 + oy);
     let q1x = params.get(2).copied().unwrap_or(bbox.x2 + ox);
     let q1y = params.get(3).copied().unwrap_or(bbox.y1 + oy);

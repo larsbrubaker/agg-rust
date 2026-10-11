@@ -477,7 +477,7 @@ mod tests {
         let mut data = Vec::new();
         let rbuf = make_gray_buffer(4, 4, &mut data);
         // Set pixel (2,1) to 200
-        data[1 * 4 + 2] = 200;
+        data[4 + 2] = 200;
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
         assert_eq!(mask.pixel(2, 1), 200);
     }
@@ -515,8 +515,8 @@ mod tests {
     #[test]
     fn test_fill_hspan_in_bounds() {
         let mut data = vec![0u8; 16];
-        for i in 0..4 {
-            data[i] = (i as u8 + 1) * 50;
+        for (i, d) in data.iter_mut().take(4).enumerate() {
+            *d = (i as u8 + 1) * 50;
         }
         let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
@@ -544,8 +544,8 @@ mod tests {
     #[test]
     fn test_fill_hspan_left_clip() {
         let mut data = vec![0u8; 16];
-        for i in 0..4 {
-            data[i] = (i as u8 + 1) * 50;
+        for (i, d) in data.iter_mut().take(4).enumerate() {
+            *d = (i as u8 + 1) * 50;
         }
         let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
@@ -561,8 +561,8 @@ mod tests {
     #[test]
     fn test_fill_hspan_right_clip() {
         let mut data = vec![0u8; 16];
-        for i in 0..4 {
-            data[i] = (i as u8 + 1) * 50;
+        for (i, d) in data.iter_mut().take(4).enumerate() {
+            *d = (i as u8 + 1) * 50;
         }
         let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);

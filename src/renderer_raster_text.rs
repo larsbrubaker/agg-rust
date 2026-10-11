@@ -92,6 +92,8 @@ mod tests {
     use crate::rendering_buffer::RowAccessor;
 
     // Minimal test font: height=2, baseline=0, start_char=65('A'), num_chars=1
+    // One annotated push per font byte reads like the C++ font table.
+    #[allow(clippy::vec_init_then_push)]
     fn make_test_font() -> Vec<u8> {
         let mut font = Vec::new();
         font.push(2); // height

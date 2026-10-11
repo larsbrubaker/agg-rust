@@ -318,7 +318,7 @@ pub fn load_bmp(path: &Path) -> io::Result<PixelBuffer> {
     let height = h.unsigned_abs();
     let top_down = h < 0;
     let bytes_pp = bpp / 8;
-    let row_stride = ((width as usize * bytes_pp + 3) / 4) * 4;
+    let row_stride = (width as usize * bytes_pp).div_ceil(4) * 4;
 
     let mut buf = PixelBuffer::new(width, height);
 
