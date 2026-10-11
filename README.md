@@ -90,7 +90,7 @@ All 64 demos run in-browser via WebAssembly with no server-side processing. Cate
 
 ```toml
 [dependencies]
-agg-rust = "1.0"
+agg-rust = "1.2"
 ```
 
 ```rust
