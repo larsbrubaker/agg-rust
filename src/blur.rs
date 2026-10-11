@@ -1,10 +1,23 @@
-//! Stack blur and recursive blur implementations.
+//! Stack blur, recursive blur and slight blur.
 //!
-//! Port of `agg_blur.h`.
-//! Provides fast approximate Gaussian blur using the stack blur algorithm
-//! and an IIR recursive blur alternative.
+//! Port of `agg_blur.h`. This file holds the RGBA32 stack blur and the RGBA32 recursive-blur
+//! wrappers; its submodules hold the byte-channel view the other blurs run on
+//! (`channel_view`), `stack_blur_gray8` (`stack_gray`), the recursive blur and its calculators
+//! (`recursive`) and `slight_blur` (`slight`).
 
-use crate::color::Rgba8;
+mod channel_view;
+mod recursive;
+mod slight;
+mod stack_gray;
+
+pub use channel_view::ChannelView;
+pub use recursive::{
+    recursive_blur_coefficients, RecursiveBlur, RecursiveBlurCalc, RecursiveBlurCalcGray,
+    RecursiveBlurCalcRgb, RecursiveBlurCalcRgba,
+};
+pub use slight::{apply_slight_blur, apply_slight_blur_all, SlightBlur};
+pub use stack_gray::stack_blur_gray8;
+
 use crate::rendering_buffer::RowAccessor;
 
 // ============================================================================
@@ -60,6 +73,7 @@ const STACK_BLUR8_SHR: [u32; 255] = [
 // ============================================================================
 
 /// Row of RGBA32 pixels at `y` as a byte slice (shared, read-only view).
+#[cfg(test)]
 #[inline]
 fn row(rbuf: &RowAccessor, y: i32) -> &[u8] {
     unsafe {
@@ -149,7 +163,12 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
                 if i <= wm {
                     src_off = i * 4;
                 }
-                stack[i + rx] = [row[src_off], row[src_off + 1], row[src_off + 2], row[src_off + 3]];
+                stack[i + rx] = [
+                    row[src_off],
+                    row[src_off + 1],
+                    row[src_off + 2],
+                    row[src_off + 3],
+                ];
                 let w = (rx + 1 - i) as u64;
                 sum_r += row[src_off] as u64 * w;
                 sum_g += row[src_off + 1] as u64 * w;
@@ -196,7 +215,12 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
                     xp += 1;
                 }
 
-                stack[stack_start] = [row[src_off], row[src_off + 1], row[src_off + 2], row[src_off + 3]];
+                stack[stack_start] = [
+                    row[src_off],
+                    row[src_off + 1],
+                    row[src_off + 2],
+                    row[src_off + 3],
+                ];
 
                 sum_in_r += row[src_off] as u64;
                 sum_in_g += row[src_off + 1] as u64;
@@ -355,57 +379,8 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
 }
 
 // ============================================================================
-// Recursive blur (IIR Gaussian approximation)
+// Recursive blur (IIR Gaussian approximation) on RGBA32
 // ============================================================================
-
-/// Recursive blur calculator for RGBA channels.
-///
-/// Port of C++ `recursive_blur_calc_rgba<double>`.
-#[derive(Clone, Copy, Default)]
-struct RecursiveBlurCalcRgba {
-    r: f64,
-    g: f64,
-    b: f64,
-    a: f64,
-}
-
-impl RecursiveBlurCalcRgba {
-    fn from_pix(c: &Rgba8) -> Self {
-        Self {
-            r: c.r as f64,
-            g: c.g as f64,
-            b: c.b as f64,
-            a: c.a as f64,
-        }
-    }
-
-    fn calc(
-        b_coeff: f64,
-        b1: f64,
-        b2: f64,
-        b3: f64,
-        c1: &Self,
-        c2: &Self,
-        c3: &Self,
-        c4: &Self,
-    ) -> Self {
-        Self {
-            r: b_coeff * c1.r + b1 * c2.r + b2 * c3.r + b3 * c4.r,
-            g: b_coeff * c1.g + b1 * c2.g + b2 * c3.g + b3 * c4.g,
-            b: b_coeff * c1.b + b1 * c2.b + b2 * c3.b + b3 * c4.b,
-            a: b_coeff * c1.a + b1 * c2.a + b2 * c3.a + b3 * c4.a,
-        }
-    }
-
-    fn to_pix(&self) -> Rgba8 {
-        Rgba8::new(
-            self.r as u32,
-            self.g as u32,
-            self.b as u32,
-            self.a as u32,
-        )
-    }
-}
 
 /// Apply recursive (IIR) Gaussian blur to an RGBA32 rendering buffer.
 ///
@@ -413,206 +388,17 @@ impl RecursiveBlurCalcRgba {
 /// Uses Young-van Vliet recursive Gaussian approximation.
 /// Operates in-place on the buffer.
 pub fn recursive_blur_rgba32(rbuf: &mut RowAccessor, radius: f64) {
-    recursive_blur_rgba32_x(rbuf, radius);
-    recursive_blur_rgba32_y(rbuf, radius);
+    RecursiveBlur::<4>::new().blur(&mut ChannelView::rgba32(rbuf), radius);
 }
 
 /// Horizontal recursive blur pass.
 pub fn recursive_blur_rgba32_x(rbuf: &mut RowAccessor, radius: f64) {
-    if radius < 0.62 {
-        return;
-    }
-    let w = rbuf.width() as usize;
-    let h = rbuf.height() as usize;
-    if w < 3 {
-        return;
-    }
-
-    let s = radius * 0.5;
-    let q = if s < 2.5 {
-        3.97156 - 4.14554 * (1.0 - 0.26891 * s).sqrt()
-    } else {
-        0.98711 * s - 0.96330
-    };
-
-    let q2 = q * q;
-    let q3 = q2 * q;
-
-    let b0 = 1.0 / (1.578250 + 2.444130 * q + 1.428100 * q2 + 0.422205 * q3);
-    let mut b1 = 2.44413 * q + 2.85619 * q2 + 1.26661 * q3;
-    let mut b2 = -1.42810 * q2 - 1.26661 * q3;
-    let mut b3 = 0.422205 * q3;
-    let b = 1.0 - (b1 + b2 + b3) * b0;
-
-    b1 *= b0;
-    b2 *= b0;
-    b3 *= b0;
-
-    let wm = w as i32 - 1;
-
-    let mut sum1 = vec![RecursiveBlurCalcRgba::default(); w];
-    let mut sum2 = vec![RecursiveBlurCalcRgba::default(); w];
-    let mut buf = vec![Rgba8::new(0, 0, 0, 0); w];
-
-    for y in 0..h {
-        // Read pixels from row
-        let row = row(rbuf, y as i32);
-
-        let pix = |x: usize| -> Rgba8 {
-            let off = x * 4;
-            Rgba8::new(
-                row[off] as u32,
-                row[off + 1] as u32,
-                row[off + 2] as u32,
-                row[off + 3] as u32,
-            )
-        };
-
-        // Forward pass
-        let c = RecursiveBlurCalcRgba::from_pix(&pix(0));
-        sum1[0] = RecursiveBlurCalcRgba::calc(b, b1, b2, b3, &c, &c, &c, &c);
-        let c = RecursiveBlurCalcRgba::from_pix(&pix(1));
-        sum1[1] = RecursiveBlurCalcRgba::calc(b, b1, b2, b3, &c, &sum1[0], &sum1[0], &sum1[0]);
-        let c = RecursiveBlurCalcRgba::from_pix(&pix(2));
-        sum1[2] = RecursiveBlurCalcRgba::calc(b, b1, b2, b3, &c, &sum1[1], &sum1[0], &sum1[0]);
-
-        for x in 3..w {
-            let c = RecursiveBlurCalcRgba::from_pix(&pix(x));
-            sum1[x] = RecursiveBlurCalcRgba::calc(
-                b, b1, b2, b3, &c, &sum1[x - 1], &sum1[x - 2], &sum1[x - 3],
-            );
-        }
-
-        // Backward pass
-        let wmi = wm as usize;
-        sum2[wmi] = RecursiveBlurCalcRgba::calc(
-            b, b1, b2, b3, &sum1[wmi], &sum1[wmi], &sum1[wmi], &sum1[wmi],
-        );
-        sum2[wmi - 1] = RecursiveBlurCalcRgba::calc(
-            b, b1, b2, b3, &sum1[wmi - 1], &sum2[wmi], &sum2[wmi], &sum2[wmi],
-        );
-        sum2[wmi - 2] = RecursiveBlurCalcRgba::calc(
-            b, b1, b2, b3, &sum1[wmi - 2], &sum2[wmi - 1], &sum2[wmi], &sum2[wmi],
-        );
-        buf[wmi] = sum2[wmi].to_pix();
-        buf[wmi - 1] = sum2[wmi - 1].to_pix();
-        buf[wmi - 2] = sum2[wmi - 2].to_pix();
-
-        for x in (0..=(wmi as i32 - 3)).rev() {
-            let x = x as usize;
-            sum2[x] = RecursiveBlurCalcRgba::calc(
-                b, b1, b2, b3, &sum1[x], &sum2[x + 1], &sum2[x + 2], &sum2[x + 3],
-            );
-            buf[x] = sum2[x].to_pix();
-        }
-
-        // Write back to row
-        let row = row_mut(rbuf, y as i32);
-        for x in 0..w {
-            let off = x * 4;
-            row[off] = buf[x].r;
-            row[off + 1] = buf[x].g;
-            row[off + 2] = buf[x].b;
-            row[off + 3] = buf[x].a;
-        }
-    }
+    RecursiveBlur::<4>::new().blur_x(&mut ChannelView::rgba32(rbuf), radius);
 }
 
 /// Vertical recursive blur pass.
 pub fn recursive_blur_rgba32_y(rbuf: &mut RowAccessor, radius: f64) {
-    if radius < 0.62 {
-        return;
-    }
-    let w = rbuf.width() as usize;
-    let h = rbuf.height() as usize;
-    if h < 3 {
-        return;
-    }
-
-    let s = radius * 0.5;
-    let q = if s < 2.5 {
-        3.97156 - 4.14554 * (1.0 - 0.26891 * s).sqrt()
-    } else {
-        0.98711 * s - 0.96330
-    };
-
-    let q2 = q * q;
-    let q3 = q2 * q;
-
-    let b0 = 1.0 / (1.578250 + 2.444130 * q + 1.428100 * q2 + 0.422205 * q3);
-    let mut b1 = 2.44413 * q + 2.85619 * q2 + 1.26661 * q3;
-    let mut b2 = -1.42810 * q2 - 1.26661 * q3;
-    let mut b3 = 0.422205 * q3;
-    let b = 1.0 - (b1 + b2 + b3) * b0;
-
-    b1 *= b0;
-    b2 *= b0;
-    b3 *= b0;
-
-    let hm = h as i32 - 1;
-    let stride = rbuf.stride() as isize;
-
-    let mut sum1 = vec![RecursiveBlurCalcRgba::default(); h];
-    let mut sum2 = vec![RecursiveBlurCalcRgba::default(); h];
-    let mut buf = vec![Rgba8::new(0, 0, 0, 0); h];
-
-    for x in 0..w {
-        let base_ptr = unsafe { rbuf.row_ptr(0).add(x * 4) };
-
-        let pix = |yi: usize| -> Rgba8 {
-            let p = unsafe { std::slice::from_raw_parts(base_ptr.offset(yi as isize * stride), 4) };
-            Rgba8::new(p[0] as u32, p[1] as u32, p[2] as u32, p[3] as u32)
-        };
-
-        // Forward pass
-        let c = RecursiveBlurCalcRgba::from_pix(&pix(0));
-        sum1[0] = RecursiveBlurCalcRgba::calc(b, b1, b2, b3, &c, &c, &c, &c);
-        let c = RecursiveBlurCalcRgba::from_pix(&pix(1));
-        sum1[1] = RecursiveBlurCalcRgba::calc(b, b1, b2, b3, &c, &sum1[0], &sum1[0], &sum1[0]);
-        let c = RecursiveBlurCalcRgba::from_pix(&pix(2));
-        sum1[2] = RecursiveBlurCalcRgba::calc(b, b1, b2, b3, &c, &sum1[1], &sum1[0], &sum1[0]);
-
-        for yi in 3..h {
-            let c = RecursiveBlurCalcRgba::from_pix(&pix(yi));
-            sum1[yi] = RecursiveBlurCalcRgba::calc(
-                b, b1, b2, b3, &c, &sum1[yi - 1], &sum1[yi - 2], &sum1[yi - 3],
-            );
-        }
-
-        // Backward pass
-        let hmi = hm as usize;
-        sum2[hmi] = RecursiveBlurCalcRgba::calc(
-            b, b1, b2, b3, &sum1[hmi], &sum1[hmi], &sum1[hmi], &sum1[hmi],
-        );
-        sum2[hmi - 1] = RecursiveBlurCalcRgba::calc(
-            b, b1, b2, b3, &sum1[hmi - 1], &sum2[hmi], &sum2[hmi], &sum2[hmi],
-        );
-        sum2[hmi - 2] = RecursiveBlurCalcRgba::calc(
-            b, b1, b2, b3, &sum1[hmi - 2], &sum2[hmi - 1], &sum2[hmi], &sum2[hmi],
-        );
-        buf[hmi] = sum2[hmi].to_pix();
-        buf[hmi - 1] = sum2[hmi - 1].to_pix();
-        buf[hmi - 2] = sum2[hmi - 2].to_pix();
-
-        for yi in (0..=(hmi as i32 - 3)).rev() {
-            let yi = yi as usize;
-            sum2[yi] = RecursiveBlurCalcRgba::calc(
-                b, b1, b2, b3, &sum1[yi], &sum2[yi + 1], &sum2[yi + 2], &sum2[yi + 3],
-            );
-            buf[yi] = sum2[yi].to_pix();
-        }
-
-        // Write back column
-        for yi in 0..h {
-            let p = unsafe {
-                std::slice::from_raw_parts_mut(base_ptr.offset(yi as isize * stride), 4)
-            };
-            p[0] = buf[yi].r;
-            p[1] = buf[yi].g;
-            p[2] = buf[yi].b;
-            p[3] = buf[yi].a;
-        }
-    }
+    RecursiveBlur::<4>::new().blur_y(&mut ChannelView::rgba32(rbuf), radius);
 }
 
 #[cfg(test)]
@@ -720,7 +506,10 @@ mod tests {
         assert!(center[0] > 0);
 
         let neighbor = get_pixel(&ra, 11, 10);
-        assert!(neighbor[0] > 0, "neighbor should have some value after blur");
+        assert!(
+            neighbor[0] > 0,
+            "neighbor should have some value after blur"
+        );
     }
 
     #[test]

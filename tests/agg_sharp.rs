@@ -24,8 +24,14 @@ mod blender_table_tests;
 mod raster_text_tests;
 #[path = "agg_sharp/rasterizer_cells_aa_tests.rs"]
 mod rasterizer_cells_aa_tests;
+#[path = "agg_sharp/recursive_blur_tests.rs"]
+mod recursive_blur_tests;
 #[path = "agg_sharp/renderer_primitives_tests.rs"]
 mod renderer_primitives_tests;
+#[path = "agg_sharp/slight_blur_tests.rs"]
+mod slight_blur_tests;
+#[path = "agg_sharp/stack_blur_gray8_tests.rs"]
+mod stack_blur_gray8_tests;
 #[path = "agg_sharp/stack_blur_tests.rs"]
 mod stack_blur_tests;
 

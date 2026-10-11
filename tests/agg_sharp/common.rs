@@ -38,3 +38,44 @@ impl Image {
         ]
     }
 }
+
+impl Image {
+    /// Every pixel set to `color`.
+    pub fn fill(&mut self, color: [u8; 4]) {
+        for px in self.buf.chunks_exact_mut(4) {
+            px.copy_from_slice(&color);
+        }
+    }
+
+    /// Sets the pixel at `x`, `y` to `color`.
+    pub fn set_pixel(&mut self, x: u32, y: u32, color: [u8; 4]) {
+        let o = ((y * self.width + x) * 4) as usize;
+        self.buf[o..o + 4].copy_from_slice(&color);
+    }
+}
+
+/// An owned one-byte-per-pixel gray image and the row accessor over it (agg-sharp's
+/// `ImageBuffer(w, h, 8, new blender_gray(1))`).
+pub struct GrayImage {
+    pub buf: Vec<u8>,
+    pub ra: RowAccessor,
+    pub width: u32,
+}
+
+impl GrayImage {
+    pub fn new(width: u32, height: u32) -> Self {
+        let mut buf = vec![0u8; (width * height) as usize];
+        let mut ra = RowAccessor::new();
+        // SAFETY: as in `Image::new`.
+        unsafe { ra.attach(buf.as_mut_ptr(), width, height, width as i32) };
+        Self { buf, ra, width }
+    }
+
+    pub fn get(&self, x: u32, y: u32) -> u8 {
+        self.buf[(y * self.width + x) as usize]
+    }
+
+    pub fn set(&mut self, x: u32, y: u32, v: u8) {
+        self.buf[(y * self.width + x) as usize] = v;
+    }
+}
