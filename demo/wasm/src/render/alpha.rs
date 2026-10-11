@@ -2,19 +2,25 @@
 //! alpha_gradient, image_alpha, alpha_mask3, image_transforms, mol_view,
 //! image_resample, alpha_mask2.
 
+use super::gb_poly::{make_arrows, make_gb_poly, Spiral};
+use super::{load_spheres_image, setup_renderer};
+use agg_rust::basics::{
+    VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP, PATH_FLAGS_CCW,
+};
 use agg_rust::bounding_rect::bounding_rect;
-use agg_rust::basics::{VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP, PATH_FLAGS_CCW};
-use agg_rust::conv_curve::ConvCurve;
 use agg_rust::bspline::Bspline;
 use agg_rust::color::{Gray8, Rgba8};
-use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl, SplineCtrl};
+use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
+use agg_rust::ctrl::{render_ctrl, CboxCtrl, RboxCtrl, SliderCtrl, SplineCtrl};
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gradient_lut::GradientLut;
 use agg_rust::gsv_text::GsvText;
 use agg_rust::image_accessors::ImageAccessorClone;
 use agg_rust::image_filters::{ImageFilterBilinear, ImageFilterLut};
+use agg_rust::math::calc_orthogonal;
+use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_gray::PixfmtGray8;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
@@ -28,19 +34,15 @@ use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_converter::{SpanConverter, SpanConverterFunction};
 use agg_rust::span_gradient::{GradientRadial, SpanGradient};
 use agg_rust::span_image_filter_rgba::{
-    SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn, SpanImageFilterRgba2x2,
+    SpanImageFilterRgba2x2, SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn,
     SpanImageResampleRgbaAffine,
 };
-use agg_rust::span_interpolator_persp::SpanInterpolatorPerspLerp;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
+use agg_rust::span_interpolator_persp::SpanInterpolatorPerspLerp;
 use agg_rust::span_interpolator_trans::SpanInterpolatorTrans;
 use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
-use agg_rust::math::calc_orthogonal;
-use agg_rust::math_stroke::{LineCap, LineJoin};
-use super::gb_poly::{make_arrows, make_gb_poly, Spiral};
-use super::{setup_renderer, load_spheres_image};
 use std::sync::OnceLock;
 
 #[cfg(target_arch = "wasm32")]
@@ -55,7 +57,6 @@ fn measure_with_ms<T, F: FnOnce() -> T>(f: F) -> (T, f64) {
     let out = f();
     (out, t0.elapsed().as_secs_f64() * 1000.0)
 }
-
 
 /// BSpline — 6 draggable control points, B-spline curve through them.
 /// Matches C++ bspline.cpp.
@@ -152,16 +153,14 @@ pub fn bspline_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     poly_stroke.set_width(1.0);
     ras.reset();
     ras.add_path(&mut poly_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-        &Rgba8::new(0, 76, 127, 153)); // rgba(0, 0.3, 0.5, 0.6)
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 76, 127, 153)); // rgba(0, 0.3, 0.5, 0.6)
 
     // Draw control points as circles
     for i in 0..n {
         let mut ell = Ellipse::new(pts_x[i], pts_y[i], 5.0, 5.0, 20, false);
         ras.reset();
         ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-            &Rgba8::new(0, 76, 127, 153));
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 76, 127, 153));
     }
 
     // Render controls
@@ -244,7 +243,14 @@ pub fn image_perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8
             let mut mtx = TransAffine::new();
             // We need quad→quad but just use the parl_to_parl approach
             let src_parl = [g_x1, g_y1, g_x2, g_y1, g_x2, g_y2];
-            let dst_parl = [quad_adj[0], quad_adj[1], quad_adj[2], quad_adj[3], quad_adj[4], quad_adj[5]];
+            let dst_parl = [
+                quad_adj[0],
+                quad_adj[1],
+                quad_adj[2],
+                quad_adj[3],
+                quad_adj[4],
+                quad_adj[5],
+            ];
             mtx.parl_to_parl(&dst_parl, &src_parl);
             let mut interp = SpanInterpolatorLinear::new(mtx);
             let mut sg = SpanImageFilterRgbaNn::new(&mut source, &mut interp);
@@ -283,8 +289,7 @@ pub fn image_perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8
     let mut quad_stroke = ConvStroke::new(&mut quad_path);
     quad_stroke.set_width(1.0);
     ras.add_path(&mut quad_stroke, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-        &Rgba8::new(0, 76, 127, 153)); // rgba(0, 0.3, 0.5, 0.6)
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 76, 127, 153)); // rgba(0, 0.3, 0.5, 0.6)
     for i in 0..4 {
         let vx = quad_adj[i * 2];
         let vy = quad_adj[i * 2 + 1];
@@ -360,9 +365,8 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let npaths = colors.len();
 
     let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
-    let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
-        agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
-    );
+    let bbox = bounding_rect(&mut path, &path_ids, 0, npaths)
+        .unwrap_or(agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0));
     let base_dx = (bbox.x2 - bbox.x1) / 2.0;
     let base_dy = (bbox.y2 - bbox.y1) / 2.0;
 
@@ -525,7 +529,10 @@ pub fn alpha_gradient(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
     }
 
-    let alpha_conv = AlphaConverter { mtx: alpha_mtx, lut: alpha_lut };
+    let alpha_conv = AlphaConverter {
+        mtx: alpha_mtx,
+        lut: alpha_lut,
+    };
     let mut pipeline = SpanConverter::new(sg, alpha_conv);
 
     let mut ell = Ellipse::new(w / 2.0, h / 2.0, 150.0, 150.0, 100, false);
@@ -567,9 +574,15 @@ pub fn image_alpha(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
 
-    let a: Vec<f64> = (0..6).map(|i| params.get(i).copied().unwrap_or(
-        match i { 3 => 0.5, 4 => 0.5, _ => 1.0 }
-    )).collect();
+    let a: Vec<f64> = (0..6)
+        .map(|i| {
+            params.get(i).copied().unwrap_or(match i {
+                3 => 0.5,
+                4 => 0.5,
+                _ => 1.0,
+            })
+        })
+        .collect();
 
     let mut buf = Vec::new();
     let mut ra = RowAccessor::new();
@@ -607,11 +620,13 @@ pub fn image_alpha(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let t_vals: Vec<f64> = (0..6).map(|i| i as f64 / 5.0).collect();
         let mut spline = Bspline::new();
         spline.init(&t_vals, &a);
-        (0..768).map(|i| {
-            let t = i as f64 / 768.0;
-            let v = spline.get(t).clamp(0.0, 1.0);
-            (v * 255.0) as u8
-        }).collect()
+        (0..768)
+            .map(|i| {
+                let t = i as f64 / 768.0;
+                let v = spline.get(t).clamp(0.0, 1.0);
+                (v * 255.0) as u8
+            })
+            .collect()
     };
 
     // Load source image
@@ -622,7 +637,10 @@ pub fn image_alpha(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Transform: center, rotate 10 deg, center back
     let mut mtx = TransAffine::new();
-    mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
+    mtx.multiply(&TransAffine::new_translation(
+        -(img_w as f64) / 2.0,
+        -(img_h as f64) / 2.0,
+    ));
     mtx.multiply(&TransAffine::new_rotation(10.0_f64.to_radians()));
     mtx.multiply(&TransAffine::new_translation(w / 2.0, h / 2.0));
     let inv_mtx = {
@@ -684,7 +702,11 @@ pub fn image_alpha(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let v = sp.get(t).clamp(0.0, 1.0);
         let px = ctrl_x + t * ctrl_w;
         let py = ctrl_y + ctrl_h - v * ctrl_h;
-        if i == 0 { spline_path.move_to(px, py); } else { spline_path.line_to(px, py); }
+        if i == 0 {
+            spline_path.move_to(px, py);
+        } else {
+            spline_path.line_to(px, py);
+        }
     }
     let mut sp_stroke = ConvStroke::new(&mut spline_path);
     sp_stroke.set_width(1.5);
@@ -788,7 +810,11 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
     let scenario = (params.first().copied().unwrap_or(3.0) as i32).clamp(0, 4) as usize;
-    let operation = if (params.get(1).copied().unwrap_or(0.0) as i32) == 0 { 0 } else { 1 };
+    let operation = if (params.get(1).copied().unwrap_or(0.0) as i32) == 0 {
+        0
+    } else {
+        1
+    };
     let mx = params.get(2).copied().unwrap_or(w / 2.0);
     let my = params.get(3).copied().unwrap_or(h / 2.0);
 
@@ -856,7 +882,8 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             ras.add_path(&mut ps2, 0);
             render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 26));
 
-            let (mask, gen_ms) = measure_with_ms(|| generate_alpha_mask(width, height, operation, &mut ps1));
+            let (mask, gen_ms) =
+                measure_with_ms(|| generate_alpha_mask(width, height, operation, &mut ps1));
             draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
 
             let (_, render_ms) = measure_with_ms(|| {
@@ -869,7 +896,11 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut buf,
                 );
             });
-            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
+            draw_text!(
+                250.0,
+                5.0,
+                &format!("Render with AlphaMask: {:.3}ms", render_ms)
+            );
         }
         1 => {
             let mut ps1 = PathStorage::new();
@@ -906,7 +937,8 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             ras.add_path(&mut stroke, 0);
             render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 26));
 
-            let (mask, gen_ms) = measure_with_ms(|| generate_alpha_mask(width, height, operation, &mut ps1));
+            let (mask, gen_ms) =
+                measure_with_ms(|| generate_alpha_mask(width, height, operation, &mut ps1));
             draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
 
             let mut ps2_for_masked = PathStorage::new();
@@ -928,7 +960,11 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut buf,
                 );
             });
-            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
+            draw_text!(
+                250.0,
+                5.0,
+                &format!("Render with AlphaMask: {:.3}ms", render_ms)
+            );
         }
         2 => {
             let mut gb_poly = PathStorage::new();
@@ -981,7 +1017,11 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut buf,
                 );
             });
-            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
+            draw_text!(
+                250.0,
+                5.0,
+                &format!("Render with AlphaMask: {:.3}ms", render_ms)
+            );
         }
         3 => {
             let mut gb_poly = PathStorage::new();
@@ -1032,7 +1072,11 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut buf,
                 );
             });
-            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
+            draw_text!(
+                250.0,
+                5.0,
+                &format!("Render with AlphaMask: {:.3}ms", render_ms)
+            );
         }
         _ => {
             let mut sp = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
@@ -1100,7 +1144,9 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut sp_for_mask = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
             let mut stroke_for_mask = ConvStroke::new(&mut sp_for_mask);
             stroke_for_mask.set_width(15.0);
-            let (mask, gen_ms) = measure_with_ms(|| generate_alpha_mask(width, height, operation, &mut stroke_for_mask));
+            let (mask, gen_ms) = measure_with_ms(|| {
+                generate_alpha_mask(width, height, operation, &mut stroke_for_mask)
+            });
             draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
 
             let mut glyph_for_masked = PathStorage::new();
@@ -1163,7 +1209,11 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut buf,
                 );
             });
-            draw_text!(250.0, 5.0, &format!("Render with AlphaMask: {:.3}ms", render_ms));
+            draw_text!(
+                250.0,
+                5.0,
+                &format!("Render with AlphaMask: {:.3}ms", render_ms)
+            );
         }
     }
 
@@ -1257,7 +1307,10 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     match example_idx {
         0 => {}
         1 => {
-            image_mtx.multiply(&TransAffine::new_translation(-image_center_x, -image_center_y));
+            image_mtx.multiply(&TransAffine::new_translation(
+                -image_center_x,
+                -image_center_y,
+            ));
             image_mtx.multiply(&TransAffine::new_rotation(pa));
             image_mtx.multiply(&TransAffine::new_scaling(poly_scale, poly_scale));
             image_mtx.multiply(&TransAffine::new_translation(poly_cx, poly_cy));
@@ -1265,7 +1318,10 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         }
         2 => {
             let ia = img_angle.to_radians();
-            image_mtx.multiply(&TransAffine::new_translation(-image_center_x, -image_center_y));
+            image_mtx.multiply(&TransAffine::new_translation(
+                -image_center_x,
+                -image_center_y,
+            ));
             image_mtx.multiply(&TransAffine::new_rotation(ia));
             image_mtx.multiply(&TransAffine::new_scaling(img_scale, img_scale));
             image_mtx.multiply(&TransAffine::new_translation(img_cx, img_cy));
@@ -1273,7 +1329,10 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         }
         3 => {
             let ia = img_angle.to_radians();
-            image_mtx.multiply(&TransAffine::new_translation(-image_center_x, -image_center_y));
+            image_mtx.multiply(&TransAffine::new_translation(
+                -image_center_x,
+                -image_center_y,
+            ));
             image_mtx.multiply(&TransAffine::new_rotation(ia));
             image_mtx.multiply(&TransAffine::new_scaling(img_scale, img_scale));
             image_mtx.multiply(&TransAffine::new_translation(poly_cx, poly_cy));
@@ -1288,7 +1347,10 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         }
         5 => {
             let ia = img_angle.to_radians();
-            image_mtx.multiply(&TransAffine::new_translation(-image_center_x, -image_center_y));
+            image_mtx.multiply(&TransAffine::new_translation(
+                -image_center_x,
+                -image_center_y,
+            ));
             image_mtx.multiply(&TransAffine::new_rotation(ia));
             image_mtx.multiply(&TransAffine::new_rotation(pa));
             image_mtx.multiply(&TransAffine::new_scaling(img_scale, img_scale));
@@ -1616,13 +1678,7 @@ impl BondLine {
 
 impl VertexSource for BondLine {
     fn rewind(&mut self, _path_id: u32) {
-        let (dx, dy) = calc_orthogonal(
-            self.thickness * 0.5,
-            self.x1,
-            self.y1,
-            self.x2,
-            self.y2,
-        );
+        let (dx, dy) = calc_orthogonal(self.thickness * 0.5, self.x1, self.y1, self.x2, self.y2);
         self.dx = dx;
         self.dy = dy;
         self.vertex = 0;
@@ -1696,13 +1752,7 @@ impl SolidWedge {
 
 impl VertexSource for SolidWedge {
     fn rewind(&mut self, _path_id: u32) {
-        let (dx, dy) = calc_orthogonal(
-            self.thickness * 2.0,
-            self.x1,
-            self.y1,
-            self.x2,
-            self.y2,
-        );
+        let (dx, dy) = calc_orthogonal(self.thickness * 2.0, self.x1, self.y1, self.x2, self.y2);
         self.dx = dx;
         self.dy = dy;
         self.vertex = 0;
@@ -1783,13 +1833,7 @@ impl DashedWedge {
 
 impl VertexSource for DashedWedge {
     fn rewind(&mut self, _path_id: u32) {
-        let (dx, dy) = calc_orthogonal(
-            self.thickness * 2.0,
-            self.x1,
-            self.y1,
-            self.x2,
-            self.y2,
-        );
+        let (dx, dy) = calc_orthogonal(self.thickness * 2.0, self.x1, self.y1, self.x2, self.y2);
         self.xt2 = self.x2 - dx;
         self.yt2 = self.y2 - dy;
         self.xt3 = self.x2 + dx;
@@ -2022,7 +2066,10 @@ pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut text_size = mol.avr_len * text_size_ctrl / 4.0;
     let thickness = mol.avr_len / scale.max(0.0001).sqrt() / 8.0;
 
-    mtx.multiply(&TransAffine::new_scaling(fit_scale * 0.80, fit_scale * 0.80));
+    mtx.multiply(&TransAffine::new_scaling(
+        fit_scale * 0.80,
+        fit_scale * 0.80,
+    ));
     mtx.multiply(&TransAffine::new_rotation(angle));
     mtx.multiply(&TransAffine::new_scaling(scale, scale));
     mtx.multiply(&TransAffine::new_translation(cx, cy));
@@ -2103,7 +2150,6 @@ pub fn mol_view(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-
 // ============================================================================
 // Image Resample — image affine/perspective transforms with resampling
 // ============================================================================
@@ -2137,14 +2183,14 @@ pub fn image_resample_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let hw = iw * 0.45;
     let hh = ih * 0.45;
     let quad = [
-        params.get(2).copied().unwrap_or(cx - hw),     // x0 top-left
-        params.get(3).copied().unwrap_or(cy - hh),     // y0
-        params.get(4).copied().unwrap_or(cx + hw),     // x1 top-right
-        params.get(5).copied().unwrap_or(cy - hh),     // y1
-        params.get(6).copied().unwrap_or(cx + hw),     // x2 bottom-right
-        params.get(7).copied().unwrap_or(cy + hh),     // y2
-        params.get(8).copied().unwrap_or(cx - hw),     // x3 bottom-left
-        params.get(9).copied().unwrap_or(cy + hh),     // y3
+        params.get(2).copied().unwrap_or(cx - hw), // x0 top-left
+        params.get(3).copied().unwrap_or(cy - hh), // y0
+        params.get(4).copied().unwrap_or(cx + hw), // x1 top-right
+        params.get(5).copied().unwrap_or(cy - hh), // y1
+        params.get(6).copied().unwrap_or(cx + hw), // x2 bottom-right
+        params.get(7).copied().unwrap_or(cy + hh), // y2
+        params.get(8).copied().unwrap_or(cx - hw), // x3 bottom-left
+        params.get(9).copied().unwrap_or(cy + hh), // y3
     ];
 
     let mut buf = Vec::new();
@@ -2199,8 +2245,8 @@ pub fn image_resample_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
         2 => {
             // Mode 2: Perspective (lerp) + 2x2 filter
-            let mut interp = SpanInterpolatorPerspLerp::new_quad_to_rect(
-                &quad, g_x1, g_y1, g_x2, g_y2);
+            let mut interp =
+                SpanInterpolatorPerspLerp::new_quad_to_rect(&quad, g_x1, g_y1, g_x2, g_y2);
             if interp.is_valid() {
                 let mut sg = SpanImageFilterRgba2x2::new(&mut source, &mut interp, &filter);
                 render_scanlines_aa(&mut ras, &mut sl, &mut rb, &mut sa, &mut sg);
@@ -2313,8 +2359,7 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut ell = Ellipse::new(cx, cy, rx, ry, 100, false);
             ras.reset();
             ras.add_path(&mut ell, 0);
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut mask_rb,
-                &Gray8::new(v, a));
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut mask_rb, &Gray8::new(v, a));
         }
     }
 
@@ -2331,9 +2376,8 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
         let npaths = path_idx.len();
-        let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
-            agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
-        );
+        let bbox = bounding_rect(&mut path, &path_ids, 0, npaths)
+            .unwrap_or(agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0));
         let base_dx = (bbox.x2 - bbox.x1) / 2.0;
         let base_dy = (bbox.y2 - bbox.y1) / 2.0;
 
@@ -2372,10 +2416,18 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 prim.set_line_color(line_color);
                 prim.set_fill_color(fill_color);
                 prim.line(
-                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % width) as f64),
-                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % height) as f64),
-                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % width) as f64),
-                    RendererPrimitives::<PixfmtRgba32>::coord((msvc_rand15(&mut rng_state) % height) as f64),
+                    RendererPrimitives::<PixfmtRgba32>::coord(
+                        (msvc_rand15(&mut rng_state) % width) as f64,
+                    ),
+                    RendererPrimitives::<PixfmtRgba32>::coord(
+                        (msvc_rand15(&mut rng_state) % height) as f64,
+                    ),
+                    RendererPrimitives::<PixfmtRgba32>::coord(
+                        (msvc_rand15(&mut rng_state) % width) as f64,
+                    ),
+                    RendererPrimitives::<PixfmtRgba32>::coord(
+                        (msvc_rand15(&mut rng_state) % height) as f64,
+                    ),
                     true,
                 );
 

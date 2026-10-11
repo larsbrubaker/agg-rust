@@ -93,11 +93,17 @@ fn cmd_render(args: &[String]) {
 
     let output = output_path.unwrap_or_else(|| format!("{}_{}x{}.bmp", demo, width, height));
 
-    println!("Rendering '{}' at {}x{} with params {:?}...", demo, width, height, params);
+    println!(
+        "Rendering '{}' at {}x{} with params {:?}...",
+        demo, width, height, params
+    );
 
-    let buf = pixel_compare::render::render_demo(demo, width, height, &params)
-        .unwrap_or_else(|| {
-            eprintln!("Unknown demo: '{}'. Use 'list' to see available demos.", demo);
+    let buf =
+        pixel_compare::render::render_demo(demo, width, height, &params).unwrap_or_else(|| {
+            eprintln!(
+                "Unknown demo: '{}'. Use 'list' to see available demos.",
+                demo
+            );
             process::exit(1);
         });
 
@@ -121,7 +127,9 @@ fn cmd_bench(args: &[String]) {
     let mut i = 3;
     while i < args.len() {
         if args[i] == "--iters" && i + 1 < args.len() {
-            iters = args[i + 1].parse().expect("Invalid --iters (must be a positive integer)");
+            iters = args[i + 1]
+                .parse()
+                .expect("Invalid --iters (must be a positive integer)");
             i += 2;
         } else {
             params.push(args[i].parse::<f64>().expect("Invalid param (must be f64)"));
@@ -135,7 +143,10 @@ fn cmd_bench(args: &[String]) {
 
     let render = || {
         pixel_compare::render::render_demo(demo, width, height, &params).unwrap_or_else(|| {
-            eprintln!("Unknown demo: '{}'. Use 'list' to see available demos.", demo);
+            eprintln!(
+                "Unknown demo: '{}'. Use 'list' to see available demos.",
+                demo
+            );
             process::exit(1);
         })
     };
@@ -150,7 +161,10 @@ fn cmd_bench(args: &[String]) {
     let n = sorted.len();
     let median = median_ms(&times);
     let mean = times.iter().sum::<f64>() / n as f64;
-    println!("best= {:.2} ms  median= {:.2} ms  mean= {:.2} ms", best, median, mean);
+    println!(
+        "best= {:.2} ms  median= {:.2} ms  mean= {:.2} ms",
+        best, median, mean
+    );
 }
 
 /// Number of untimed warmup iterations run before the timed loop. Kept in sync
@@ -264,17 +278,83 @@ struct BenchCase {
 ///
 /// Adding a demo later is a one-line change here.
 const BENCH_CASES: &[BenchCase] = &[
-    BenchCase { name: "simple_line", width: 512, height: 512, params: &[], byte_verified: true },
-    BenchCase { name: "lion_outline", width: 512, height: 512, params: &[], byte_verified: true },
-    BenchCase { name: "rasterizers2", width: 500, height: 450, params: &[], byte_verified: true },
-    BenchCase { name: "conv_dash_marker", width: 500, height: 330, params: &[], byte_verified: true },
-    BenchCase { name: "perspective", width: 600, height: 600, params: &[], byte_verified: true },
-    BenchCase { name: "image_perspective", width: 600, height: 600, params: &[], byte_verified: true },
-    BenchCase { name: "image_transforms", width: 430, height: 340, params: &[], byte_verified: true },
-    BenchCase { name: "image_filters", width: 430, height: 340, params: &[], byte_verified: true },
-    BenchCase { name: "compositing2", width: 600, height: 400, params: &[], byte_verified: true },
-    BenchCase { name: "flash_rasterizer", width: 655, height: 520, params: &[], byte_verified: true },
-    BenchCase { name: "flash_rasterizer2", width: 655, height: 520, params: &[], byte_verified: true },
+    BenchCase {
+        name: "simple_line",
+        width: 512,
+        height: 512,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "lion_outline",
+        width: 512,
+        height: 512,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "rasterizers2",
+        width: 500,
+        height: 450,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "conv_dash_marker",
+        width: 500,
+        height: 330,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "perspective",
+        width: 600,
+        height: 600,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "image_perspective",
+        width: 600,
+        height: 600,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "image_transforms",
+        width: 430,
+        height: 340,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "image_filters",
+        width: 430,
+        height: 340,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "compositing2",
+        width: 600,
+        height: 400,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "flash_rasterizer",
+        width: 655,
+        height: 520,
+        params: &[],
+        byte_verified: true,
+    },
+    BenchCase {
+        name: "flash_rasterizer2",
+        width: 655,
+        height: 520,
+        params: &[],
+        byte_verified: true,
+    },
 ];
 
 /// Result of benchmarking one demo on both sides. The `cpp_*` fields are `None`
@@ -367,7 +447,10 @@ fn cmd_bench_compare(args: &[String]) {
     // Rust side gets exactly `WARMUP_ITERS` warmups per pass — the same count as
     // the C++ side (a probe render would give Rust an extra warmup and skew things).
     let available = pixel_compare::render::available_demos();
-    let rust_present: Vec<bool> = BENCH_CASES.iter().map(|c| available.contains(&c.name)).collect();
+    let rust_present: Vec<bool> = BENCH_CASES
+        .iter()
+        .map(|c| available.contains(&c.name))
+        .collect();
 
     // Interleave Rust and C++ per demo within each pass, exactly as the single-pass
     // path did. Running the full sweep `passes` times (rather than `passes` back-to-
@@ -390,7 +473,10 @@ fn cmd_bench_compare(args: &[String]) {
             let rust_times = time_render_loop(
                 || {
                     pixel_compare::render::render_demo(
-                        case.name, case.width, case.height, case.params,
+                        case.name,
+                        case.width,
+                        case.height,
+                        case.params,
                     )
                     .expect("demo verified present in registry above")
                 },
@@ -438,7 +524,11 @@ fn cmd_bench_compare(args: &[String]) {
             (
                 None,
                 None,
-                Some(cpp_error[idx].clone().unwrap_or_else(|| "C++ bench failed".to_string())),
+                Some(
+                    cpp_error[idx]
+                        .clone()
+                        .unwrap_or_else(|| "C++ bench failed".to_string()),
+                ),
             )
         } else {
             let (b, m) = pooled_best_median(&cpp_passes[idx]);
@@ -556,9 +646,7 @@ fn render_benchmark_doc(
     cpp_exe: &str,
     date: Option<&str>,
 ) -> String {
-    let date = date
-        .map(|d| d.to_string())
-        .unwrap_or_else(detect_date);
+    let date = date.map(|d| d.to_string()).unwrap_or_else(detect_date);
     let cpu = detect_cpu();
     let os = detect_os();
     let rustc = detect_rustc();
@@ -792,7 +880,10 @@ fn find_file_named(dir: &Path, name: &str, max_depth: usize) -> Option<PathBuf> 
 /// Run a command and capture its stdout as a String, returning None if the
 /// command cannot be spawned or exits non-zero.
 fn run_capture(program: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(program).args(args).output().ok()?;
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -927,8 +1018,8 @@ fn cmd_verify(args: &[String]) {
 
     // 1. Render Rust version
     println!("Rendering Rust '{}'...", demo);
-    let rust_buf = pixel_compare::render::render_demo(demo, width, height, &params)
-        .unwrap_or_else(|| {
+    let rust_buf =
+        pixel_compare::render::render_demo(demo, width, height, &params).unwrap_or_else(|| {
             eprintln!("Unknown demo: '{}'", demo);
             process::exit(1);
         });
@@ -985,7 +1076,10 @@ fn cmd_verify(args: &[String]) {
     if !result.identical {
         // Always save side-by-side on failure
         let sbs = generate_sidebyside(&rust_buf, &cpp_buf);
-        let sbs_path = out_dir.join(format!("{}_sidebyside_{}x{}{}.bmp", demo, width, height, suffix));
+        let sbs_path = out_dir.join(format!(
+            "{}_sidebyside_{}x{}{}.bmp",
+            demo, width, height, suffix
+        ));
         save_image(&sbs_path, &sbs).expect("Failed to save side-by-side");
         println!("Side-by-side saved: {}", sbs_path.display());
 
@@ -1006,7 +1100,7 @@ fn cmd_verify(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        best_ms, median_ms, parse_cpp_bench_output, params_suffix, pooled_best_median,
+        best_ms, median_ms, params_suffix, parse_cpp_bench_output, pooled_best_median,
         time_render_loop, BENCH_CASES,
     };
 
@@ -1067,13 +1161,18 @@ mod tests {
     #[test]
     fn all_bench_cases_are_byte_verified() {
         for c in BENCH_CASES {
-            assert!(c.byte_verified, "BENCH_CASES demo '{}' is not byte_verified", c.name);
+            assert!(
+                c.byte_verified,
+                "BENCH_CASES demo '{}' is not byte_verified",
+                c.name
+            );
         }
     }
 
     #[test]
     fn parse_cpp_bench_output_extracts_iter_samples_only() {
-        let stdout = "iter   1: 3.87 ms\niter   2: 3.63 ms\nbest= 3.63 ms  median= 3.75 ms  mean= 3.75 ms\n";
+        let stdout =
+            "iter   1: 3.87 ms\niter   2: 3.63 ms\nbest= 3.63 ms  median= 3.75 ms  mean= 3.75 ms\n";
         assert_eq!(parse_cpp_bench_output(stdout), vec![3.87, 3.63]);
     }
 
@@ -1093,7 +1192,11 @@ mod tests {
     fn bench_cases_have_unique_names_and_sane_sizes() {
         let mut seen = std::collections::HashSet::new();
         for c in BENCH_CASES {
-            assert!(seen.insert(c.name), "duplicate demo in BENCH_CASES: {}", c.name);
+            assert!(
+                seen.insert(c.name),
+                "duplicate demo in BENCH_CASES: {}",
+                c.name
+            );
             assert!(c.width > 0 && c.height > 0, "{} has zero size", c.name);
         }
     }
@@ -1104,7 +1207,11 @@ mod tests {
     fn bench_cases_render_in_rust_registry() {
         for c in BENCH_CASES {
             let out = pixel_compare::render::render_demo(c.name, c.width, c.height, c.params);
-            assert!(out.is_some(), "BENCH_CASES demo '{}' not in Rust registry", c.name);
+            assert!(
+                out.is_some(),
+                "BENCH_CASES demo '{}' not in Rust registry",
+                c.name
+            );
         }
     }
 
@@ -1128,7 +1235,10 @@ mod tests {
 
     #[test]
     fn same_params_yield_identical_suffix() {
-        assert_eq!(params_suffix(&[1.0, 2.0, 3.0]), params_suffix(&[1.0, 2.0, 3.0]));
+        assert_eq!(
+            params_suffix(&[1.0, 2.0, 3.0]),
+            params_suffix(&[1.0, 2.0, 3.0])
+        );
     }
 
     #[test]

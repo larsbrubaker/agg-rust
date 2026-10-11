@@ -2,6 +2,7 @@
 
 use agg_rust::color::Rgba8;
 use agg_rust::conv_stroke::ConvStroke;
+use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ctrl::{render_ctrl, CboxCtrl, RboxCtrl, SliderCtrl};
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gsv_text::GsvText;
@@ -15,7 +16,6 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
-use agg_rust::conv_transform::ConvTransform;
 
 /// Load spheres.bmp and return (width, height, rgba_data).
 fn load_spheres_bmp() -> (u32, u32, Vec<u8>) {
@@ -34,9 +34,9 @@ fn load_spheres_bmp() -> (u32, u32, Vec<u8>) {
             let si = src_off + x * bytes_pp;
             let di = (y * w as usize + x) * 4;
             if bytes_pp >= 3 {
-                rgba[di] = d[si + 2];     // R from BGR
+                rgba[di] = d[si + 2]; // R from BGR
                 rgba[di + 1] = d[si + 1]; // G
-                rgba[di + 2] = d[si];     // B
+                rgba[di + 2] = d[si]; // B
                 rgba[di + 3] = if bytes_pp >= 4 { d[si + 3] } else { 255 };
             }
         }
@@ -103,7 +103,9 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         // Clipping ellipse
         let mut r = iw;
-        if ih < r { r = ih; }
+        if ih < r {
+            r = ih;
+        }
         r *= 0.5;
         r -= 4.0;
         let mut ell = Ellipse::new(iw / 2.0, ih / 2.0, r, r, 200, false);
@@ -233,9 +235,23 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         // Filter radio box
         let filter_names = [
-            "simple (NN)", "bilinear", "bicubic", "spline16", "spline36",
-            "hanning", "hamming", "hermite", "kaiser", "quadric", "catrom",
-            "gaussian", "bessel", "mitchell", "sinc", "lanczos", "blackman",
+            "simple (NN)",
+            "bilinear",
+            "bicubic",
+            "spline16",
+            "spline36",
+            "hanning",
+            "hamming",
+            "hermite",
+            "kaiser",
+            "quadric",
+            "catrom",
+            "gaussian",
+            "bessel",
+            "mitchell",
+            "sinc",
+            "lanczos",
+            "blackman",
         ];
         let mut r_filters = RboxCtrl::new(0.0, 0.0, 110.0, 210.0);
         r_filters.border_width(0.0, 0.0);

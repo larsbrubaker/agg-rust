@@ -5,28 +5,23 @@
 //!
 //! Split into submodules to keep each file under 2000 lines.
 
-mod basic;
-mod images;
 mod alpha;
-mod transforms;
+mod basic;
 mod compositing;
 pub(crate) mod gb_poly;
+mod images;
+mod transforms;
 
-pub use basic::*;
-pub use images::*;
 pub use alpha::*;
-pub use transforms::*;
+pub use basic::*;
 pub use compositing::*;
+pub use images::*;
+pub use transforms::*;
 
 use agg_rust::rendering_buffer::RowAccessor;
 
 /// Create a rendering buffer, pixel format, and renderer base from dimensions.
-pub(crate) fn setup_renderer(
-    buf: &mut Vec<u8>,
-    ra: &mut RowAccessor,
-    width: u32,
-    height: u32,
-) {
+pub(crate) fn setup_renderer(buf: &mut Vec<u8>, ra: &mut RowAccessor, width: u32, height: u32) {
     let stride = (width * 4) as i32;
     buf.resize((width * height * 4) as usize, 255);
     unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
@@ -103,9 +98,9 @@ pub(super) fn load_spheres_image_native() -> (u32, u32, Vec<u8>) {
             let si = src_off + x * bytes_pp;
             let di = (y * w as usize + x) * 4;
             if bytes_pp >= 3 {
-                rgba[di] = d[si + 2];     // R from BGR
+                rgba[di] = d[si + 2]; // R from BGR
                 rgba[di + 1] = d[si + 1]; // G
-                rgba[di + 2] = d[si];     // B
+                rgba[di + 2] = d[si]; // B
                 rgba[di + 3] = if bytes_pp >= 4 { d[si + 3] } else { 255 };
             }
         }

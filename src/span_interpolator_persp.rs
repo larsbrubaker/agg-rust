@@ -353,7 +353,8 @@ mod tests {
     #[test]
     fn test_exact_rect_to_quad() {
         let quad = [10.0, 10.0, 110.0, 10.0, 110.0, 110.0, 10.0, 110.0];
-        let mut interp = SpanInterpolatorPerspExact::new_rect_to_quad(0.0, 0.0, 100.0, 100.0, &quad);
+        let mut interp =
+            SpanInterpolatorPerspExact::new_rect_to_quad(0.0, 0.0, 100.0, 100.0, &quad);
         assert!(interp.is_valid());
 
         // Point (0,0) in rect space → (10,10) in quad space

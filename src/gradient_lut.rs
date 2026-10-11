@@ -199,7 +199,11 @@ impl GradientLut {
             // `end - start - 1`. The previous `end - start + 1` sized it two steps too
             // long, so every segment stopped ~2/255 short of its end color (a
             // black->white ramp ended at 253, not 255).
-            let seg_len = if end > start { (end - start - 1).max(1) } else { 1 };
+            let seg_len = if end > start {
+                (end - start - 1).max(1)
+            } else {
+                1
+            };
 
             if self.use_fast_interpolator {
                 let mut ci = ColorInterpolatorRgba8::new(

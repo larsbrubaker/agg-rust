@@ -6,7 +6,7 @@
 //! scanline contains pixels from multiple fill styles).
 
 use crate::basics::{
-    is_close, is_move_to, is_stop, is_vertex, iround, FillingRule, VertexSource,
+    iround, is_close, is_move_to, is_stop, is_vertex, FillingRule, VertexSource,
     POLY_SUBPIXEL_MASK, POLY_SUBPIXEL_SCALE, POLY_SUBPIXEL_SHIFT,
 };
 use crate::rasterizer_scanline_aa::Scanline;
@@ -297,14 +297,30 @@ impl CellsEngine {
         let fy1 = y1 & POLY_SUBPIXEL_MASK as i32;
         let fy2 = y2 & POLY_SUBPIXEL_MASK as i32;
 
-        if ex1 < self.min_x { self.min_x = ex1; }
-        if ex1 > self.max_x { self.max_x = ex1; }
-        if ey1_orig < self.min_y { self.min_y = ey1_orig; }
-        if ey1_orig > self.max_y { self.max_y = ey1_orig; }
-        if ex2 < self.min_x { self.min_x = ex2; }
-        if ex2 > self.max_x { self.max_x = ex2; }
-        if ey2 < self.min_y { self.min_y = ey2; }
-        if ey2 > self.max_y { self.max_y = ey2; }
+        if ex1 < self.min_x {
+            self.min_x = ex1;
+        }
+        if ex1 > self.max_x {
+            self.max_x = ex1;
+        }
+        if ey1_orig < self.min_y {
+            self.min_y = ey1_orig;
+        }
+        if ey1_orig > self.max_y {
+            self.max_y = ey1_orig;
+        }
+        if ex2 < self.min_x {
+            self.min_x = ex2;
+        }
+        if ex2 > self.max_x {
+            self.max_x = ex2;
+        }
+        if ey2 < self.min_y {
+            self.min_y = ey2;
+        }
+        if ey2 > self.max_y {
+            self.max_y = ey2;
+        }
 
         let mut ey1 = ey1_orig;
         self.set_curr_cell(ex1, ey1);
@@ -383,13 +399,7 @@ impl CellsEngine {
                     delta += 1;
                 }
                 let x_to = x_from + delta;
-                self.render_hline(
-                    ey1,
-                    x_from,
-                    POLY_SUBPIXEL_SCALE as i32 - first,
-                    x_to,
-                    first,
-                );
+                self.render_hline(ey1, x_from, POLY_SUBPIXEL_SCALE as i32 - first, x_to, first);
                 x_from = x_to;
                 ey1 += incr;
                 self.set_curr_cell(x_from >> POLY_SUBPIXEL_SHIFT, ey1);
@@ -609,8 +619,8 @@ pub struct RasterizerCompoundAa {
     filling_rule: FillingRule,
     layer_order: LayerOrder,
     styles: Vec<StyleInfo>,
-    ast: Vec<u32>,   // Active Style Table
-    asm: Vec<u8>,    // Active Style Mask (bitmask)
+    ast: Vec<u32>, // Active Style Table
+    asm: Vec<u8>,  // Active Style Mask (bitmask)
     cells: Vec<CellInfo>,
     cover_buf: Vec<u8>,
     min_style: i32,
@@ -922,8 +932,7 @@ impl RasterizerCompoundAa {
                 return 0;
             }
             let num_cells = self.outline.scanline_num_cells(self.scan_y as u32);
-            let cell_indices: Vec<u32> =
-                self.outline.scanline_cells(self.scan_y as u32).to_vec();
+            let cell_indices: Vec<u32> = self.outline.scanline_cells(self.scan_y as u32).to_vec();
 
             let num_styles = (self.max_style - self.min_style + 2) as usize;
 
@@ -1220,7 +1229,10 @@ mod tests {
 
         // Sweep at least one scanline
         let num_styles = ras.sweep_styles();
-        assert!(num_styles >= 1, "Expected at least 1 style, got {num_styles}");
+        assert!(
+            num_styles >= 1,
+            "Expected at least 1 style, got {num_styles}"
+        );
     }
 
     #[test]

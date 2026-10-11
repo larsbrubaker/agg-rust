@@ -740,100 +740,148 @@ macro_rules! comp_op_span {
     ($op:expr, |$blend:ident| $body:block) => {
         match $op {
             CompOp::Clear => {
-                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, _a: u8, cover: u8| blend_clear(p, cover);
+                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, _a: u8, cover: u8| {
+                    blend_clear(p, cover)
+                };
                 $body
             }
             CompOp::Src => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_src(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Dst => {}
             CompOp::SrcOver => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_over(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_src_over(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::DstOver => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_dst_over(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_dst_over(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::SrcIn => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_in(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_src_in(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::DstIn => {
-                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, a: u8, cover: u8| blend_dst_in(p, a, cover);
+                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, a: u8, cover: u8| {
+                    blend_dst_in(p, a, cover)
+                };
                 $body
             }
             CompOp::SrcOut => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_out(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_src_out(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::DstOut => {
-                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, a: u8, cover: u8| blend_dst_out(p, a, cover);
+                let $blend = |p: &mut [u8; 4], _r: u8, _g: u8, _b: u8, a: u8, cover: u8| {
+                    blend_dst_out(p, a, cover)
+                };
                 $body
             }
             CompOp::SrcAtop => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_src_atop(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_src_atop(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::DstAtop => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_dst_atop(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_dst_atop(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Xor => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_xor(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_xor(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Plus => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_plus(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_plus(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Minus => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_minus(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_minus(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Multiply => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_multiply(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_multiply(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Screen => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_screen(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_screen(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Overlay => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_overlay(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_overlay(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Darken => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_darken(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_darken(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Lighten => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_lighten(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_lighten(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::ColorDodge => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_color_dodge(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_color_dodge(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::ColorBurn => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_color_burn(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_color_burn(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::HardLight => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_hard_light(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_hard_light(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::SoftLight => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_soft_light(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_soft_light(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Difference => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_difference(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_difference(p, r, g, b, a, cover)
+                };
                 $body
             }
             CompOp::Exclusion => {
-                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| blend_exclusion(p, r, g, b, a, cover);
+                let $blend = |p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8| {
+                    blend_exclusion(p, r, g, b, a, cover)
+                };
                 $body
             }
         }

@@ -114,7 +114,12 @@ impl<'a> PixelFormat for PixfmtRgb24<'a> {
     fn pixel(&self, x: i32, y: i32) -> Rgba8 {
         let row = self.row(y);
         let off = x as usize * BPP;
-        Rgba8::new(row[off] as u32, row[off + 1] as u32, row[off + 2] as u32, 255)
+        Rgba8::new(
+            row[off] as u32,
+            row[off + 1] as u32,
+            row[off + 2] as u32,
+            255,
+        )
     }
 
     fn copy_pixel(&mut self, x: i32, y: i32, c: &Rgba8) {

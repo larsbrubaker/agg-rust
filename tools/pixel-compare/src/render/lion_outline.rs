@@ -40,8 +40,8 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Compute bounding box to match C++ exactly (not hardcoded values)
     let path_ids_u32: Vec<u32> = path_idx.iter().map(|&x| x as u32).collect();
     let npaths = colors.len();
-    let rect = bounding_rect(&mut path, &path_ids_u32, 0, npaths)
-        .expect("Lion path has no vertices");
+    let rect =
+        bounding_rect(&mut path, &path_ids_u32, 0, npaths).expect("Lion path has no vertices");
     let base_dx = (rect.x2 - rect.x1) / 2.0;
     let base_dy = (rect.y2 - rect.y1) / 2.0;
 
@@ -89,7 +89,11 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         // params[7] > 0 = only render first N paths (for debugging)
         let max_paths = params.get(7).copied().unwrap_or(0.0) as usize;
-        let render_count = if max_paths > 0 { max_paths.min(npaths) } else { npaths };
+        let render_count = if max_paths > 0 {
+            max_paths.min(npaths)
+        } else {
+            npaths
+        };
         for i in 0..render_count {
             let start = path_idx[i] as u32;
             let mut transformed = ConvTransform::new(&mut path, mtx);

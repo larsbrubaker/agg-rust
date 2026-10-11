@@ -173,6 +173,9 @@ mod tests {
             }
             count += 1;
         }
-        assert!(count > 2, "Long segment should be subdivided: count={count}");
+        assert!(
+            count > 2,
+            "Long segment should be subdivided: count={count}"
+        );
     }
 }

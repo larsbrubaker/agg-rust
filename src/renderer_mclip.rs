@@ -161,14 +161,7 @@ impl<PF: PixelFormat> RendererMclip<PF> {
         }
     }
 
-    pub fn blend_hline(
-        &mut self,
-        x1: i32,
-        y: i32,
-        x2: i32,
-        c: &PF::ColorType,
-        cover: CoverType,
-    ) {
+    pub fn blend_hline(&mut self, x1: i32, y: i32, x2: i32, c: &PF::ColorType, cover: CoverType) {
         if self.first_clip_box() {
             loop {
                 self.ren.blend_hline(x1, y, x2, c, cover);
@@ -179,14 +172,7 @@ impl<PF: PixelFormat> RendererMclip<PF> {
         }
     }
 
-    pub fn blend_vline(
-        &mut self,
-        x: i32,
-        y1: i32,
-        y2: i32,
-        c: &PF::ColorType,
-        cover: CoverType,
-    ) {
+    pub fn blend_vline(&mut self, x: i32, y1: i32, y2: i32, c: &PF::ColorType, cover: CoverType) {
         if self.first_clip_box() {
             loop {
                 self.ren.blend_vline(x, y1, y2, c, cover);

@@ -36,14 +36,14 @@ mod renderer_base_float_tests;
 mod renderer_markers_tests;
 #[path = "agg_sharp/renderer_primitives_tests.rs"]
 mod renderer_primitives_tests;
+#[path = "agg_sharp/scanline_boolean_algebra_tests.rs"]
+mod scanline_boolean_algebra_tests;
 #[path = "agg_sharp/slight_blur_tests.rs"]
 mod slight_blur_tests;
 #[path = "agg_sharp/srgb_lut_float_tests.rs"]
 mod srgb_lut_float_tests;
 #[path = "agg_sharp/stack_blur_gray8_tests.rs"]
 mod stack_blur_gray8_tests;
-#[path = "agg_sharp/scanline_boolean_algebra_tests.rs"]
-mod scanline_boolean_algebra_tests;
 #[path = "agg_sharp/stack_blur_tests.rs"]
 mod stack_blur_tests;
 #[path = "agg_sharp/trans_warp_magnifier_tests.rs"]

@@ -30,7 +30,12 @@ impl PixelBuffer {
 
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let i = ((y * self.width + x) * 4) as usize;
-        [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
+        [
+            self.data[i],
+            self.data[i + 1],
+            self.data[i + 2],
+            self.data[i + 3],
+        ]
     }
 
     /// Flip the buffer vertically (top-to-bottom becomes bottom-to-top).
@@ -298,7 +303,10 @@ pub fn load_bmp(path: &Path) -> io::Result<PixelBuffer> {
     File::open(path)?.read_to_end(&mut data)?;
 
     if data.len() < 54 || &data[0..2] != b"BM" {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Not a valid BMP file"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Not a valid BMP file",
+        ));
     }
 
     let pixel_offset = u32::from_le_bytes([data[10], data[11], data[12], data[13]]) as usize;
@@ -363,7 +371,10 @@ pub fn load_raw(path: &Path) -> io::Result<PixelBuffer> {
     File::open(path)?.read_to_end(&mut data)?;
 
     if data.len() < 8 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Raw file too small"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Raw file too small",
+        ));
     }
 
     let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
@@ -373,7 +384,11 @@ pub fn load_raw(path: &Path) -> io::Result<PixelBuffer> {
     if data.len() < expected {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Raw file too small: expected {} bytes, got {}", expected, data.len()),
+            format!(
+                "Raw file too small: expected {} bytes, got {}",
+                expected,
+                data.len()
+            ),
         ));
     }
 

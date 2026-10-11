@@ -398,11 +398,9 @@ where
             let mut ix = 0i32;
             let mut iy = 0i32;
             self.interpolator.coordinates(&mut ix, &mut iy);
-            let d = self.gradient_function.calculate(
-                ix >> DOWNSCALE_SHIFT,
-                iy >> DOWNSCALE_SHIFT,
-                d2,
-            );
+            let d =
+                self.gradient_function
+                    .calculate(ix >> DOWNSCALE_SHIFT, iy >> DOWNSCALE_SHIFT, d2);
             let d = (((d - d1) * color_size) / dd).clamp(0, color_max);
             *pixel = self.color_function.get(d as usize);
             self.interpolator.next();

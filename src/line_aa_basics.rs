@@ -94,7 +94,18 @@ impl LineParameters {
         // octant = (sy & 4) | (sx & 2) | int(vertical)
         let octant = ((sy as u32 & 4) | (sx as u32 & 2) | (vertical as u32)) as usize;
         Self {
-            x1, y1, x2, y2, dx, dy, sx, sy, vertical, inc, len, octant,
+            x1,
+            y1,
+            x2,
+            y2,
+            dx,
+            dy,
+            sx,
+            sy,
+            vertical,
+            inc,
+            len,
+            octant,
         }
     }
 

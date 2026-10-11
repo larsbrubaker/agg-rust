@@ -27,8 +27,8 @@ fn lion_outline_matches_cpp_reference_512x512() {
     assert_eq!(reference.width, 512);
     assert_eq!(reference.height, 512);
 
-    let rust = render_demo("lion_outline", 512, 512, &[])
-        .expect("lion_outline demo should be registered");
+    let rust =
+        render_demo("lion_outline", 512, 512, &[]).expect("lion_outline demo should be registered");
 
     let result = compare_buffers(&reference, &rust);
     assert!(

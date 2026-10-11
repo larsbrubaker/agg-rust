@@ -3,7 +3,7 @@
 //! Port of make_gb_poly.cpp, make_arrows.cpp, and spiral class from AGG 2.6 examples.
 //! Copyright (c) 2025, AGG Rust port contributors.
 
-use agg_rust::basics::{VertexSource, PATH_CMD_MOVE_TO, PATH_CMD_LINE_TO, PATH_CMD_STOP};
+use agg_rust::basics::{VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
 use agg_rust::path_storage::PathStorage;
 
 /// Spiral vertex source matching the C++ spiral class in scanline_boolean2.cpp.

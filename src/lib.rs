@@ -32,8 +32,8 @@ pub mod basics;
 pub mod color;
 pub mod color_rgba32;
 pub mod gamma;
-pub mod srgb_lut;
 pub mod math;
+pub mod srgb_lut;
 
 // Phase 2: Memory & Geometry Primitives
 pub mod arc;
@@ -94,11 +94,11 @@ pub mod span_solid;
 
 // Phase 6: Transforms, Image Filters, Text & Alpha Masking
 pub mod alpha_mask_u8;
-pub mod pixfmt_amask_adaptor;
 pub mod conv_marker;
 pub mod gsv_text;
 pub mod image_accessors;
 pub mod image_filters;
+pub mod pixfmt_amask_adaptor;
 pub mod span_image_filter;
 pub mod trans_bilinear;
 pub mod trans_perspective;
@@ -106,8 +106,8 @@ pub mod trans_perspective;
 // Phase 7: Image Span Filters & Demo Infrastructure
 pub mod ellipse_bresenham;
 pub mod rasterizer_outline;
-pub mod renderer_primitives;
 pub mod renderer_markers;
+pub mod renderer_primitives;
 pub mod span_converter;
 pub mod span_image_filter_rgba;
 pub mod span_interpolator_trans;
@@ -161,6 +161,6 @@ pub mod trans_double_path;
 
 // Phase 16: TrueType Font Engine (optional, requires `font` feature)
 #[cfg(feature = "font")]
-pub mod font_engine;
-#[cfg(feature = "font")]
 pub mod font_cache;
+#[cfg(feature = "font")]
+pub mod font_engine;

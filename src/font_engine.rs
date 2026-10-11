@@ -269,30 +269,41 @@ impl OutlineCollector {
     #[inline]
     fn sy(&self, v: f32) -> f64 {
         let y = v as f64 * self.scale;
-        if self.flip_y { -y } else { y }
+        if self.flip_y {
+            -y
+        } else {
+            y
+        }
     }
 }
 
 impl ttf_parser::OutlineBuilder for OutlineCollector {
     fn move_to(&mut self, x: f32, y: f32) {
-        self.vertices.push((self.sx(x), self.sy(y), PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.sx(x), self.sy(y), PATH_CMD_MOVE_TO));
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        self.vertices.push((self.sx(x), self.sy(y), PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.sx(x), self.sy(y), PATH_CMD_LINE_TO));
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         // Quadratic Bezier: control point + endpoint, both with PATH_CMD_CURVE3
-        self.vertices.push((self.sx(x1), self.sy(y1), PATH_CMD_CURVE3));
-        self.vertices.push((self.sx(x), self.sy(y), PATH_CMD_CURVE3));
+        self.vertices
+            .push((self.sx(x1), self.sy(y1), PATH_CMD_CURVE3));
+        self.vertices
+            .push((self.sx(x), self.sy(y), PATH_CMD_CURVE3));
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         // Cubic Bezier: two control points + endpoint, all with PATH_CMD_CURVE4
-        self.vertices.push((self.sx(x1), self.sy(y1), PATH_CMD_CURVE4));
-        self.vertices.push((self.sx(x2), self.sy(y2), PATH_CMD_CURVE4));
-        self.vertices.push((self.sx(x), self.sy(y), PATH_CMD_CURVE4));
+        self.vertices
+            .push((self.sx(x1), self.sy(y1), PATH_CMD_CURVE4));
+        self.vertices
+            .push((self.sx(x2), self.sy(y2), PATH_CMD_CURVE4));
+        self.vertices
+            .push((self.sx(x), self.sy(y), PATH_CMD_CURVE4));
     }
 
     fn close(&mut self) {

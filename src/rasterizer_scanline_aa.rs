@@ -818,7 +818,10 @@ mod tests {
         let mut ras_source = RasterizerScanlineAa::new();
         ras_source.add_path(&mut path, 0);
         let cached_cells = ras_source.outline_cells();
-        assert!(!cached_cells.is_empty(), "outline_cells() should return non-empty cells");
+        assert!(
+            !cached_cells.is_empty(),
+            "outline_cells() should return non-empty cells"
+        );
 
         let mut ras_replay = RasterizerScanlineAa::new();
         ras_replay.add_cells_offset(&cached_cells, dx, dy);

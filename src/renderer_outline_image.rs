@@ -234,8 +234,7 @@ impl<F: PatternFilter> LineImagePattern<F> {
         self.width = uceil(src.width());
         self.width_hr = uround(src.width() * LINE_SUBPIXEL_SCALE as f64);
         self.half_height_hr = uround(src.height() * LINE_SUBPIXEL_SCALE as f64 / 2.0);
-        self.offset_y_hr =
-            self.dilation_hr + self.half_height_hr - LINE_SUBPIXEL_SCALE / 2;
+        self.offset_y_hr = self.dilation_hr + self.half_height_hr - LINE_SUBPIXEL_SCALE / 2;
         self.half_height_hr += LINE_SUBPIXEL_SCALE / 2;
 
         let total_w = (self.width + self.dilation * 2) as usize;
@@ -276,8 +275,7 @@ impl<F: PatternFilter> LineImagePattern<F> {
                 self.buf[y][self.dilation as usize + self.width as usize + dx] = src_val;
 
                 // Left border: copy from right edge of center
-                let src_val = self.buf[y]
-                    [self.dilation as usize + self.width as usize - 1 - dx];
+                let src_val = self.buf[y][self.dilation as usize + self.width as usize - 1 - dx];
                 self.buf[y][self.dilation as usize - 1 - dx] = src_val;
             }
         }
@@ -394,17 +392,33 @@ pub trait ImageLinePattern {
 }
 
 impl<F: PatternFilter> ImageLinePattern for LineImagePattern<F> {
-    fn pattern_width(&self) -> i32 { self.pattern_width() }
-    fn line_width(&self) -> i32 { self.line_width() }
-    fn width(&self) -> f64 { self.width() }
-    fn pixel(&self, p: &mut Rgba8, x: i32, y: i32) { self.pixel(p, x, y) }
+    fn pattern_width(&self) -> i32 {
+        self.pattern_width()
+    }
+    fn line_width(&self) -> i32 {
+        self.line_width()
+    }
+    fn width(&self) -> f64 {
+        self.width()
+    }
+    fn pixel(&self, p: &mut Rgba8, x: i32, y: i32) {
+        self.pixel(p, x, y)
+    }
 }
 
 impl<F: PatternFilter> ImageLinePattern for LineImagePatternPow2<F> {
-    fn pattern_width(&self) -> i32 { self.pattern_width() }
-    fn line_width(&self) -> i32 { self.line_width() }
-    fn width(&self) -> f64 { self.width() }
-    fn pixel(&self, p: &mut Rgba8, x: i32, y: i32) { self.pixel(p, x, y) }
+    fn pattern_width(&self) -> i32 {
+        self.pattern_width()
+    }
+    fn line_width(&self) -> i32 {
+        self.line_width()
+    }
+    fn width(&self) -> f64 {
+        self.width()
+    }
+    fn pixel(&self, p: &mut Rgba8, x: i32, y: i32) {
+        self.pixel(p, x, y)
+    }
 }
 
 // ============================================================================
@@ -434,9 +448,18 @@ pub struct DistanceInterpolator4 {
 impl DistanceInterpolator4 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        x1: i32, y1: i32, x2: i32, y2: i32,
-        sx: i32, sy: i32, ex: i32, ey: i32,
-        len: i32, scale: f64, x: i32, y: i32,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        sx: i32,
+        sy: i32,
+        ex: i32,
+        ey: i32,
+        len: i32,
+        scale: f64,
+        x: i32,
+        y: i32,
     ) -> Self {
         let mut dx = x2 - x1;
         let mut dy = y2 - y1;
@@ -463,10 +486,8 @@ impl DistanceInterpolator4 {
         let dy_f = iround(((y2 - y1) << LINE_SUBPIXEL_SHIFT) as f64 / d);
         let dx_pict = -dy_f;
         let dy_pict = dx_f;
-        let dist_pict = ((x + LINE_SUBPIXEL_SCALE / 2 - (x1 - dy_f)) as i64
-            * dy_pict as i64
-            - (y + LINE_SUBPIXEL_SCALE / 2 - (y1 + dx_f)) as i64
-                * dx_pict as i64)
+        let dist_pict = ((x + LINE_SUBPIXEL_SCALE / 2 - (x1 - dy_f)) as i64 * dy_pict as i64
+            - (y + LINE_SUBPIXEL_SCALE / 2 - (y1 + dx_f)) as i64 * dx_pict as i64)
             >> LINE_SUBPIXEL_SHIFT;
 
         dx <<= LINE_SUBPIXEL_SHIFT;
@@ -477,8 +498,18 @@ impl DistanceInterpolator4 {
         dy_end <<= LINE_MR_SUBPIXEL_SHIFT;
 
         Self {
-            dx, dy, dx_start, dy_start, dx_pict, dy_pict, dx_end, dy_end,
-            dist, dist_start, dist_pict: dist_pict as i32, dist_end,
+            dx,
+            dy,
+            dx_start,
+            dy_start,
+            dx_pict,
+            dy_pict,
+            dx_end,
+            dy_end,
+            dist,
+            dist_start,
+            dist_pict: dist_pict as i32,
+            dist_end,
             len: ilen,
         }
     }
@@ -563,17 +594,50 @@ impl DistanceInterpolator4 {
         }
     }
 
-    #[inline] pub fn dist(&self) -> i32 { self.dist }
-    #[inline] pub fn dist_start(&self) -> i32 { self.dist_start }
-    #[inline] pub fn dist_pict(&self) -> i32 { self.dist_pict }
-    #[inline] pub fn dist_end(&self) -> i32 { self.dist_end }
-    #[inline] pub fn dx_start(&self) -> i32 { self.dx_start }
-    #[inline] pub fn dy_start(&self) -> i32 { self.dy_start }
-    #[inline] pub fn dx_pict(&self) -> i32 { self.dx_pict }
-    #[inline] pub fn dy_pict(&self) -> i32 { self.dy_pict }
-    #[inline] pub fn dx_end(&self) -> i32 { self.dx_end }
-    #[inline] pub fn dy_end(&self) -> i32 { self.dy_end }
-    #[inline] pub fn len(&self) -> i32 { self.len }
+    #[inline]
+    pub fn dist(&self) -> i32 {
+        self.dist
+    }
+    #[inline]
+    pub fn dist_start(&self) -> i32 {
+        self.dist_start
+    }
+    #[inline]
+    pub fn dist_pict(&self) -> i32 {
+        self.dist_pict
+    }
+    #[inline]
+    pub fn dist_end(&self) -> i32 {
+        self.dist_end
+    }
+    #[inline]
+    pub fn dx_start(&self) -> i32 {
+        self.dx_start
+    }
+    #[inline]
+    pub fn dy_start(&self) -> i32 {
+        self.dy_start
+    }
+    #[inline]
+    pub fn dx_pict(&self) -> i32 {
+        self.dx_pict
+    }
+    #[inline]
+    pub fn dy_pict(&self) -> i32 {
+        self.dy_pict
+    }
+    #[inline]
+    pub fn dx_end(&self) -> i32 {
+        self.dx_end
+    }
+    #[inline]
+    pub fn dy_end(&self) -> i32 {
+        self.dy_end
+    }
+    #[inline]
+    pub fn len(&self) -> i32 {
+        self.len
+    }
 }
 
 // ============================================================================
@@ -657,26 +721,13 @@ where
     /// Render a line segment with image pattern (no clipping).
     ///
     /// Port of C++ `renderer_outline_image::line3_no_clip`.
-    fn line3_no_clip(
-        &mut self,
-        lp: &LineParameters,
-        sx: i32, sy: i32,
-        ex: i32, ey: i32,
-    ) {
+    fn line3_no_clip(&mut self, lp: &LineParameters, sx: i32, sy: i32, ex: i32, ey: i32) {
         if lp.len > LINE_MAX_LENGTH {
             let (lp1, lp2) = lp.divide();
             let mx = lp1.x2 + (lp1.y2 - lp1.y1);
             let my = lp1.y2 - (lp1.x2 - lp1.x1);
-            self.line3_no_clip(
-                &lp1,
-                (lp.x1 + sx) >> 1, (lp.y1 + sy) >> 1,
-                mx, my,
-            );
-            self.line3_no_clip(
-                &lp2,
-                mx, my,
-                (lp.x2 + ex) >> 1, (lp.y2 + ey) >> 1,
-            );
+            self.line3_no_clip(&lp1, (lp.x1 + sx) >> 1, (lp.y1 + sy) >> 1, mx, my);
+            self.line3_no_clip(&lp2, mx, my, (lp.x2 + ex) >> 1, (lp.y2 + ey) >> 1);
             return;
         }
 
@@ -699,21 +750,13 @@ where
     /// This combines the C++ `line_interpolator_image` constructor and
     /// stepping methods into a single function to avoid borrow conflicts.
     #[allow(clippy::too_many_arguments)]
-    fn render_line_image(
-        &mut self,
-        lp: &LineParameters,
-        sx: i32, sy: i32,
-        ex: i32, ey: i32,
-    ) {
+    fn render_line_image(&mut self, lp: &LineParameters, sx: i32, sy: i32, ex: i32, ey: i32) {
         const MAX_HW: usize = 64;
         const DIST_SIZE: usize = MAX_HW + 1;
         const COLOR_SIZE: usize = MAX_HW * 2 + 4;
 
         let li_init = if lp.vertical {
-            Dda2LineInterpolator::new_relative(
-                line_dbl_hr(lp.x2 - lp.x1),
-                (lp.y2 - lp.y1).abs(),
-            )
+            Dda2LineInterpolator::new_relative(line_dbl_hr(lp.x2 - lp.x1), (lp.y2 - lp.y1).abs())
         } else {
             Dda2LineInterpolator::new_relative(
                 line_dbl_hr(lp.y2 - lp.y1),
@@ -722,9 +765,16 @@ where
         };
 
         let di_init = DistanceInterpolator4::new(
-            lp.x1, lp.y1, lp.x2, lp.y2,
-            sx, sy, ex, ey,
-            lp.len, self.scale_x,
+            lp.x1,
+            lp.y1,
+            lp.x2,
+            lp.y2,
+            sx,
+            sy,
+            ex,
+            ey,
+            lp.len,
+            self.scale_x,
             lp.x1 & !LINE_SUBPIXEL_MASK,
             lp.y1 & !LINE_SUBPIXEL_MASK,
         );
@@ -747,14 +797,20 @@ where
         {
             let mut dd = Dda2LineInterpolator::new_forward(
                 0,
-                if lp.vertical { lp.dy << LINE_SUBPIXEL_SHIFT } else { lp.dx << LINE_SUBPIXEL_SHIFT },
+                if lp.vertical {
+                    lp.dy << LINE_SUBPIXEL_SHIFT
+                } else {
+                    lp.dx << LINE_SUBPIXEL_SHIFT
+                },
                 lp.len,
             );
             let stop = width + LINE_SUBPIXEL_SCALE * 2;
             let mut i = 0;
             while i < MAX_HW {
                 dist_pos[i] = dd.y();
-                if dist_pos[i] >= stop { break; }
+                if dist_pos[i] >= stop {
+                    break;
+                }
                 dd.inc();
                 i += 1;
             }
@@ -778,52 +834,82 @@ where
                 li.dec();
                 y -= lp.inc;
                 x = (lp.x1 + li.y()) >> LINE_SUBPIXEL_SHIFT;
-                if lp.inc > 0 { di.dec_y(x - old_x); }
-                else { di.inc_y(x - old_x); }
+                if lp.inc > 0 {
+                    di.dec_y(x - old_x);
+                } else {
+                    di.inc_y(x - old_x);
+                }
                 old_x = x;
 
                 let mut d1 = di.dist_start();
                 let mut d2 = d1;
                 let mut dx = 0usize;
-                if d1 < 0 { npix += 1; }
+                if d1 < 0 {
+                    npix += 1;
+                }
                 loop {
                     d1 += di.dy_start();
                     d2 -= di.dy_start();
-                    if d1 < 0 { npix += 1; }
-                    if d2 < 0 { npix += 1; }
+                    if d1 < 0 {
+                        npix += 1;
+                    }
+                    if d2 < 0 {
+                        npix += 1;
+                    }
                     dx += 1;
-                    if dist_pos[dx] > width { break; }
+                    if dist_pos[dx] > width {
+                        break;
+                    }
                 }
-                if npix == 0 { break; }
+                if npix == 0 {
+                    break;
+                }
                 npix = 0;
                 step -= 1;
-                if step < -max_extent { break; }
+                if step < -max_extent {
+                    break;
+                }
             }
         } else {
             loop {
                 li.dec();
                 x -= lp.inc;
                 y = (lp.y1 + li.y()) >> LINE_SUBPIXEL_SHIFT;
-                if lp.inc > 0 { di.dec_x(y - old_y); }
-                else { di.inc_x(y - old_y); }
+                if lp.inc > 0 {
+                    di.dec_x(y - old_y);
+                } else {
+                    di.inc_x(y - old_y);
+                }
                 old_y = y;
 
                 let mut d1 = di.dist_start();
                 let mut d2 = d1;
                 let mut dy = 0usize;
-                if d1 < 0 { npix += 1; }
+                if d1 < 0 {
+                    npix += 1;
+                }
                 loop {
                     d1 -= di.dx_start();
                     d2 += di.dx_start();
-                    if d1 < 0 { npix += 1; }
-                    if d2 < 0 { npix += 1; }
+                    if d1 < 0 {
+                        npix += 1;
+                    }
+                    if d2 < 0 {
+                        npix += 1;
+                    }
                     dy += 1;
-                    if dist_pos[dy] > width { break; }
+                    if dist_pos[dy] > width {
+                        break;
+                    }
                 }
-                if npix == 0 { break; }
+                if npix == 0 {
+                    break;
+                }
                 npix = 0;
                 step -= 1;
-                if step < -max_extent { break; }
+                if step < -max_extent {
+                    break;
+                }
             }
         }
 
@@ -840,8 +926,11 @@ where
                 li.inc();
                 y += lp.inc;
                 x = (lp.x1 + li.y()) >> LINE_SUBPIXEL_SHIFT;
-                if lp.inc > 0 { di.inc_y(x - old_x); }
-                else { di.dec_y(x - old_x); }
+                if lp.inc > 0 {
+                    di.inc_y(x - old_x);
+                } else {
+                    di.dec_y(x - old_x);
+                }
                 old_x = x;
 
                 let s1 = di.dist() / lp.len;
@@ -874,7 +963,9 @@ where
                     colors[p1] = Rgba8::new(0, 0, 0, 0);
                     if dist_end > 0 && dist_start <= 0 {
                         let mut d = dist_pos[dx];
-                        if lp.inc > 0 { d = -d; }
+                        if lp.inc > 0 {
+                            d = -d;
+                        }
                         self.pattern.pixel(&mut colors[p1], dist_pict, s2 + d);
                         n += 1;
                     }
@@ -894,7 +985,9 @@ where
                     colors[p0] = Rgba8::new(0, 0, 0, 0);
                     if dist_end > 0 && dist_start <= 0 {
                         let mut d = dist_pos[dx];
-                        if lp.inc > 0 { d = -d; }
+                        if lp.inc > 0 {
+                            d = -d;
+                        }
                         self.pattern.pixel(&mut colors[p0], dist_pict, s2 - d);
                         n += 1;
                     }
@@ -908,10 +1001,8 @@ where
                         .iter()
                         .map(|c| PF::ColorType::from(*c))
                         .collect();
-                    self.ren.blend_color_hspan(
-                        x - dx as i32 + 1, y, len as i32,
-                        &cvec, &[], 255,
-                    );
+                    self.ren
+                        .blend_color_hspan(x - dx as i32 + 1, y, len as i32, &cvec, &[], 255);
                 }
 
                 step += 1;
@@ -925,8 +1016,11 @@ where
                 li.inc();
                 x += lp.inc;
                 y = (lp.y1 + li.y()) >> LINE_SUBPIXEL_SHIFT;
-                if lp.inc > 0 { di.inc_x(y - old_y); }
-                else { di.dec_x(y - old_y); }
+                if lp.inc > 0 {
+                    di.inc_x(y - old_y);
+                } else {
+                    di.dec_x(y - old_y);
+                }
                 old_y = y;
 
                 let s1 = di.dist() / lp.len;
@@ -959,7 +1053,9 @@ where
                     colors[p1] = Rgba8::new(0, 0, 0, 0);
                     if dist_end > 0 && dist_start <= 0 {
                         let mut d = dist_pos[dy];
-                        if lp.inc > 0 { d = -d; }
+                        if lp.inc > 0 {
+                            d = -d;
+                        }
                         self.pattern.pixel(&mut colors[p1], dist_pict, s2 - d);
                         n += 1;
                     }
@@ -979,7 +1075,9 @@ where
                     colors[p0] = Rgba8::new(0, 0, 0, 0);
                     if dist_end > 0 && dist_start <= 0 {
                         let mut d = dist_pos[dy];
-                        if lp.inc > 0 { d = -d; }
+                        if lp.inc > 0 {
+                            d = -d;
+                        }
                         self.pattern.pixel(&mut colors[p0], dist_pict, s2 + d);
                         n += 1;
                     }
@@ -993,10 +1091,8 @@ where
                         .iter()
                         .map(|c| PF::ColorType::from(*c))
                         .collect();
-                    self.ren.blend_color_vspan(
-                        x, y - dy as i32 + 1, len as i32,
-                        &cvec, &[], 255,
-                    );
+                    self.ren
+                        .blend_color_vspan(x, y - dy as i32 + 1, len as i32, &cvec, &[], 255);
                 }
 
                 step += 1;
@@ -1008,8 +1104,7 @@ where
     }
 }
 
-impl<'a, PF: PixelFormat, P: ImageLinePattern> OutlineAaRenderer
-    for RendererOutlineImage<'a, PF, P>
+impl<'a, PF: PixelFormat, P: ImageLinePattern> OutlineAaRenderer for RendererOutlineImage<'a, PF, P>
 where
     PF::ColorType: Default + Clone + From<Rgba8>,
 {
@@ -1033,7 +1128,10 @@ where
             if (flags & 4) == 0 {
                 if flags != 0 {
                     let lp2 = LineParameters::new(
-                        x1, y1, x2, y2,
+                        x1,
+                        y1,
+                        x2,
+                        y2,
                         uround(calc_distance_i(x1, y1, x2, y2)),
                     );
                     let mut sx = sx;
@@ -1041,9 +1139,7 @@ where
                     let mut ex = ex;
                     let mut ey = ey;
                     if flags & 1 != 0 {
-                        self.start += uround(
-                            calc_distance_i(lp.x1, lp.y1, x1, y1) / self.scale_x,
-                        );
+                        self.start += uround(calc_distance_i(lp.x1, lp.y1, x1, y1) / self.scale_x);
                         sx = x1 + (y2 - y1);
                         sy = y1 - (x2 - x1);
                     } else {
@@ -1102,15 +1198,25 @@ mod tests {
     }
 
     impl ImagePatternSource for SolidPatternSource {
-        fn width(&self) -> f64 { self.w as f64 }
-        fn height(&self) -> f64 { self.h as f64 }
-        fn pixel(&self, _x: i32, _y: i32) -> Rgba8 { self.color }
+        fn width(&self) -> f64 {
+            self.w as f64
+        }
+        fn height(&self) -> f64 {
+            self.h as f64
+        }
+        fn pixel(&self, _x: i32, _y: i32) -> Rgba8 {
+            self.color
+        }
     }
 
     #[test]
     fn test_line_image_pattern_creation() {
         use crate::pattern_filters_rgba::PatternFilterBilinearRgba;
-        let src = SolidPatternSource { w: 16, h: 8, color: Rgba8::new(255, 0, 0, 255) };
+        let src = SolidPatternSource {
+            w: 16,
+            h: 8,
+            color: Rgba8::new(255, 0, 0, 255),
+        };
         let pat = LineImagePattern::<PatternFilterBilinearRgba>::with_source(&src);
         assert!(pat.pattern_width() > 0);
         assert!(pat.line_width() > 0);
@@ -1119,7 +1225,11 @@ mod tests {
     #[test]
     fn test_line_image_pattern_pixel() {
         use crate::pattern_filters_rgba::PatternFilterNn;
-        let src = SolidPatternSource { w: 16, h: 8, color: Rgba8::new(255, 128, 64, 200) };
+        let src = SolidPatternSource {
+            w: 16,
+            h: 8,
+            color: Rgba8::new(255, 128, 64, 200),
+        };
         let pat = LineImagePattern::<PatternFilterNn>::with_source(&src);
         let mut p = Rgba8::new(0, 0, 0, 0);
         pat.pixel(&mut p, 0, 0);
@@ -1128,18 +1238,18 @@ mod tests {
 
     #[test]
     fn test_distance_interpolator4() {
-        let di = DistanceInterpolator4::new(
-            0, 0, 256, 0,
-            -256, 0, 512, 0,
-            256, 1.0, 0, 0,
-        );
+        let di = DistanceInterpolator4::new(0, 0, 256, 0, -256, 0, 512, 0, 256, 1.0, 0, 0);
         assert_ne!(di.len(), 0);
     }
 
     #[test]
     fn test_line_image_pattern_pow2() {
         use crate::pattern_filters_rgba::PatternFilterBilinearRgba;
-        let src = SolidPatternSource { w: 16, h: 8, color: Rgba8::new(0, 255, 0, 255) };
+        let src = SolidPatternSource {
+            w: 16,
+            h: 8,
+            color: Rgba8::new(0, 255, 0, 255),
+        };
         let pat = LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src);
         assert!(pat.pattern_width() > 0);
         assert!(pat.line_width() > 0);
@@ -1159,11 +1269,17 @@ mod tests {
         let stride = (w * 4) as i32;
         let mut buf = vec![255u8; (h * w * 4) as usize];
         let mut ra = RowAccessor::new();
-        unsafe { ra.attach(buf.as_mut_ptr(), w, h, stride); }
+        unsafe {
+            ra.attach(buf.as_mut_ptr(), w, h, stride);
+        }
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
 
-        let src = SolidPatternSource { w: 32, h: 16, color: Rgba8::new(255, 0, 0, 255) };
+        let src = SolidPatternSource {
+            w: 32,
+            h: 16,
+            color: Rgba8::new(255, 0, 0, 255),
+        };
         let pat = LineImagePattern::<PatternFilterBilinearRgba>::with_source(&src);
 
         let mut ren = RendererOutlineImage::new(&mut rb, &pat);
@@ -1171,15 +1287,13 @@ mod tests {
         ren.set_start_x(0.0);
 
         // Draw a horizontal line
-        let lp = LineParameters::new(
-            10 * 256, 50 * 256,
-            90 * 256, 50 * 256,
-            80 * 256,
-        );
+        let lp = LineParameters::new(10 * 256, 50 * 256, 90 * 256, 50 * 256, 80 * 256);
         ren.line3(
             &lp,
-            10 * 256 + (0), 50 * 256 - (80 * 256),
-            90 * 256 + (0), 50 * 256 - (80 * 256),
+            10 * 256 + (0),
+            50 * 256 - (80 * 256),
+            90 * 256 + (0),
+            50 * 256 - (80 * 256),
         );
 
         // Check some pixels were drawn (red channel should be non-zero near the line)
@@ -1194,7 +1308,9 @@ mod tests {
                     break;
                 }
             }
-            if found { break; }
+            if found {
+                break;
+            }
         }
         assert!(found, "Expected red pixels near row 50");
     }

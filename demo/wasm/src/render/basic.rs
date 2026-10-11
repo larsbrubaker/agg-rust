@@ -2,16 +2,19 @@
 //! bezier_div, circles, rounded_rect, aa_demo, gamma_correction, line_thickness,
 //! rasterizers, conv_contour, perspective.
 
-use agg_rust::basics::{deg2rad, is_stop, is_vertex, VertexSource, PATH_FLAGS_CW, PATH_FLAGS_CCW};
-use agg_rust::bspline::Bspline;
+use super::setup_renderer;
+use agg_rust::basics::{deg2rad, is_stop, is_vertex, VertexSource, PATH_FLAGS_CCW, PATH_FLAGS_CW};
 use agg_rust::bounding_rect::bounding_rect;
+use agg_rust::bspline::Bspline;
 use agg_rust::color::Rgba8;
 use agg_rust::conv_contour::ConvContour;
-use agg_rust::ctrl::{render_ctrl, CboxCtrl, GammaCtrl, RboxCtrl, ScaleCtrl, SliderCtrl, SplineCtrl};
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
+use agg_rust::ctrl::{
+    render_ctrl, CboxCtrl, GammaCtrl, RboxCtrl, ScaleCtrl, SliderCtrl, SplineCtrl,
+};
 use agg_rust::curves::{Curve4, CurveApproximationMethod};
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gamma::{srgb_to_linear, GammaFunction, GammaPower, GammaThreshold};
@@ -29,15 +32,13 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_gradient::{
-    GradientConic, GradientDiamond, GradientRadial, GradientReflectAdaptor,
-    GradientSqrtXY, GradientX, GradientXY,
-    SpanGradient,
+    GradientConic, GradientDiamond, GradientRadial, GradientReflectAdaptor, GradientSqrtXY,
+    GradientX, GradientXY, SpanGradient,
 };
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
-use super::setup_renderer;
 
 // ============================================================================
 // Lion
@@ -152,19 +153,20 @@ pub fn gradients(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     const SPLINE_B_BASE: usize = 35;
     const SPLINE_A_BASE: usize = 47;
 
-    let read_spline_point = |base: usize, idx: usize, default_x: f64, default_y: f64| -> (f64, f64) {
-        let x = params
-            .get(base + idx * 2)
-            .copied()
-            .unwrap_or(default_x)
-            .clamp(0.0, 1.0);
-        let y = params
-            .get(base + idx * 2 + 1)
-            .copied()
-            .unwrap_or(default_y)
-            .clamp(0.0, 1.0);
-        (x, y)
-    };
+    let read_spline_point =
+        |base: usize, idx: usize, default_x: f64, default_y: f64| -> (f64, f64) {
+            let x = params
+                .get(base + idx * 2)
+                .copied()
+                .unwrap_or(default_x)
+                .clamp(0.0, 1.0);
+            let y = params
+                .get(base + idx * 2 + 1)
+                .copied()
+                .unwrap_or(default_y)
+                .clamp(0.0, 1.0);
+            (x, y)
+        };
 
     let cx = params.get(0).copied().unwrap_or(CENTER_X);
     let cy = params.get(1).copied().unwrap_or(CENTER_Y);
@@ -326,7 +328,11 @@ mod gradients_tests {
 
         // Outside r=110 should be untouched background black.
         let outside = pixel_at(&img, w, 580, 20);
-        assert_eq!(outside, [0, 0, 0, 255], "outside sphere should be background");
+        assert_eq!(
+            outside,
+            [0, 0, 0, 255],
+            "outside sphere should be background"
+        );
     }
 }
 
@@ -386,26 +392,91 @@ pub fn gouraud(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Inner 3 (edge vertices → centroid, brc=0 → black)
     // Outer 3 (edge vertices → reflected midpoint, brc=1 → white)
     struct Tri {
-        x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64,
-        c0: Rgba8, c1: Rgba8, c2: Rgba8,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        c0: Rgba8,
+        c1: Rgba8,
+        c2: Rgba8,
     }
 
     let triangles = [
         // Inner 3
-        Tri { x0: vx0, y0: vy0, x1: vx1, y1: vy1, x2: xc, y2: yc, c0: red, c1: green, c2: black },
-        Tri { x0: vx1, y0: vy1, x1: vx2, y1: vy2, x2: xc, y2: yc, c0: green, c1: blue, c2: black },
-        Tri { x0: vx2, y0: vy2, x1: vx0, y1: vy0, x2: xc, y2: yc, c0: blue, c1: red, c2: black },
+        Tri {
+            x0: vx0,
+            y0: vy0,
+            x1: vx1,
+            y1: vy1,
+            x2: xc,
+            y2: yc,
+            c0: red,
+            c1: green,
+            c2: black,
+        },
+        Tri {
+            x0: vx1,
+            y0: vy1,
+            x1: vx2,
+            y1: vy2,
+            x2: xc,
+            y2: yc,
+            c0: green,
+            c1: blue,
+            c2: black,
+        },
+        Tri {
+            x0: vx2,
+            y0: vy2,
+            x1: vx0,
+            y1: vy0,
+            x2: xc,
+            y2: yc,
+            c0: blue,
+            c1: red,
+            c2: black,
+        },
         // Outer 3
-        Tri { x0: vx0, y0: vy0, x1: vx1, y1: vy1, x2: rx01, y2: ry01, c0: red, c1: green, c2: white },
-        Tri { x0: vx1, y0: vy1, x1: vx2, y1: vy2, x2: rx12, y2: ry12, c0: green, c1: blue, c2: white },
-        Tri { x0: vx2, y0: vy2, x1: vx0, y1: vy0, x2: rx20, y2: ry20, c0: blue, c1: red, c2: white },
+        Tri {
+            x0: vx0,
+            y0: vy0,
+            x1: vx1,
+            y1: vy1,
+            x2: rx01,
+            y2: ry01,
+            c0: red,
+            c1: green,
+            c2: white,
+        },
+        Tri {
+            x0: vx1,
+            y0: vy1,
+            x1: vx2,
+            y1: vy2,
+            x2: rx12,
+            y2: ry12,
+            c0: green,
+            c1: blue,
+            c2: white,
+        },
+        Tri {
+            x0: vx2,
+            y0: vy2,
+            x1: vx0,
+            y1: vy0,
+            x2: rx20,
+            y2: ry20,
+            c0: blue,
+            c1: red,
+            c2: white,
+        },
     ];
 
     for tri in &triangles {
         let mut g = SpanGouraudRgba::new_with_triangle(
-            tri.c0, tri.c1, tri.c2,
-            tri.x0, tri.y0, tri.x1, tri.y1, tri.x2, tri.y2,
-            d,
+            tri.c0, tri.c1, tri.c2, tri.x0, tri.y0, tri.x1, tri.y1, tri.x2, tri.y2, d,
         );
         ras.reset();
         ras.add_path(&mut g, 0);
@@ -1731,7 +1802,9 @@ pub fn line_thickness(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         let gray = (50.0 + t * 150.0) as u32;
         render_scanlines_aa_solid(
-            &mut ras, &mut sl, &mut rb,
+            &mut ras,
+            &mut sl,
+            &mut rb,
             &Rgba8::new(gray, gray / 2, 0, 255),
         );
     }
@@ -1796,31 +1869,32 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    let mut render_with_gamma = |path: &mut PathStorage, color: Rgba8, map_cover: &dyn Fn(u8) -> u8| {
-        let mut ras = RasterizerScanlineAa::new();
-        let mut sl = ScanlineU8::new();
-        ras.add_path(path, 0);
-        if !ras.rewind_scanlines() {
-            return;
-        }
-        sl.reset(ras.min_x(), ras.max_x());
-        while ras.sweep_scanline(&mut sl) {
-            let y = sl.y();
-            let spans = sl.begin();
-            let covers = sl.covers();
-            for span in spans {
-                if span.len <= 0 {
-                    continue;
-                }
-                let len = span.len as usize;
-                let mut mapped = Vec::with_capacity(len);
-                for cov in &covers[span.cover_offset..span.cover_offset + len] {
-                    mapped.push(map_cover(*cov));
-                }
-                rb.blend_solid_hspan(span.x, y, span.len, &color, &mapped);
+    let mut render_with_gamma =
+        |path: &mut PathStorage, color: Rgba8, map_cover: &dyn Fn(u8) -> u8| {
+            let mut ras = RasterizerScanlineAa::new();
+            let mut sl = ScanlineU8::new();
+            ras.add_path(path, 0);
+            if !ras.rewind_scanlines() {
+                return;
             }
-        }
-    };
+            sl.reset(ras.min_x(), ras.max_x());
+            while ras.sweep_scanline(&mut sl) {
+                let y = sl.y();
+                let spans = sl.begin();
+                let covers = sl.covers();
+                for span in spans {
+                    if span.len <= 0 {
+                        continue;
+                    }
+                    let len = span.len as usize;
+                    let mut mapped = Vec::with_capacity(len);
+                    for cov in &covers[span.cover_offset..span.cover_offset + len] {
+                        mapped.push(map_cover(*cov));
+                    }
+                    rb.blend_solid_hspan(span.x, y, span.len, &color, &mapped);
+                }
+            }
+        };
 
     let a = (alpha.clamp(0.0, 1.0) * 255.0) as u32;
 
@@ -1832,11 +1906,9 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         path.line_to(vx2, vy2);
         path.close_polygon(0);
         let gp = GammaPower::new(gamma * 2.0);
-        render_with_gamma(
-            &mut path,
-            Rgba8::new(179, 128, 26, a),
-            &|cov: u8| ((gp.call(cov as f64 / 255.0) * 255.0) + 0.5) as u8,
-        );
+        render_with_gamma(&mut path, Rgba8::new(179, 128, 26, a), &|cov: u8| {
+            ((gp.call(cov as f64 / 255.0) * 255.0) + 0.5) as u8
+        });
     }
 
     // Left triangle: aliased with gamma_threshold(gamma), shifted by -200.
@@ -1847,11 +1919,13 @@ pub fn rasterizers(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         path.line_to(vx2 - 200.0, vy2);
         path.close_polygon(0);
         let gt = GammaThreshold::new(gamma);
-        render_with_gamma(
-            &mut path,
-            Rgba8::new(26, 128, 179, a),
-            &|cov: u8| if gt.call(cov as f64 / 255.0) >= 0.5 { 255 } else { 0 },
-        );
+        render_with_gamma(&mut path, Rgba8::new(26, 128, 179, a), &|cov: u8| {
+            if gt.call(cov as f64 / 255.0) >= 0.5 {
+                255
+            } else {
+                0
+            }
+        });
     }
 
     let mut ras = RasterizerScanlineAa::new();
@@ -1898,8 +1972,16 @@ mod rasterizers_tests {
         // Right AA triangle is warm (R > B), left aliased triangle is cool (B > R).
         assert!(right[0] > right[2], "right triangle should be warm-toned");
         assert!(left[2] > left[0], "left triangle should be cool-toned");
-        assert_ne!(right, [255, 255, 255, 255], "right triangle should not be white");
-        assert_ne!(left, [255, 255, 255, 255], "left triangle should not be white");
+        assert_ne!(
+            right,
+            [255, 255, 255, 255],
+            "right triangle should not be white"
+        );
+        assert_ne!(
+            left,
+            [255, 255, 255, 255],
+            "left triangle should not be white"
+        );
     }
 }
 
@@ -2056,9 +2138,8 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Compute bounding rect of lion paths
     let path_ids: Vec<u32> = path_idx.iter().map(|&i| i as u32).collect();
-    let bbox = bounding_rect(&mut path, &path_ids, 0, npaths).unwrap_or(
-        agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0),
-    );
+    let bbox = bounding_rect(&mut path, &path_ids, 0, npaths)
+        .unwrap_or(agg_rust::basics::RectD::new(0.0, 0.0, 250.0, 400.0));
     // Match C++ perspective.cpp parse_lion(): mirror source lion in both axes
     // around its bounding box before applying quad transform.
     path.flip_x(bbox.x1, bbox.x2);
@@ -2208,4 +2289,3 @@ pub fn perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     buf
 }
-

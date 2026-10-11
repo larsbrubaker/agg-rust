@@ -3,6 +3,9 @@
 //! lion_outline, rasterizers2, line_patterns, line_patterns_clip, compositing, compositing2,
 //! flash_rasterizer, flash_rasterizer2, rasterizer_compound.
 
+use super::setup_renderer;
+use agg_rust::basics::uround;
+use agg_rust::basics::FillingRule;
 use agg_rust::basics::{is_stop, is_vertex, VertexSource, COVER_FULL};
 use agg_rust::blur::stack_blur_rgba32;
 use agg_rust::color::{Gray8, Rgba, Rgba8};
@@ -13,6 +16,7 @@ use agg_rust::conv_transform::ConvTransform;
 use agg_rust::ctrl::{render_ctrl, CboxCtrl, RboxCtrl, SliderCtrl};
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gamma::srgb_to_linear;
+use agg_rust::gradient_lut::{ColorFunction, GradientLinearColor};
 use agg_rust::gsv_text::GsvText;
 use agg_rust::image_accessors::{ImageAccessorWrap, WrapModeRepeat};
 use agg_rust::math_stroke::{LineCap, LineJoin};
@@ -20,9 +24,9 @@ use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_gray::PixfmtGray8;
 use agg_rust::pixfmt_rgb::PixfmtRgb24;
 use agg_rust::pixfmt_rgba::{PixfmtRgba32, PixfmtRgba32Pre};
-use agg_rust::rasterizer_compound_aa::{RasterizerCompoundAa, LayerOrder};
+use agg_rust::rasterizer_compound_aa::{LayerOrder, RasterizerCompoundAa};
 use agg_rust::rasterizer_outline::RasterizerOutline;
-use agg_rust::rasterizer_outline_aa::{RasterizerOutlineAa, OutlineAaJoin};
+use agg_rust::rasterizer_outline_aa::{OutlineAaJoin, RasterizerOutlineAa};
 use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
 use agg_rust::renderer_base::RendererBase;
 use agg_rust::renderer_outline_aa::{LineProfileAa, RendererOutlineAa};
@@ -30,15 +34,14 @@ use agg_rust::renderer_primitives::RendererPrimitives;
 use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid};
 use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::rounded_rect::RoundedRect;
-use agg_rust::basics::FillingRule;
-use agg_rust::scanline_boolean_algebra::{SBoolOp, sbool_combine_shapes_aa, sbool_combine_shapes_bin};
+use agg_rust::scanline_bin::ScanlineBin;
+use agg_rust::scanline_boolean_algebra::{
+    sbool_combine_shapes_aa, sbool_combine_shapes_bin, SBoolOp,
+};
 use agg_rust::scanline_storage_aa::ScanlineStorageAa;
 use agg_rust::scanline_storage_bin::ScanlineStorageBin;
-use agg_rust::scanline_bin::ScanlineBin;
 use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
-use agg_rust::basics::uround;
-use agg_rust::gradient_lut::{ColorFunction, GradientLinearColor};
 use agg_rust::span_gradient::{GradientRadial, GradientX, SpanGradient};
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
@@ -48,8 +51,6 @@ use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_bilinear::TransBilinear;
 use agg_rust::trans_perspective::TransPerspective;
 use agg_rust::trans_viewport::{AspectRatio, TransViewport};
-use super::setup_renderer;
-
 
 // ============================================================================
 // Blend Color — shape with blurred shadow
@@ -108,7 +109,9 @@ pub fn blend_color(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         shape.rewind(0);
         loop {
             let cmd = shape.vertex(&mut x, &mut y);
-            if is_stop(cmd) { break; }
+            if is_stop(cmd) {
+                break;
+            }
             if is_vertex(cmd) {
                 if (cmd & 0x07) == 1 {
                     shadow_shape.move_to(x + shadow_dx, y + shadow_dy);
@@ -185,7 +188,6 @@ pub fn blend_color(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-
 // ============================================================================
 // Component Rendering — RGB channels as independent gray layers
 // ============================================================================
@@ -233,10 +235,10 @@ pub fn component_rendering(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         for x in 0..width {
             let gi = (y * width + x) as usize;
             let oi = gi * 4;
-            buf[oi] = r_buf[gi];     // R channel from red circle gray
+            buf[oi] = r_buf[gi]; // R channel from red circle gray
             buf[oi + 1] = g_buf[gi]; // G channel from green circle gray
             buf[oi + 2] = b_buf[gi]; // B channel from blue circle gray
-            buf[oi + 3] = 255;       // fully opaque
+            buf[oi + 3] = 255; // fully opaque
         }
     }
 
@@ -257,7 +259,6 @@ pub fn component_rendering(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     buf
 }
-
 
 // ============================================================================
 // Polymorphic Renderer — triangle rendered via different pixel formats
@@ -301,11 +302,21 @@ pub fn polymorphic_renderer(width: u32, height: u32, params: &[f64]) -> Vec<u8> 
                 let mut sl = ScanlineU8::new();
 
                 ras.add_path(&mut tri, 0);
-                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rgb_rb, &Rgba8::new(80, 30, 20, 255));
+                render_scanlines_aa_solid(
+                    &mut ras,
+                    &mut sl,
+                    &mut rgb_rb,
+                    &Rgba8::new(80, 30, 20, 255),
+                );
 
                 ras.reset();
                 ras.add_path(&mut ell, 0);
-                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rgb_rb, &Rgba8::new(20, 80, 40, 200));
+                render_scanlines_aa_solid(
+                    &mut ras,
+                    &mut sl,
+                    &mut rgb_rb,
+                    &Rgba8::new(20, 80, 40, 200),
+                );
             }
             // Convert RGB24 → RGBA32
             for y in 0..height {
@@ -414,7 +425,10 @@ fn render_storage_solid(
                 let len = span.len;
                 if len > 0 {
                     ren.blend_solid_hspan(
-                        x, y, len, color,
+                        x,
+                        y,
+                        len,
+                        color,
                         &sl.covers()[span.cover_offset..span.cover_offset + len as usize],
                     );
                 }
@@ -422,7 +436,6 @@ fn render_storage_solid(
         }
     }
 }
-
 
 // ============================================================================
 // Scanline Boolean — two shape groups with boolean operations
@@ -452,16 +465,24 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
     let defaults_quad1 = [
-        50.0, 180.0,
-        w / 2.0 - 25.0, 200.0,
-        w / 2.0 - 25.0, h - 70.0,
-        50.0, h - 50.0,
+        50.0,
+        180.0,
+        w / 2.0 - 25.0,
+        200.0,
+        w / 2.0 - 25.0,
+        h - 70.0,
+        50.0,
+        h - 50.0,
     ];
     let defaults_quad2 = [
-        w / 2.0 + 25.0, 180.0,
-        w - 50.0, 200.0,
-        w - 50.0, h - 70.0,
-        w / 2.0 + 25.0, h - 50.0,
+        w / 2.0 + 25.0,
+        180.0,
+        w - 50.0,
+        200.0,
+        w - 50.0,
+        h - 70.0,
+        w / 2.0 + 25.0,
+        h - 50.0,
     ];
 
     let mut quad1 = defaults_quad1;
@@ -492,7 +513,8 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let n2 = if i < 3 { i * 2 + 2 } else { 0 };
             for j in 0..num_circles {
                 let cx = quad[n1] + (quad[n2] - quad[n1]) * j as f64 / num_circles as f64;
-                let cy = quad[n1 + 1] + (quad[n2 + 1] - quad[n1 + 1]) * j as f64 / num_circles as f64;
+                let cy =
+                    quad[n1 + 1] + (quad[n2 + 1] - quad[n1 + 1]) * j as f64 / num_circles as f64;
                 let mut ell = Ellipse::new(cx, cy, radius, radius, 100, false);
                 ps.concat_path(&mut ell, 0);
             }
@@ -526,11 +548,22 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut storage2 = ScanlineStorageAa::new();
     let mut storage_result = ScanlineStorageAa::new();
     sbool_combine_shapes_aa(
-        op, &mut ras1, &mut ras2,
-        &mut sl1, &mut sl2, &mut sl_result,
-        &mut storage1, &mut storage2, &mut storage_result,
+        op,
+        &mut ras1,
+        &mut ras2,
+        &mut sl1,
+        &mut sl2,
+        &mut sl_result,
+        &mut storage1,
+        &mut storage2,
+        &mut storage_result,
     );
-    render_storage_solid(&mut storage_result, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+    render_storage_solid(
+        &mut storage_result,
+        &mut sl,
+        &mut rb,
+        &Rgba8::new(0, 0, 0, 255),
+    );
 
     // Render interactive quad guides (edges + vertex handles).
     for quad in [&quad1, &quad2] {
@@ -589,7 +622,6 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-
 // ============================================================================
 // Scanline Boolean 2 — more complex boolean ops with paths
 // ============================================================================
@@ -607,7 +639,7 @@ pub fn scanline_boolean(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// params[4] = mouse_x
 /// params[5] = mouse_y
 pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
-    use super::gb_poly::{make_gb_poly, make_arrows, Spiral};
+    use super::gb_poly::{make_arrows, make_gb_poly, Spiral};
     use agg_rust::ctrl::RboxCtrl;
 
     let polygon_idx = params.first().copied().unwrap_or(3.0) as u32;
@@ -712,13 +744,11 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
             ras1.reset();
             ras1.add_path(&mut ps1, 0);
-            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 0, 0, 26)); // rgba(0,0,0,0.1)
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb, &Rgba8::new(0, 0, 0, 26)); // rgba(0,0,0,0.1)
 
             ras2.reset();
             ras2.add_path(&mut ps2, 0);
-            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 153, 0, 26)); // rgba(0,0.6,0,0.1)
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb, &Rgba8::new(0, 153, 0, 26)); // rgba(0,0.6,0,0.1)
 
             // Re-add for boolean
             ras1.reset();
@@ -759,13 +789,11 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
             ras1.reset();
             ras1.add_path(&mut ps1, 0);
-            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 0, 0, 26));
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb, &Rgba8::new(0, 0, 0, 26));
 
             ras2.reset();
             ras2.add_path(&mut stroke, 0);
-            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 153, 0, 26));
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb, &Rgba8::new(0, 153, 0, 26));
 
             // Re-add for boolean
             ras1.reset();
@@ -796,18 +824,15 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut trans_arrows = ConvTransform::new(&mut arrows, mtx2);
 
             ras2.add_path(&mut trans_gb_poly, 0);
-            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
-                &Rgba8::new(128, 128, 0, 26)); // rgba(0.5,0.5,0,0.1)
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb, &Rgba8::new(128, 128, 0, 26)); // rgba(0.5,0.5,0,0.1)
 
             let mut stroke_gb_poly = ConvStroke::new(&mut trans_gb_poly);
             stroke_gb_poly.set_width(0.1);
             ras1.add_path(&mut stroke_gb_poly, 0);
-            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 0, 0, 255));
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
             ras2.add_path(&mut trans_arrows, 0);
-            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 128, 128, 26)); // rgba(0,0.5,0.5,0.1)
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb, &Rgba8::new(0, 128, 128, 26)); // rgba(0,0.5,0.5,0.1)
 
             ras1.reset();
             ras1.filling_rule(fill_rule);
@@ -830,20 +855,17 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut trans_gb_poly = ConvTransform::new(&mut gb_poly, mtx);
 
             ras1.add_path(&mut trans_gb_poly, 0);
-            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
-                &Rgba8::new(128, 128, 0, 26));
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb, &Rgba8::new(128, 128, 0, 26));
 
             let mut stroke_gb_poly = ConvStroke::new(&mut trans_gb_poly);
             stroke_gb_poly.set_width(0.1);
             ras1.reset();
             ras1.add_path(&mut stroke_gb_poly, 0);
-            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 0, 0, 255));
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
             ras2.reset();
             ras2.add_path(&mut stroke, 0);
-            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 128, 128, 26));
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb, &Rgba8::new(0, 128, 128, 26));
 
             ras1.reset();
             ras1.filling_rule(fill_rule);
@@ -910,13 +932,11 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
             ras1.reset();
             ras1.add_path(&mut stroke, 0);
-            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 0, 0, 26));
+            render_scanlines_aa_solid(&mut ras1, &mut sl_u8, &mut rb, &Rgba8::new(0, 0, 0, 26));
 
             ras2.reset();
             ras2.add_path(&mut curve, 0);
-            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb,
-                &Rgba8::new(0, 153, 0, 26));
+            render_scanlines_aa_solid(&mut ras2, &mut sl_u8, &mut rb, &Rgba8::new(0, 153, 0, 26));
 
             // Re-add for boolean
             ras1.reset();
@@ -954,9 +974,15 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 let mut st_result = ScanlineStorageBin::new();
 
                 sbool_combine_shapes_bin(
-                    op, &mut ras1, &mut ras2,
-                    &mut sl1, &mut sl2, &mut sl_result,
-                    &mut st1, &mut st2, &mut st_result,
+                    op,
+                    &mut ras1,
+                    &mut ras2,
+                    &mut sl1,
+                    &mut sl2,
+                    &mut sl_result,
+                    &mut st1,
+                    &mut st2,
+                    &mut st_result,
                 );
 
                 render_storage_bin_solid(&mut st_result, &mut sl_u8, &mut rb, &result_color);
@@ -971,9 +997,15 @@ pub fn scanline_boolean2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 let mut st_result = ScanlineStorageAa::new();
 
                 sbool_combine_shapes_aa(
-                    op, &mut ras1, &mut ras2,
-                    &mut sl1, &mut sl2, &mut sl_result,
-                    &mut st1, &mut st2, &mut st_result,
+                    op,
+                    &mut ras1,
+                    &mut ras2,
+                    &mut sl1,
+                    &mut sl2,
+                    &mut sl_result,
+                    &mut st1,
+                    &mut st2,
+                    &mut st_result,
                 );
 
                 render_storage_solid(&mut st_result, &mut sl_u8, &mut rb, &result_color);
@@ -1023,7 +1055,6 @@ fn render_storage_bin_solid(
     }
 }
 
-
 // ============================================================================
 // Pattern Fill — repeating pattern fills a polygon
 // ============================================================================
@@ -1069,11 +1100,20 @@ pub fn pattern_fill(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let r = if i % 2 == 0 { pr } else { pr * 0.4 };
             let px = pc + r * angle.cos();
             let py = pc + r * angle.sin();
-            if i == 0 { star.move_to(px, py); } else { star.line_to(px, py); }
+            if i == 0 {
+                star.move_to(px, py);
+            } else {
+                star.line_to(px, py);
+            }
         }
         star.close_polygon(0);
         ras.add_path(&mut star, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut pat_rb, &Rgba8::new(100, 60, 160, 255));
+        render_scanlines_aa_solid(
+            &mut ras,
+            &mut sl,
+            &mut pat_rb,
+            &Rgba8::new(100, 60, 160, 255),
+        );
     }
 
     // Create pattern source using ImageAccessorWrap for tiling
@@ -1098,7 +1138,11 @@ pub fn pattern_fill(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let r = if i % 2 == 0 { r_outer } else { r_inner };
         let px = cx + r * angle.cos();
         let py = cy + r * angle.sin();
-        if i == 0 { polygon.move_to(px, py); } else { polygon.line_to(px, py); }
+        if i == 0 {
+            polygon.move_to(px, py);
+        } else {
+            polygon.line_to(px, py);
+        }
     }
     polygon.close_polygon(0);
 
@@ -1131,7 +1175,6 @@ pub fn pattern_fill(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-
 // ============================================================================
 // Pattern Perspective — pattern with perspective transform
 // ============================================================================
@@ -1144,10 +1187,14 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
     let default_quad = [
-        w * 0.17, h * 0.17,
-        w * 0.83, h * 0.08,
-        w * 0.83, h * 0.83,
-        w * 0.17, h * 0.83,
+        w * 0.17,
+        h * 0.17,
+        w * 0.83,
+        h * 0.08,
+        w * 0.83,
+        h * 0.83,
+        w * 0.17,
+        h * 0.83,
     ];
     let quad: Vec<f64> = (0..8)
         .map(|i| params.get(i).copied().unwrap_or(default_quad[i]))
@@ -1191,7 +1238,12 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     rect.close_polygon(0);
                     ras.reset();
                     ras.add_path(&mut rect, 0);
-                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut img_rb, &Rgba8::new(200, 210, 220, 255));
+                    render_scanlines_aa_solid(
+                        &mut ras,
+                        &mut sl,
+                        &mut img_rb,
+                        &Rgba8::new(200, 210, 220, 255),
+                    );
                 }
             }
         }
@@ -1199,7 +1251,12 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut ell = Ellipse::new(50.0, 50.0, 35.0, 35.0, 50, false);
         ras.reset();
         ras.add_path(&mut ell, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut img_rb, &Rgba8::new(60, 100, 180, 255));
+        render_scanlines_aa_solid(
+            &mut ras,
+            &mut sl,
+            &mut img_rb,
+            &Rgba8::new(60, 100, 180, 255),
+        );
     }
 
     // Set up image source
@@ -1219,11 +1276,14 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut sl = ScanlineU8::new();
 
     // Render based on transform type
-    let dst_quad: [f64; 8] = [quad[0], quad[1], quad[2], quad[3], quad[4], quad[5], quad[6], quad[7]];
+    let dst_quad: [f64; 8] = [
+        quad[0], quad[1], quad[2], quad[3], quad[4], quad[5], quad[6], quad[7],
+    ];
     match trans_type {
         1 => {
             // Bilinear
-            let tb = TransBilinear::new_quad_to_rect(&dst_quad, 0.0, 0.0, img_w as f64, img_h as f64);
+            let tb =
+                TransBilinear::new_quad_to_rect(&dst_quad, 0.0, 0.0, img_w as f64, img_h as f64);
             if tb.is_valid() {
                 let mut interp = SpanInterpolatorTrans::new(tb);
                 let bg_color = Rgba8::new(255, 255, 255, 255);
@@ -1249,7 +1309,14 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         _ => {
             // Affine (use first 3 corners for parallelogram mapping)
             let src_parl: [f64; 6] = [0.0, 0.0, img_w as f64, 0.0, img_w as f64, img_h as f64];
-            let dst_parl: [f64; 6] = [dst_quad[0], dst_quad[1], dst_quad[2], dst_quad[3], dst_quad[4], dst_quad[5]];
+            let dst_parl: [f64; 6] = [
+                dst_quad[0],
+                dst_quad[1],
+                dst_quad[2],
+                dst_quad[3],
+                dst_quad[4],
+                dst_quad[5],
+            ];
             let mut mtx = TransAffine::new();
             mtx.parl_to_parl(&dst_parl, &src_parl);
             let mut interp = SpanInterpolatorLinear::new(mtx);
@@ -1285,7 +1352,6 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-
 // ============================================================================
 // Pattern Resample — resampled pattern with quality controls
 // ============================================================================
@@ -1299,10 +1365,14 @@ pub fn pattern_resample(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let w = width as f64;
     let h = height as f64;
     let default_quad = [
-        w * 0.2, h * 0.2,
-        w * 0.8, h * 0.15,
-        w * 0.85, h * 0.8,
-        w * 0.15, h * 0.85,
+        w * 0.2,
+        h * 0.2,
+        w * 0.8,
+        h * 0.15,
+        w * 0.85,
+        h * 0.8,
+        w * 0.15,
+        h * 0.85,
     ];
     let quad: Vec<f64> = (0..8)
         .map(|i| params.get(i).copied().unwrap_or(default_quad[i]))
@@ -1330,9 +1400,15 @@ pub fn pattern_resample(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let dx = u - 0.5;
             let dy = v - 0.5;
             let d = (dx * dx + dy * dy).sqrt() * 4.0;
-            let r = ((128.0 + 127.0 * (d * 6.28).sin()) as f64).powf(gamma_val).clamp(0.0, 255.0);
-            let g = ((128.0 + 127.0 * (d * 6.28 + 2.1).sin()) as f64).powf(gamma_val).clamp(0.0, 255.0);
-            let b = ((128.0 + 127.0 * (d * 6.28 + 4.2).sin()) as f64).powf(gamma_val).clamp(0.0, 255.0);
+            let r = ((128.0 + 127.0 * (d * 6.28).sin()) as f64)
+                .powf(gamma_val)
+                .clamp(0.0, 255.0);
+            let g = ((128.0 + 127.0 * (d * 6.28 + 2.1).sin()) as f64)
+                .powf(gamma_val)
+                .clamp(0.0, 255.0);
+            let b = ((128.0 + 127.0 * (d * 6.28 + 4.2).sin()) as f64)
+                .powf(gamma_val)
+                .clamp(0.0, 255.0);
             img_buf[off] = r as u8;
             img_buf[off + 1] = g as u8;
             img_buf[off + 2] = b as u8;
@@ -1345,7 +1421,9 @@ pub fn pattern_resample(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     unsafe { img_ra.attach(img_buf.as_mut_ptr(), img_w, img_h, img_stride) };
 
     // Perspective transform
-    let dst_quad: [f64; 8] = [quad[0], quad[1], quad[2], quad[3], quad[4], quad[5], quad[6], quad[7]];
+    let dst_quad: [f64; 8] = [
+        quad[0], quad[1], quad[2], quad[3], quad[4], quad[5], quad[6], quad[7],
+    ];
     let mut tp = TransPerspective::new();
     tp.quad_to_rect(&dst_quad, 0.0, 0.0, img_w as f64, img_h as f64);
     if tp.is_valid() {
@@ -1502,7 +1580,11 @@ impl Spiral {
     fn new(cx: f64, cy: f64, r1: f64, r2: f64, step: f64, start_angle: f64) -> Self {
         let da = (8.0_f64).to_radians();
         Self {
-            cx, cy, r1, r2, da,
+            cx,
+            cy,
+            r1,
+            r2,
+            da,
             dr: step / 45.0,
             start_angle,
             angle: start_angle,
@@ -1520,7 +1602,7 @@ impl VertexSource for Spiral {
     }
 
     fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
-        use agg_rust::basics::{PATH_CMD_MOVE_TO, PATH_CMD_LINE_TO, PATH_CMD_STOP};
+        use agg_rust::basics::{PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
         if self.curr_r > self.r2 {
             return PATH_CMD_STOP;
         }
@@ -1542,14 +1624,21 @@ impl VertexSource for Spiral {
 /// Exact copy of the C++ `pixmap_chain` data from rasterizers2.cpp.
 /// Format: [width, height, pixel0, pixel1, ...] where each pixel is 0xAARRGGBB.
 static PIXMAP_CHAIN: [u32; 114] = [
-    16, 7,
-    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0xb4c29999, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff,
-    0x00ffffff, 0x00ffffff, 0x0cfbf9f9, 0xff9a5757, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff,
-    0x00ffffff, 0x5ae0cccc, 0xffa46767, 0xff660000, 0xff975252, 0x7ed4b8b8, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0xa8c6a0a0, 0xff7f2929, 0xff670202, 0x9ecaa6a6, 0x5ae0cccc, 0x00ffffff,
-    0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xa4c7a2a2, 0x3affff00, 0x3affff00, 0xff975151, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000,
-    0x00ffffff, 0x5ae0cccc, 0xffa46767, 0xff660000, 0xff954f4f, 0x7ed4b8b8, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0xa8c6a0a0, 0xff7f2929, 0xff670202, 0x9ecaa6a6, 0x5ae0cccc, 0x00ffffff,
-    0x00ffffff, 0x00ffffff, 0x0cfbf9f9, 0xff9a5757, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff,
-    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0xb4c29999, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+    16, 7, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0xb4c29999, 0xff9a5757, 0xff9a5757,
+    0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x0cfbf9f9, 0xff9a5757, 0xff660000, 0xff660000, 0xff660000,
+    0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xb4c29999, 0x00ffffff, 0x00ffffff,
+    0x00ffffff, 0x00ffffff, 0x5ae0cccc, 0xffa46767, 0xff660000, 0xff975252, 0x7ed4b8b8, 0x5ae0cccc,
+    0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0xa8c6a0a0, 0xff7f2929, 0xff670202, 0x9ecaa6a6, 0x5ae0cccc,
+    0x00ffffff, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xa4c7a2a2,
+    0x3affff00, 0x3affff00, 0xff975151, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000,
+    0xff660000, 0x00ffffff, 0x5ae0cccc, 0xffa46767, 0xff660000, 0xff954f4f, 0x7ed4b8b8, 0x5ae0cccc,
+    0x5ae0cccc, 0x5ae0cccc, 0x5ae0cccc, 0xa8c6a0a0, 0xff7f2929, 0xff670202, 0x9ecaa6a6, 0x5ae0cccc,
+    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x0cfbf9f9, 0xff9a5757, 0xff660000, 0xff660000, 0xff660000,
+    0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xff660000, 0xb4c29999, 0x00ffffff, 0x00ffffff,
+    0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0xb4c29999, 0xff9a5757, 0xff9a5757,
+    0xff9a5757, 0xff9a5757, 0xff9a5757, 0xff9a5757, 0xb4c29999, 0x00ffffff, 0x00ffffff, 0x00ffffff,
+    0x00ffffff,
 ];
 
 /// Pattern source reading from an ARGB32 pixmap — port of C++ `pattern_pixmap_argb32`.
@@ -1567,8 +1656,12 @@ impl PatternPixmapArgb32 {
     fn new(pixmap: &'static [u32]) -> Self {
         Self { pixmap }
     }
-    fn pw(&self) -> u32 { self.pixmap[0] }
-    fn ph(&self) -> u32 { self.pixmap[1] }
+    fn pw(&self) -> u32 {
+        self.pixmap[0]
+    }
+    fn ph(&self) -> u32 {
+        self.pixmap[1]
+    }
 
     /// Full-precision premultiplied linear color for pixel (x, y).
     ///
@@ -1596,8 +1689,12 @@ impl PatternPixmapArgb32 {
 }
 
 impl agg_rust::renderer_outline_image::ImagePatternSource for PatternPixmapArgb32 {
-    fn width(&self) -> f64 { self.pw() as f64 }
-    fn height(&self) -> f64 { self.ph() as f64 }
+    fn width(&self) -> f64 {
+        self.pw() as f64
+    }
+    fn height(&self) -> f64 {
+        self.ph() as f64
+    }
     fn pixel(&self, x: i32, y: i32) -> Rgba8 {
         // The 8-bit form is what C++ stores when the pattern is used directly
         // (no scaling): `rgba8(rgba(srgba8).premultiply())` via `uround`.
@@ -1653,119 +1750,127 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // differently from the straight-alpha `lerp`, so the main scene must use
     // `PixfmtRgba32Pre` to match byte-for-byte.
     {
-    let pf = PixfmtRgba32Pre::new(&mut ra);
-    let mut rb = RendererBase::new(pf);
-    rb.clear(&Rgba8::new(255, 255, 242, 255));
+        let pf = PixfmtRgba32Pre::new(&mut ra);
+        let mut rb = RendererBase::new(pf);
+        rb.clear(&Rgba8::new(255, 255, 242, 255));
 
-    // 1. Aliased pixel accuracy (top-left) — Bresenham with rounded coords
-    {
-        let mut prim = RendererPrimitives::new(&mut rb);
-        prim.set_line_color(Rgba8::new(102, 77, 26, 255));
-        let mut ras_al = RasterizerOutline::new(&mut prim);
-        let mut s1 = Spiral::new(w / 5.0, h / 4.0 + 50.0, 5.0, 70.0, 8.0, start_angle);
-        // For pixel accuracy, manually round coordinates
-        let mut px = PathStorage::new();
-        s1.rewind(0);
-        let (mut vx, mut vy) = (0.0, 0.0);
-        loop {
-            let cmd = s1.vertex(&mut vx, &mut vy);
-            if is_stop(cmd) { break; }
-            if is_vertex(cmd) {
-                let rx = vx.floor();
-                let ry = vy.floor();
-                if cmd == agg_rust::basics::PATH_CMD_MOVE_TO {
-                    px.move_to(rx, ry);
-                } else {
-                    px.line_to(rx, ry);
+        // 1. Aliased pixel accuracy (top-left) — Bresenham with rounded coords
+        {
+            let mut prim = RendererPrimitives::new(&mut rb);
+            prim.set_line_color(Rgba8::new(102, 77, 26, 255));
+            let mut ras_al = RasterizerOutline::new(&mut prim);
+            let mut s1 = Spiral::new(w / 5.0, h / 4.0 + 50.0, 5.0, 70.0, 8.0, start_angle);
+            // For pixel accuracy, manually round coordinates
+            let mut px = PathStorage::new();
+            s1.rewind(0);
+            let (mut vx, mut vy) = (0.0, 0.0);
+            loop {
+                let cmd = s1.vertex(&mut vx, &mut vy);
+                if is_stop(cmd) {
+                    break;
+                }
+                if is_vertex(cmd) {
+                    let rx = vx.floor();
+                    let ry = vy.floor();
+                    if cmd == agg_rust::basics::PATH_CMD_MOVE_TO {
+                        px.move_to(rx, ry);
+                    } else {
+                        px.line_to(rx, ry);
+                    }
                 }
             }
-        }
-        ras_al.add_path(&mut px, 0);
-    }
-
-    // 2. Aliased subpixel accuracy (top-right) — Bresenham direct
-    {
-        let mut prim = RendererPrimitives::new(&mut rb);
-        prim.set_line_color(Rgba8::new(102, 77, 26, 255));
-        let mut ras_al = RasterizerOutline::new(&mut prim);
-        let mut s2 = Spiral::new(w / 2.0, h / 4.0 + 50.0, 5.0, 70.0, 8.0, start_angle);
-        ras_al.add_path(&mut s2, 0);
-    }
-
-    // 3. Anti-aliased outline (bottom-left)
-    {
-        let profile = LineProfileAa::with_width(line_width);
-        let mut ren_oaa = RendererOutlineAa::new(&mut rb, &profile);
-        ren_oaa.set_color(color);
-        let mut ras_oaa = RasterizerOutlineAa::new();
-        ras_oaa.set_round_cap(true);
-        ras_oaa.set_line_join(if accurate_joins {
-            OutlineAaJoin::MiterAccurate
-        } else {
-            OutlineAaJoin::Round
-        });
-        let mut s3 = Spiral::new(w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
-        ras_oaa.add_path(&mut s3, 0, &mut ren_oaa);
-    }
-
-    // 4. Scanline rasterizer (bottom-center)
-    {
-        let mut ras = RasterizerScanlineAa::new();
-        let mut sl = ScanlineU8::new();
-        let mut s4 = Spiral::new(w / 2.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
-        let mut stroke = ConvStroke::new(&mut s4);
-        stroke.set_width(line_width);
-        stroke.set_line_cap(LineCap::Round);
-        ras.add_path(&mut stroke, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
-    }
-
-    // 5. Anti-aliased outline with image pattern (bottom-right)
-    {
-        let src = PatternPixmapArgb32::new(&PIXMAP_CHAIN);
-        let src_scaled = LineImageScale::new(&src, line_width);
-
-        let pattern = if scale_pattern {
-            LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src_scaled)
-        } else {
-            LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src)
-        };
-
-        let mut ren_img = RendererOutlineImage::new(&mut rb, &pattern);
-        if scale_pattern {
-            ren_img.set_scale_x(line_width / src.ph() as f64);
+            ras_al.add_path(&mut px, 0);
         }
 
-        let mut ras_img = RasterizerOutlineAa::new();
-        let mut s5 = Spiral::new(
-            w - w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle,
-        );
-        ras_img.add_path(&mut s5, 0, &mut ren_img);
-    }
-
-    // Labels
-    {
-        let mut ras = RasterizerScanlineAa::new();
-        let mut sl = ScanlineU8::new();
-        let labels = [
-            (50.0, 80.0, "Bresenham lines,\n\nregular accuracy"),
-            (w / 2.0 - 50.0, 80.0, "Bresenham lines,\n\nsubpixel accuracy"),
-            (50.0, h / 2.0 + 50.0, "Anti-aliased lines"),
-            (w / 2.0 - 50.0, h / 2.0 + 50.0, "Scanline rasterizer"),
-            (w - w / 5.0 - 50.0, h / 2.0 + 50.0, "Arbitrary Image Pattern"),
-        ];
-        for (lx, ly, txt) in labels {
-            let mut t = GsvText::new();
-            t.size(8.0, 0.0);
-            t.text(txt);
-            t.start_point(lx, ly);
-            let mut ts = ConvStroke::new(&mut t);
-            ts.set_width(0.7);
-            ras.reset();
-            ras.add_path(&mut ts, 0);
-            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+        // 2. Aliased subpixel accuracy (top-right) — Bresenham direct
+        {
+            let mut prim = RendererPrimitives::new(&mut rb);
+            prim.set_line_color(Rgba8::new(102, 77, 26, 255));
+            let mut ras_al = RasterizerOutline::new(&mut prim);
+            let mut s2 = Spiral::new(w / 2.0, h / 4.0 + 50.0, 5.0, 70.0, 8.0, start_angle);
+            ras_al.add_path(&mut s2, 0);
         }
-    }
+
+        // 3. Anti-aliased outline (bottom-left)
+        {
+            let profile = LineProfileAa::with_width(line_width);
+            let mut ren_oaa = RendererOutlineAa::new(&mut rb, &profile);
+            ren_oaa.set_color(color);
+            let mut ras_oaa = RasterizerOutlineAa::new();
+            ras_oaa.set_round_cap(true);
+            ras_oaa.set_line_join(if accurate_joins {
+                OutlineAaJoin::MiterAccurate
+            } else {
+                OutlineAaJoin::Round
+            });
+            let mut s3 = Spiral::new(w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
+            ras_oaa.add_path(&mut s3, 0, &mut ren_oaa);
+        }
+
+        // 4. Scanline rasterizer (bottom-center)
+        {
+            let mut ras = RasterizerScanlineAa::new();
+            let mut sl = ScanlineU8::new();
+            let mut s4 = Spiral::new(w / 2.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
+            let mut stroke = ConvStroke::new(&mut s4);
+            stroke.set_width(line_width);
+            stroke.set_line_cap(LineCap::Round);
+            ras.add_path(&mut stroke, 0);
+            render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
+        }
+
+        // 5. Anti-aliased outline with image pattern (bottom-right)
+        {
+            let src = PatternPixmapArgb32::new(&PIXMAP_CHAIN);
+            let src_scaled = LineImageScale::new(&src, line_width);
+
+            let pattern = if scale_pattern {
+                LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src_scaled)
+            } else {
+                LineImagePatternPow2::<PatternFilterBilinearRgba>::with_source(&src)
+            };
+
+            let mut ren_img = RendererOutlineImage::new(&mut rb, &pattern);
+            if scale_pattern {
+                ren_img.set_scale_x(line_width / src.ph() as f64);
+            }
+
+            let mut ras_img = RasterizerOutlineAa::new();
+            let mut s5 = Spiral::new(w - w / 5.0, h - h / 4.0 + 20.0, 5.0, 70.0, 8.0, start_angle);
+            ras_img.add_path(&mut s5, 0, &mut ren_img);
+        }
+
+        // Labels
+        {
+            let mut ras = RasterizerScanlineAa::new();
+            let mut sl = ScanlineU8::new();
+            let labels = [
+                (50.0, 80.0, "Bresenham lines,\n\nregular accuracy"),
+                (
+                    w / 2.0 - 50.0,
+                    80.0,
+                    "Bresenham lines,\n\nsubpixel accuracy",
+                ),
+                (50.0, h / 2.0 + 50.0, "Anti-aliased lines"),
+                (w / 2.0 - 50.0, h / 2.0 + 50.0, "Scanline rasterizer"),
+                (
+                    w - w / 5.0 - 50.0,
+                    h / 2.0 + 50.0,
+                    "Arbitrary Image Pattern",
+                ),
+            ];
+            for (lx, ly, txt) in labels {
+                let mut t = GsvText::new();
+                t.size(8.0, 0.0);
+                t.text(txt);
+                t.start_point(lx, ly);
+                let mut ts = ConvStroke::new(&mut t);
+                ts.set_width(0.7);
+                ras.reset();
+                ras.add_path(&mut ts, 0);
+                render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
+            }
+        }
     } // end premultiplied main scene
 
     // Controls — match C++ layout. Rendered through a plain (non-premultiplied)
@@ -1819,60 +1924,52 @@ pub fn rasterizers2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Brightness-to-alpha lookup table — exact match of C++ `brightness_to_alpha`.
 /// Maps brightness index (0..768) → alpha value.
 static BRIGHTNESS_TO_ALPHA: [u8; 768] = [
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 254, 254, 254, 254, 254, 254,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-    254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 253, 253,
-    253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 252,
-    252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 251, 251, 251, 251, 251,
-    251, 251, 251, 251, 250, 250, 250, 250, 250, 250, 250, 250, 249, 249, 249, 249,
-    249, 249, 249, 248, 248, 248, 248, 248, 248, 248, 247, 247, 247, 247, 247, 246,
-    246, 246, 246, 246, 246, 245, 245, 245, 245, 245, 244, 244, 244, 244, 243, 243,
-    243, 243, 243, 242, 242, 242, 242, 241, 241, 241, 241, 240, 240, 240, 239, 239,
-    239, 239, 238, 238, 238, 238, 237, 237, 237, 236, 236, 236, 235, 235, 235, 234,
-    234, 234, 233, 233, 233, 232, 232, 232, 231, 231, 230, 230, 230, 229, 229, 229,
-    228, 228, 227, 227, 227, 226, 226, 225, 225, 224, 224, 224, 223, 223, 222, 222,
-    221, 221, 220, 220, 219, 219, 219, 218, 218, 217, 217, 216, 216, 215, 214, 214,
-    213, 213, 212, 212, 211, 211, 210, 210, 209, 209, 208, 207, 207, 206, 206, 205,
-    204, 204, 203, 203, 202, 201, 201, 200, 200, 199, 198, 198, 197, 196, 196, 195,
-    194, 194, 193, 192, 192, 191, 190, 190, 189, 188, 188, 187, 186, 186, 185, 184,
-    183, 183, 182, 181, 180, 180, 179, 178, 177, 177, 176, 175, 174, 174, 173, 172,
-    171, 171, 170, 169, 168, 167, 166, 166, 165, 164, 163, 162, 162, 161, 160, 159,
-    158, 157, 156, 156, 155, 154, 153, 152, 151, 150, 149, 148, 148, 147, 146, 145,
-    144, 143, 142, 141, 140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129,
-    128, 128, 127, 125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114, 113,
-    112, 111, 110, 109, 108, 107, 106, 105, 104, 102, 101, 100,  99,  98,  97,  96,
-     95,  94,  93,  91,  90,  89,  88,  87,  86,  85,  84,  82,  81,  80,  79,  78,
-     77,  75,  74,  73,  72,  71,  70,  69,  67,  66,  65,  64,  63,  61,  60,  59,
-     58,  57,  56,  54,  53,  52,  51,  50,  48,  47,  46,  45,  44,  42,  41,  40,
-     39,  37,  36,  35,  34,  33,  31,  30,  29,  28,  27,  25,  24,  23,  22,  20,
-     19,  18,  17,  15,  14,  13,  12,  11,   9,   8,   7,   6,   4,   3,   2,   1,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 254, 254, 254, 254, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254,
+    254, 254, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253,
+    252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 251, 251, 251, 251, 251, 251, 251,
+    251, 251, 250, 250, 250, 250, 250, 250, 250, 250, 249, 249, 249, 249, 249, 249, 249, 248, 248,
+    248, 248, 248, 248, 248, 247, 247, 247, 247, 247, 246, 246, 246, 246, 246, 246, 245, 245, 245,
+    245, 245, 244, 244, 244, 244, 243, 243, 243, 243, 243, 242, 242, 242, 242, 241, 241, 241, 241,
+    240, 240, 240, 239, 239, 239, 239, 238, 238, 238, 238, 237, 237, 237, 236, 236, 236, 235, 235,
+    235, 234, 234, 234, 233, 233, 233, 232, 232, 232, 231, 231, 230, 230, 230, 229, 229, 229, 228,
+    228, 227, 227, 227, 226, 226, 225, 225, 224, 224, 224, 223, 223, 222, 222, 221, 221, 220, 220,
+    219, 219, 219, 218, 218, 217, 217, 216, 216, 215, 214, 214, 213, 213, 212, 212, 211, 211, 210,
+    210, 209, 209, 208, 207, 207, 206, 206, 205, 204, 204, 203, 203, 202, 201, 201, 200, 200, 199,
+    198, 198, 197, 196, 196, 195, 194, 194, 193, 192, 192, 191, 190, 190, 189, 188, 188, 187, 186,
+    186, 185, 184, 183, 183, 182, 181, 180, 180, 179, 178, 177, 177, 176, 175, 174, 174, 173, 172,
+    171, 171, 170, 169, 168, 167, 166, 166, 165, 164, 163, 162, 162, 161, 160, 159, 158, 157, 156,
+    156, 155, 154, 153, 152, 151, 150, 149, 148, 148, 147, 146, 145, 144, 143, 142, 141, 140, 139,
+    138, 137, 136, 135, 134, 133, 132, 131, 130, 129, 128, 128, 127, 125, 124, 123, 122, 121, 120,
+    119, 118, 117, 116, 115, 114, 113, 112, 111, 110, 109, 108, 107, 106, 105, 104, 102, 101, 100,
+    99, 98, 97, 96, 95, 94, 93, 91, 90, 89, 88, 87, 86, 85, 84, 82, 81, 80, 79, 78, 77, 75, 74, 73,
+    72, 71, 70, 69, 67, 66, 65, 64, 63, 61, 60, 59, 58, 57, 56, 54, 53, 52, 51, 50, 48, 47, 46, 45,
+    44, 42, 41, 40, 39, 37, 36, 35, 34, 33, 31, 30, 29, 28, 27, 25, 24, 23, 22, 20, 19, 18, 17, 15,
+    14, 13, 12, 11, 9, 8, 7, 6, 4, 3, 2, 1,
 ];
 
 /// Pattern source that reads from RGBA pixel data and converts brightness to alpha.
 /// Port of C++ `pattern_src_brightness_to_alpha`.
 struct PatternSrcBrightnessToAlpha {
-    data: Vec<u8>,   // RGBA data
+    data: Vec<u8>, // RGBA data
     w: u32,
     h: u32,
 }
@@ -1884,8 +1981,12 @@ impl PatternSrcBrightnessToAlpha {
 }
 
 impl agg_rust::renderer_outline_image::ImagePatternSource for PatternSrcBrightnessToAlpha {
-    fn width(&self) -> f64 { self.w as f64 }
-    fn height(&self) -> f64 { self.h as f64 }
+    fn width(&self) -> f64 {
+        self.w as f64
+    }
+    fn height(&self) -> f64 {
+        self.h as f64
+    }
     fn pixel(&self, x: i32, y: i32) -> Rgba8 {
         let x = x.max(0).min(self.w as i32 - 1) as usize;
         let y = y.max(0).min(self.h as i32 - 1) as usize;
@@ -1896,7 +1997,8 @@ impl agg_rust::renderer_outline_image::ImagePatternSource for PatternSrcBrightne
         let sum = r + g + b;
         // C++: i = sum * sizeof(brightness_to_alpha) / (3 * color_type::full_value())
         //    = sum * 768 / 765
-        let i = (sum * BRIGHTNESS_TO_ALPHA.len() as u32 / (3 * 255)).min(BRIGHTNESS_TO_ALPHA.len() as u32 - 1) as usize;
+        let i = (sum * BRIGHTNESS_TO_ALPHA.len() as u32 / (3 * 255))
+            .min(BRIGHTNESS_TO_ALPHA.len() as u32 - 1) as usize;
         let cover = BRIGHTNESS_TO_ALPHA[i];
         // mult_cover: (255 * cover + 255) >> 8
         let a = ((255u32 * cover as u32) + 255) >> 8;
@@ -1964,15 +2066,15 @@ pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Default bezier curve control points — exact match of C++ line_patterns.cpp
     let defaults: [(f64, f64, f64, f64, f64, f64, f64, f64); 9] = [
-        ( 64.0,  19.0,  14.0, 126.0, 118.0, 266.0,  19.0, 265.0),
-        (112.0, 113.0, 178.0,  32.0, 200.0, 132.0, 125.0, 438.0),
-        (401.0,  24.0, 326.0, 149.0, 285.0,  11.0, 177.0,  77.0),
-        (188.0, 427.0, 129.0, 295.0,  19.0, 283.0,  25.0, 410.0),
+        (64.0, 19.0, 14.0, 126.0, 118.0, 266.0, 19.0, 265.0),
+        (112.0, 113.0, 178.0, 32.0, 200.0, 132.0, 125.0, 438.0),
+        (401.0, 24.0, 326.0, 149.0, 285.0, 11.0, 177.0, 77.0),
+        (188.0, 427.0, 129.0, 295.0, 19.0, 283.0, 25.0, 410.0),
         (451.0, 346.0, 302.0, 218.0, 265.0, 441.0, 459.0, 400.0),
-        (454.0, 198.0,  14.0,  13.0, 220.0, 291.0, 483.0, 283.0),
+        (454.0, 198.0, 14.0, 13.0, 220.0, 291.0, 483.0, 283.0),
         (301.0, 398.0, 355.0, 231.0, 209.0, 211.0, 170.0, 353.0),
-        (484.0, 101.0, 222.0,  33.0, 486.0, 435.0, 487.0, 138.0),
-        (143.0, 147.0,  11.0,  45.0,  83.0, 427.0, 132.0, 197.0),
+        (484.0, 101.0, 222.0, 33.0, 486.0, 435.0, 487.0, 138.0),
+        (143.0, 147.0, 11.0, 45.0, 83.0, 427.0, 132.0, 197.0),
     ];
 
     // Read control points from params[2..74] if provided (from interactive JS drag),
@@ -1982,7 +2084,16 @@ pub fn line_patterns(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut c = defaults;
         for i in 0..9 {
             let o = i * 8;
-            c[i] = (p[o], p[o+1], p[o+2], p[o+3], p[o+4], p[o+5], p[o+6], p[o+7]);
+            c[i] = (
+                p[o],
+                p[o + 1],
+                p[o + 2],
+                p[o + 3],
+                p[o + 4],
+                p[o + 5],
+                p[o + 6],
+                p[o + 7],
+            );
         }
         c
     } else {
@@ -2248,7 +2359,14 @@ fn render_circle_gradient(
     let mut span = SpanGradient::new(interp, grad, &lut, 0.0, 100.0);
 
     let r = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt() / 2.0;
-    let mut ell = Ellipse::new((x1 + x2) * 0.5 + 5.0, (y1 + y2) * 0.5 - 3.0, r, r, 100, false);
+    let mut ell = Ellipse::new(
+        (x1 + x2) * 0.5 + 5.0,
+        (y1 + y2) * 0.5 - 3.0,
+        r,
+        r,
+        100,
+        false,
+    );
     ras.add_path(&mut ell, 0);
     render_scanlines_aa_solid(
         &mut ras,
@@ -2497,10 +2615,30 @@ pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut comp = RboxCtrl::new(420.0, 5.0, 590.0, 340.0);
     comp.text_size(6.8, 0.0);
     for item in [
-        "clear", "src", "dst", "src-over", "dst-over", "src-in", "dst-in", "src-out",
-        "dst-out", "src-atop", "dst-atop", "xor", "plus", "multiply", "screen", "overlay",
-        "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light",
-        "difference", "exclusion",
+        "clear",
+        "src",
+        "dst",
+        "src-over",
+        "dst-over",
+        "src-in",
+        "dst-in",
+        "src-out",
+        "dst-out",
+        "src-atop",
+        "dst-atop",
+        "xor",
+        "plus",
+        "multiply",
+        "screen",
+        "overlay",
+        "darken",
+        "lighten",
+        "color-dodge",
+        "color-burn",
+        "hard-light",
+        "soft-light",
+        "difference",
+        "exclusion",
     ] {
         comp.add_item(item);
     }
@@ -2640,13 +2778,47 @@ pub fn compositing2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb_comp = RendererBase::new(pf_comp);
     radial_shape(&mut rb_comp, &ramp1, &resize_mtx, 50.0, 50.0, 370.0, 370.0);
 
-    rb_comp.ren_mut().set_comp_op(comp_op_from_index(comp_op_idx));
+    rb_comp
+        .ren_mut()
+        .set_comp_op(comp_op_from_index(comp_op_idx));
     let cx = 50.0;
     let cy = 50.0;
-    radial_shape(&mut rb_comp, &ramp2, &resize_mtx, cx + 50.0, cy + 50.0, cx + 190.0, cy + 190.0);
-    radial_shape(&mut rb_comp, &ramp2, &resize_mtx, cx + 130.0, cy + 50.0, cx + 270.0, cy + 190.0);
-    radial_shape(&mut rb_comp, &ramp2, &resize_mtx, cx + 50.0, cy + 130.0, cx + 190.0, cy + 270.0);
-    radial_shape(&mut rb_comp, &ramp2, &resize_mtx, cx + 130.0, cy + 130.0, cx + 270.0, cy + 270.0);
+    radial_shape(
+        &mut rb_comp,
+        &ramp2,
+        &resize_mtx,
+        cx + 50.0,
+        cy + 50.0,
+        cx + 190.0,
+        cy + 190.0,
+    );
+    radial_shape(
+        &mut rb_comp,
+        &ramp2,
+        &resize_mtx,
+        cx + 130.0,
+        cy + 50.0,
+        cx + 270.0,
+        cy + 190.0,
+    );
+    radial_shape(
+        &mut rb_comp,
+        &ramp2,
+        &resize_mtx,
+        cx + 50.0,
+        cy + 130.0,
+        cx + 190.0,
+        cy + 270.0,
+    );
+    radial_shape(
+        &mut rb_comp,
+        &ramp2,
+        &resize_mtx,
+        cx + 130.0,
+        cy + 130.0,
+        cx + 270.0,
+        cy + 270.0,
+    );
     drop(rb_comp);
 
     let pf = PixfmtRgba32::new(&mut ra);
@@ -2669,10 +2841,30 @@ pub fn compositing2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut comp = RboxCtrl::new(420.0, 5.0, 590.0, 340.0);
     comp.text_size(6.8, 0.0);
     for item in [
-        "clear", "src", "dst", "src-over", "dst-over", "src-in", "dst-in", "src-out",
-        "dst-out", "src-atop", "dst-atop", "xor", "plus", "multiply", "screen", "overlay",
-        "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light",
-        "difference", "exclusion",
+        "clear",
+        "src",
+        "dst",
+        "src-over",
+        "dst-over",
+        "src-in",
+        "dst-in",
+        "src-out",
+        "dst-out",
+        "src-atop",
+        "dst-atop",
+        "xor",
+        "plus",
+        "multiply",
+        "screen",
+        "overlay",
+        "darken",
+        "lighten",
+        "color-dodge",
+        "color-burn",
+        "hard-light",
+        "soft-light",
+        "difference",
+        "exclusion",
     ] {
         comp.add_item(item);
     }
@@ -2764,8 +2956,7 @@ fn render_compound(
                     for span in sl.begin() {
                         let len = span.len as usize;
                         let start = (span.x - min_x) as usize;
-                        let covers =
-                            &sl.covers()[span.cover_offset..span.cover_offset + len];
+                        let covers = &sl.covers()[span.cover_offset..span.cover_offset + len];
                         for k in 0..len {
                             let cover = covers[k];
                             let dst = &mut mix_buffer[start + k];
@@ -2782,14 +2973,7 @@ fn render_compound(
             // Emit the blended result as opaque color spans.
             for span in sl_bin.begin() {
                 let start = (span.x - min_x) as usize;
-                rb.blend_color_hspan(
-                    span.x,
-                    y,
-                    span.len,
-                    &mix_buffer[start..],
-                    &[],
-                    COVER_FULL,
-                );
+                rb.blend_color_hspan(span.x, y, span.len, &mix_buffer[start..], &[], COVER_FULL);
             }
         }
     }
@@ -2926,11 +3110,19 @@ fn flash_palette() -> Vec<Rgba8> {
     colors
 }
 
-fn flash_shape_transform(shape: &FlashShape, width: u32, height: u32, scale: f64, rotation: f64) -> TransAffine {
+fn flash_shape_transform(
+    shape: &FlashShape,
+    width: u32,
+    height: u32,
+    scale: f64,
+    rotation: f64,
+) -> TransAffine {
     let mut path = shape.path.clone();
     let path_ids: Vec<u32> = shape.styles.iter().map(|s| s.path_id).collect();
     let mut base = TransAffine::new();
-    if let Some(rect) = agg_rust::bounding_rect::bounding_rect(&mut path, &path_ids, 0, path_ids.len()) {
+    if let Some(rect) =
+        agg_rust::bounding_rect::bounding_rect(&mut path, &path_ids, 0, path_ids.len())
+    {
         let mut vp = TransViewport::new();
         vp.preserve_aspect_ratio(0.5, 0.5, AspectRatio::Meet);
         vp.set_world_viewport(rect.x1, rect.y1, rect.x2, rect.y2);
@@ -2948,14 +3140,22 @@ fn flash_shape_transform(shape: &FlashShape, width: u32, height: u32, scale: f64
     user
 }
 
-fn flash_user_transform_from_params(width: u32, height: u32, params: &[f64], shape: &FlashShape) -> (usize, TransAffine) {
+fn flash_user_transform_from_params(
+    width: u32,
+    height: u32,
+    params: &[f64],
+    shape: &FlashShape,
+) -> (usize, TransAffine) {
     // Backward compatible path:
     // params[0] = scale, params[1] = rotation_degrees, params[2] = shape_index
     if params.len() < 7 {
         let scale_val = params.first().copied().unwrap_or(1.0).max(0.01);
         let rotation = params.get(1).copied().unwrap_or(0.0).to_radians();
         let shape_index = params.get(2).copied().unwrap_or(0.0).max(0.0) as usize;
-        return (shape_index, flash_shape_transform(shape, width, height, scale_val, rotation));
+        return (
+            shape_index,
+            flash_shape_transform(shape, width, height, scale_val, rotation),
+        );
     }
 
     // Extended state:
@@ -2963,17 +3163,14 @@ fn flash_user_transform_from_params(width: u32, height: u32, params: &[f64], sha
     // params[1..=6]  = user affine [sx, shy, shx, sy, tx, ty], pre-base
     let shape_index = params[0].max(0.0) as usize;
     let mut user = TransAffine::new_custom(
-        params[1],
-        params[2],
-        params[3],
-        params[4],
-        params[5],
-        params[6],
+        params[1], params[2], params[3], params[4], params[5], params[6],
     );
     let mut path = shape.path.clone();
     let path_ids: Vec<u32> = shape.styles.iter().map(|s| s.path_id).collect();
     let mut base = TransAffine::new();
-    if let Some(rect) = agg_rust::bounding_rect::bounding_rect(&mut path, &path_ids, 0, path_ids.len()) {
+    if let Some(rect) =
+        agg_rust::bounding_rect::bounding_rect(&mut path, &path_ids, 0, path_ids.len())
+    {
         let mut vp = TransViewport::new();
         vp.preserve_aspect_ratio(0.5, 0.5, AspectRatio::Meet);
         vp.set_world_viewport(rect.x1, rect.y1, rect.x2, rect.y2);
@@ -3019,7 +3216,15 @@ fn flash_user_scale(params: &[f64]) -> f64 {
     }
 }
 
-pub fn flash_pick_vertex(demo2: bool, width: u32, height: u32, params: &[f64], x: f64, y: f64, radius: f64) -> i32 {
+pub fn flash_pick_vertex(
+    demo2: bool,
+    width: u32,
+    height: u32,
+    params: &[f64],
+    x: f64,
+    y: f64,
+    radius: f64,
+) -> i32 {
     let shapes = flash_shapes();
     if shapes.is_empty() {
         return -1;
@@ -3064,7 +3269,8 @@ pub fn flash_screen_to_shape(width: u32, height: u32, params: &[f64], x: f64, y:
         return vec![x, y];
     }
     let shape_for_index = &shapes[0];
-    let (shape_index, mtx0) = flash_user_transform_from_params(width, height, params, shape_for_index);
+    let (shape_index, mtx0) =
+        flash_user_transform_from_params(width, height, params, shape_for_index);
     let shape = &shapes[shape_index % shapes.len()];
     let (_, mtx) = flash_user_transform_from_params(width, height, params, shape);
     let _ = mtx0; // Keep decode symmetry; mtx from selected shape is the one we need.
@@ -3240,7 +3446,10 @@ pub fn flash_rasterizer2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 }
             }
         }
-        let color = colors.get(s as usize).copied().unwrap_or(Rgba8::new(0, 0, 0, 255));
+        let color = colors
+            .get(s as usize)
+            .copied()
+            .unwrap_or(Rgba8::new(0, 0, 0, 255));
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &color);
     }
     ras.auto_close(true);
@@ -3387,7 +3596,11 @@ pub fn rasterizer_compound(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     let mut rasc = RasterizerCompoundAa::new();
     rasc.clip_box(0.0, 0.0, w, h);
-    rasc.layer_order(if invert_order { LayerOrder::Inverse } else { LayerOrder::Direct });
+    rasc.layer_order(if invert_order {
+        LayerOrder::Inverse
+    } else {
+        LayerOrder::Direct
+    });
 
     let mut ell = Ellipse::new(220.0, 180.0, 120.0, 10.0, 128, false);
     let mut str_ell = ConvStroke::new(&mut ell);

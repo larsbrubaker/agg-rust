@@ -92,8 +92,9 @@ impl ScanlineStorageAa {
                     self.max_x = xe;
                 }
                 let covers_offset = self.covers.len();
-                self.covers
-                    .extend_from_slice(&covers_buf[sp.cover_offset..sp.cover_offset + len as usize]);
+                self.covers.extend_from_slice(
+                    &covers_buf[sp.cover_offset..sp.cover_offset + len as usize],
+                );
                 self.spans.push(SpanData {
                     x,
                     len,
@@ -143,8 +144,9 @@ impl ScanlineStorageAa {
                 self.covers.push(covers_buf[sp.cover_offset]);
             } else {
                 // Per-pixel covers
-                self.covers
-                    .extend_from_slice(&covers_buf[sp.cover_offset..sp.cover_offset + len as usize]);
+                self.covers.extend_from_slice(
+                    &covers_buf[sp.cover_offset..sp.cover_offset + len as usize],
+                );
             }
             self.spans.push(SpanData {
                 x,
@@ -242,10 +244,7 @@ impl ScanlineStorageAa {
 
     /// Iterate over embedded scanline spans for boolean algebra.
     /// Returns an iterator of (x, len, covers_slice) tuples.
-    pub fn embedded_spans(
-        &self,
-        sl_idx: usize,
-    ) -> impl Iterator<Item = EmbeddedSpan<'_>> + '_ {
+    pub fn embedded_spans(&self, sl_idx: usize) -> impl Iterator<Item = EmbeddedSpan<'_>> + '_ {
         let sld = &self.scanlines[sl_idx];
         let spans = &self.spans[sld.start_span..sld.start_span + sld.num_spans as usize];
         spans.iter().map(move |sp| EmbeddedSpan {

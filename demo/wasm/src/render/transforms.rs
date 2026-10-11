@@ -2,6 +2,7 @@
 //! multi_clip, simple_blur, blur, trans_curve1, trans_curve2, lion_lens, distortions,
 //! gouraud_mesh, truetype_test.
 
+use super::{load_spheres_image, setup_renderer};
 use agg_rust::basics::{is_end_poly, is_move_to, is_stop, is_vertex, VertexSource};
 use agg_rust::bounding_rect::{bounding_rect, bounding_rect_single};
 use agg_rust::bspline::Bspline;
@@ -10,7 +11,7 @@ use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_segmentator::ConvSegmentator;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
-use agg_rust::ctrl::{render_ctrl, SliderCtrl, RboxCtrl, GammaCtrl, CboxCtrl, Ctrl};
+use agg_rust::ctrl::{render_ctrl, CboxCtrl, Ctrl, GammaCtrl, RboxCtrl, SliderCtrl};
 use agg_rust::ellipse::Ellipse;
 use agg_rust::embedded_raster_fonts;
 use agg_rust::font_cache::FontCacheManager;
@@ -20,18 +21,18 @@ use agg_rust::gsv_text::GsvText;
 use agg_rust::math::fast_sqrt;
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_rgba::{PixelFormat, PixfmtRgba32};
+use agg_rust::rasterizer_compound_aa::RasterizerCompoundAa;
 use agg_rust::rasterizer_outline_aa::{OutlineAaJoin, RasterizerOutlineAa};
 use agg_rust::rasterizer_scanline_aa::{RasterizerScanlineAa, Scanline};
 use agg_rust::renderer_base::RendererBase;
 use agg_rust::renderer_outline_aa::{LineProfileAa, RendererOutlineAa};
 use agg_rust::renderer_raster_text::render_raster_htext_solid;
-use agg_rust::rasterizer_compound_aa::RasterizerCompoundAa;
 use agg_rust::renderer_scanline::{render_scanlines_aa, render_scanlines_aa_solid, SpanGenerator};
 use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::scanline_u::ScanlineU8;
-use agg_rust::span_gradient::GradientFunction;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
+use agg_rust::span_gradient::GradientFunction;
 use agg_rust::span_image_filter_rgba::SpanImageFilterRgbaBilinearClip;
 use agg_rust::span_interpolator_adaptor::{Distortion, SpanInterpolatorAdaptor};
 use agg_rust::span_interpolator_linear::{
@@ -41,7 +42,6 @@ use agg_rust::trans_affine::TransAffine;
 use agg_rust::trans_polar::TransPolar;
 use agg_rust::trans_single_path::TransSinglePath;
 use agg_rust::trans_warp_magnifier::TransWarpMagnifier;
-use super::{load_spheres_image, setup_renderer};
 
 /// Embedded Liberation Serif Italic font (SIL OFL license).
 /// Metrically compatible with Times New Roman Italic (timesi.ttf) used by the C++ demo.
@@ -78,14 +78,20 @@ pub fn raster_text(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
         (embedded_raster_fonts::GSE8X16, "gse8x16"),
         (embedded_raster_fonts::GSE8X16_BOLD, "gse8x16_bold"),
         (embedded_raster_fonts::MCS11_PROP, "mcs11_prop"),
-        (embedded_raster_fonts::MCS11_PROP_CONDENSED, "mcs11_prop_condensed"),
+        (
+            embedded_raster_fonts::MCS11_PROP_CONDENSED,
+            "mcs11_prop_condensed",
+        ),
         (embedded_raster_fonts::MCS12_PROP, "mcs12_prop"),
         (embedded_raster_fonts::MCS13_PROP, "mcs13_prop"),
         (embedded_raster_fonts::MCS5X10_MONO, "mcs5x10_mono"),
         (embedded_raster_fonts::MCS5X11_MONO, "mcs5x11_mono"),
         (embedded_raster_fonts::MCS6X10_MONO, "mcs6x10_mono"),
         (embedded_raster_fonts::MCS6X11_MONO, "mcs6x11_mono"),
-        (embedded_raster_fonts::MCS7X12_MONO_HIGH, "mcs7x12_mono_high"),
+        (
+            embedded_raster_fonts::MCS7X12_MONO_HIGH,
+            "mcs7x12_mono_high",
+        ),
         (embedded_raster_fonts::MCS7X12_MONO_LOW, "mcs7x12_mono_low"),
         (embedded_raster_fonts::VERDANA12, "verdana12"),
         (embedded_raster_fonts::VERDANA12_BOLD, "verdana12_bold"),
@@ -114,7 +120,10 @@ pub fn raster_text(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     let mut y = 5.0;
     for &(font_data, name) in fonts {
         glyph.set_font(font_data);
-        let text = format!("A quick brown fox jumps over the lazy dog 0123456789: {}", name);
+        let text = format!(
+            "A quick brown fox jumps over the lazy dog 0123456789: {}",
+            name
+        );
         render_raster_htext_solid(&mut rb, &mut glyph, 5.0, y, &text, &black, false);
         y += glyph.height() + 1.0;
     }
@@ -122,11 +131,8 @@ pub fn raster_text(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     // Render gradient raster text matching C++ renderer_raster_htext pipeline.
     let mut grad_func = GradientSineRepeatAdaptor::new();
     grad_func.set_periods(5.0);
-    let color_func = GradientLinearColor::new(
-        Rgba8::new(255, 0, 0, 255),
-        Rgba8::new(0, 128, 0, 255),
-        256,
-    );
+    let color_func =
+        GradientLinearColor::new(Rgba8::new(255, 0, 0, 255), Rgba8::new(0, 128, 0, 255), 256);
     let inter = SpanInterpolatorLinear::new(TransAffine::new());
     let mut span_gen = RasterTextGradientSpan::new(inter, grad_func, &color_func, 0.0, 150.0);
     render_raster_htext_span(
@@ -176,7 +182,9 @@ struct RasterTextGradientSpan<'a, G, F> {
     d2: i32,
 }
 
-impl<'a, G: GradientFunction, F: agg_rust::gradient_lut::ColorFunction> RasterTextGradientSpan<'a, G, F> {
+impl<'a, G: GradientFunction, F: agg_rust::gradient_lut::ColorFunction>
+    RasterTextGradientSpan<'a, G, F>
+{
     fn new(
         interpolator: SpanInterpolatorLinear,
         gradient_function: G,
@@ -214,7 +222,11 @@ where
             let mut ix = 0i32;
             let mut iy = 0i32;
             self.interpolator.coordinates(&mut ix, &mut iy);
-            let d = self.gradient_function.calculate(ix >> DOWNSCALE_SHIFT, iy >> DOWNSCALE_SHIFT, self.d2);
+            let d = self.gradient_function.calculate(
+                ix >> DOWNSCALE_SHIFT,
+                iy >> DOWNSCALE_SHIFT,
+                self.d2,
+            );
             let d = (((d - self.d1) * color_size) / dd).clamp(0, color_size - 1);
             *pixel = self.color_function.get(d as usize);
             self.interpolator.next();
@@ -636,7 +648,13 @@ pub fn simple_blur(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     buf
 }
 
-fn sample_simple_blur_rgb24(src_rgb: &[u8], width: u32, height: u32, x: i32, y: i32) -> (u8, u8, u8) {
+fn sample_simple_blur_rgb24(
+    src_rgb: &[u8],
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+) -> (u8, u8, u8) {
     if y < 1 || y >= (height as i32 - 1) {
         return (0, 0, 0);
     }
@@ -906,12 +924,7 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             .unwrap_or((150.0, 90.0, 330.0, 275.0))
     };
 
-    let defaults_quad = [
-        sx1, sy1,
-        sx2, sy1,
-        sx2, sy2,
-        sx1, sy2,
-    ];
+    let defaults_quad = [sx1, sy1, sx2, sy1, sx2, sy2, sx1, sy2];
     let mut shadow_quad = defaults_quad;
     for i in 0..8 {
         if let Some(v) = params.get(5 + i) {
@@ -935,7 +948,8 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut blur_ms = 0.0;
     // Match C++: bbox is measured on transformed curve geometry.
     let mut shadow_curve_for_bounds = ConvCurve::new(&mut shadow);
-    let mut shadow_trans_for_bounds = ConvTransform::new(&mut shadow_curve_for_bounds, shadow_persp);
+    let mut shadow_trans_for_bounds =
+        ConvTransform::new(&mut shadow_curve_for_bounds, shadow_persp);
     if let Some(bbox) = bounding_rect_single(&mut shadow_trans_for_bounds, 0) {
         let (mut bx1, mut by1, mut bx2, mut by2) = (bbox.x1, bbox.y1, bbox.x2, bbox.y2);
         bx1 -= radius;
@@ -952,17 +966,7 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let t0 = std::time::Instant::now();
         if method != 2 || channel_r || channel_g || channel_b {
             blur_subrect(
-                &mut buf,
-                width,
-                height,
-                bx1,
-                by1,
-                bx2,
-                by2,
-                radius,
-                method,
-                channel_r,
-                channel_g,
+                &mut buf, width, height, bx1, by1, bx2, by2, radius, method, channel_r, channel_g,
                 channel_b,
             );
         }
@@ -991,7 +995,14 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ras.add_path(&mut quad_stroke, 0);
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(0, 77, 128, 77));
     for i in 0..4 {
-        let mut handle = Ellipse::new(shadow_quad[i * 2], shadow_quad[i * 2 + 1], 3.5, 3.5, 20, false);
+        let mut handle = Ellipse::new(
+            shadow_quad[i * 2],
+            shadow_quad[i * 2 + 1],
+            3.5,
+            3.5,
+            20,
+            false,
+        );
         ras.reset();
         ras.add_path(&mut handle, 0);
         render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb2, &Rgba8::new(140, 180, 200, 220));
@@ -1061,12 +1072,7 @@ pub fn trans_curve1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Default control points matching C++ on_init():
     // (50,50), (150+20,150-20), (250-20,250+20), (350+20,350-20), (450-20,450+20), (550,550)
     let default_pts = [
-        50.0, 50.0,
-        170.0, 130.0,
-        230.0, 270.0,
-        370.0, 330.0,
-        430.0, 470.0,
-        550.0, 550.0,
+        50.0, 50.0, 170.0, 130.0, 230.0, 270.0, 370.0, 330.0, 430.0, 470.0, 550.0, 550.0,
     ];
     let pts: Vec<f64> = (0..12)
         .map(|i| params.get(i + 1).copied().unwrap_or(default_pts[i]))
@@ -1299,20 +1305,20 @@ pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // poly1: offset (+10, -10) from diagonal
     // poly2: offset (-10, +10) from diagonal
     let default_poly1 = [
-        60.0, 40.0,     // 10+50, -10+50
-        180.0, 120.0,   // 10+150+20, -10+150-20
-        240.0, 260.0,   // 10+250-20, -10+250+20
-        380.0, 320.0,   // 10+350+20, -10+350-20
-        440.0, 460.0,   // 10+450-20, -10+450+20
-        560.0, 540.0,   // 10+550, -10+550
+        60.0, 40.0, // 10+50, -10+50
+        180.0, 120.0, // 10+150+20, -10+150-20
+        240.0, 260.0, // 10+250-20, -10+250+20
+        380.0, 320.0, // 10+350+20, -10+350-20
+        440.0, 460.0, // 10+450-20, -10+450+20
+        560.0, 540.0, // 10+550, -10+550
     ];
     let default_poly2 = [
-        40.0, 60.0,     // -10+50, 10+50
-        160.0, 140.0,   // -10+150+20, 10+150-20
-        220.0, 280.0,   // -10+250-20, 10+250+20
-        360.0, 340.0,   // -10+350+20, 10+350-20
-        420.0, 480.0,   // -10+450-20, 10+450+20
-        540.0, 560.0,   // -10+550, 10+550
+        40.0, 60.0, // -10+50, 10+50
+        160.0, 140.0, // -10+150+20, 10+150-20
+        220.0, 280.0, // -10+250-20, 10+250+20
+        360.0, 340.0, // -10+350+20, 10+350-20
+        420.0, 480.0, // -10+450-20, 10+450+20
+        540.0, 560.0, // -10+550, 10+550
     ];
 
     let pts1: Vec<f64> = (0..12)
@@ -1367,7 +1373,12 @@ pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     while t <= (n_pts - 1) as f64 + 0.001 {
         let x = bspline_x1.get(t);
         let y = bspline_y1.get(t);
-        if first { tcurve.move_to1(x, y); first = false; } else { tcurve.line_to1(x, y); }
+        if first {
+            tcurve.move_to1(x, y);
+            first = false;
+        } else {
+            tcurve.line_to1(x, y);
+        }
         t += step;
     }
     // Feed path 2
@@ -1376,7 +1387,12 @@ pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     while t <= (n_pts - 1) as f64 + 0.001 {
         let x = bspline_x2.get(t);
         let y = bspline_y2.get(t);
-        if first { tcurve.move_to2(x, y); first = false; } else { tcurve.line_to2(x, y); }
+        if first {
+            tcurve.move_to2(x, y);
+            first = false;
+        } else {
+            tcurve.line_to2(x, y);
+        }
         t += step;
     }
     tcurve.finalize_paths();
@@ -1444,7 +1460,12 @@ pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         while t <= (n_pts - 1) as f64 + 0.001 {
             let cx = bx.get(t);
             let cy = by.get(t);
-            if first { curve_path.move_to(cx, cy); first = false; } else { curve_path.line_to(cx, cy); }
+            if first {
+                curve_path.move_to(cx, cy);
+                first = false;
+            } else {
+                curve_path.line_to(cx, cy);
+            }
             t += step;
         }
         let mut curve_stroke = ConvStroke::new(&mut curve_path);
@@ -1464,7 +1485,11 @@ pub fn trans_curve2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         for i in 0..n_pts {
             let px = poly_pts[i * 2];
             let py = poly_pts[i * 2 + 1];
-            if i == 0 { poly_path.move_to(px, py); } else { poly_path.line_to(px, py); }
+            if i == 0 {
+                poly_path.move_to(px, py);
+            } else {
+                poly_path.line_to(px, py);
+            }
         }
         let mut poly_stroke = ConvStroke::new(&mut poly_path);
         poly_stroke.set_width(1.0);
@@ -1573,7 +1598,9 @@ pub fn lion_lens(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut first_in_path = true;
         loop {
             let cmd = segm.vertex(&mut x, &mut y);
-            if is_stop(cmd) { break; }
+            if is_stop(cmd) {
+                break;
+            }
             if is_vertex(cmd) {
                 // Apply affine transform
                 mtx.transform(&mut x, &mut y);
@@ -1656,7 +1683,14 @@ struct PeriodicDistortion {
 }
 
 impl PeriodicDistortion {
-    fn new(kind: DistortionKind, cx: f64, cy: f64, period: f64, amplitude: f64, phase: f64) -> Self {
+    fn new(
+        kind: DistortionKind,
+        cx: f64,
+        cy: f64,
+        period: f64,
+        amplitude: f64,
+        phase: f64,
+    ) -> Self {
         Self {
             kind,
             cx,
@@ -1672,7 +1706,9 @@ impl PeriodicDistortion {
         let yd = *y as f64 / SUBPIXEL_SCALE as f64 - self.cy;
         let d = (xd * xd + yd * yd).sqrt();
         if d > 1.0 {
-            let a = (d / (16.0 * self.period) - self.phase).cos() * (1.0 / (self.amplitude_inv * d)) + 1.0;
+            let a = (d / (16.0 * self.period) - self.phase).cos()
+                * (1.0 / (self.amplitude_inv * d))
+                + 1.0;
             *x = ((xd * a + self.cx) * SUBPIXEL_SCALE as f64) as i32;
             *y = ((yd * a + self.cy) * SUBPIXEL_SCALE as f64) as i32;
         }
@@ -1791,7 +1827,10 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let angle_rad = angle * std::f64::consts::PI / 180.0;
 
     let mut src_mtx = TransAffine::new();
-    src_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
+    src_mtx.multiply(&TransAffine::new_translation(
+        -(img_w as f64) / 2.0,
+        -(img_h as f64) / 2.0,
+    ));
     src_mtx.multiply(&TransAffine::new_rotation(angle_rad));
     src_mtx.multiply(&TransAffine::new_translation(
         img_w as f64 / 2.0 + 10.0,
@@ -1799,7 +1838,10 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ));
 
     let mut img_mtx = TransAffine::new();
-    img_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
+    img_mtx.multiply(&TransAffine::new_translation(
+        -(img_w as f64) / 2.0,
+        -(img_h as f64) / 2.0,
+    ));
     img_mtx.multiply(&TransAffine::new_rotation(angle_rad));
     img_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
     img_mtx.multiply(&TransAffine::new_translation(
@@ -1817,7 +1859,8 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut sl = ScanlineU8::new();
     let mut sa = SpanAllocator::new();
 
-    let mut interpolator_left = SpanInterpolatorAdaptor::new(SpanInterpolatorLinear::new(img_mtx), distortion_left);
+    let mut interpolator_left =
+        SpanInterpolatorAdaptor::new(SpanInterpolatorLinear::new(img_mtx), distortion_left);
     let mut span_left = SpanImageFilterRgbaBilinearClip::new(
         &img_ra,
         Rgba8::new(255, 255, 255, 255),
@@ -1860,7 +1903,10 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 0, 255));
 
     let mut gr1_mtx = TransAffine::new();
-    gr1_mtx.multiply(&TransAffine::new_translation(-(img_w as f64) / 2.0, -(img_h as f64) / 2.0));
+    gr1_mtx.multiply(&TransAffine::new_translation(
+        -(img_w as f64) / 2.0,
+        -(img_h as f64) / 2.0,
+    ));
     gr1_mtx.multiply(&TransAffine::new_scaling_uniform(0.8));
     gr1_mtx.multiply(&TransAffine::new_rotation(angle_rad));
     gr1_mtx.multiply(&TransAffine::new_translation(
@@ -1883,7 +1929,8 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let distortion_right = PeriodicDistortion::new(kind, cx2, cy2, period, amplitude, phase);
     let interpolator_right =
         SpanInterpolatorAdaptor::new(SpanInterpolatorLinear::new(gr2_mtx), distortion_right);
-    let mut gradient_span = DistortedRadialGradientSpan::new(interpolator_right, &gradient_colors, 0.0, 180.0);
+    let mut gradient_span =
+        DistortedRadialGradientSpan::new(interpolator_right, &gradient_colors, 0.0, 180.0);
 
     let mut ell_right = Ellipse::new(
         img_w as f64 / 2.0,
@@ -2105,7 +2152,11 @@ fn build_gouraud_mesh_state(width: u32, height: u32, params: &[f64]) -> GouraudM
             let p3 = p2 + cols;
             let p4 = p1 + cols;
             triangles.push(MeshTriangle { p1, p2, p3 });
-            triangles.push(MeshTriangle { p1: p3, p2: p4, p3: p1 });
+            triangles.push(MeshTriangle {
+                p1: p3,
+                p2: p4,
+                p3: p1,
+            });
 
             let curr_cell = (i * (cols - 1) + j) as i32;
             let left_cell = if j > 0 { curr_cell - 1 } else { -1 };
@@ -2118,7 +2169,11 @@ fn build_gouraud_mesh_state(width: u32, height: u32, params: &[f64]) -> GouraudM
             let curr_t1 = curr_cell * 2;
             let curr_t2 = curr_t1 + 1;
             let left_t1 = if left_cell >= 0 { left_cell * 2 } else { -1 };
-            let bott_t2 = if bott_cell >= 0 { bott_cell * 2 + 1 } else { -1 };
+            let bott_t2 = if bott_cell >= 0 {
+                bott_cell * 2 + 1
+            } else {
+                -1
+            };
 
             edges.push(MeshEdge {
                 p1,
@@ -2160,15 +2215,7 @@ fn build_gouraud_mesh_state(width: u32, height: u32, params: &[f64]) -> GouraudM
 
     let anim_step = params.first().copied().unwrap_or(0.0).max(0.0) as usize % 256;
     for _ in 0..anim_step {
-        mesh_randomize_points(
-            &mut vertices,
-            cols,
-            rows,
-            cell_w,
-            cell_h,
-            start_x,
-            start_y,
-        );
+        mesh_randomize_points(&mut vertices, cols, rows, cell_w, cell_h, start_x, start_y);
         mesh_rotate_colors(&mut vertices);
     }
 
@@ -2283,16 +2330,7 @@ fn render_gouraud_compound(
         let p2 = &vertices[tri.p2];
         let p3 = &vertices[tri.p3];
         let mut sg = SpanGouraudRgba::new_with_triangle(
-            p1.color,
-            p2.color,
-            p3.color,
-            p1.x,
-            p1.y,
-            p2.x,
-            p2.y,
-            p3.x,
-            p3.y,
-            0.0,
+            p1.color, p2.color, p3.color, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y, 0.0,
         );
         sg.prepare();
         gouraud_spans.push(sg);
@@ -2464,12 +2502,9 @@ fn draw_text_lcd<PF: agg_rust::pixfmt_rgba::PixelFormat<ColorType = Rgba8>>(
                 let zoom_in = TransAffine::new_scaling(1.0, 100.0);
                 let mut zoomed_in = ConvTransform::new(&mut trans, zoom_in);
 
-                let mut contour =
-                    agg_rust::conv_contour::ConvContour::new(&mut zoomed_in);
+                let mut contour = agg_rust::conv_contour::ConvContour::new(&mut zoomed_in);
                 contour.set_auto_detect_orientation(false);
-                contour.set_width(
-                    -faux_weight_val * height * sp_scale / 15.0,
-                );
+                contour.set_width(-faux_weight_val * height * sp_scale / 15.0);
 
                 let zoom_out = TransAffine::new_scaling(1.0, 1.0 / 100.0);
                 let mut zoomed_out = ConvTransform::new(&mut contour, zoom_out);
@@ -2544,7 +2579,14 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         rb.clear(&Rgba8::new(255, 255, 255, 255));
         if invert {
             // Match C++: invert only the text area below controls.
-            rb.blend_bar(0, 120, width as i32, height as i32, &Rgba8::new(0, 0, 0, 255), 255);
+            rb.blend_bar(
+                0,
+                120,
+                width as i32,
+                height as i32,
+                &Rgba8::new(0, 0, 0, 255),
+                255,
+            );
         }
     }
 
@@ -2553,12 +2595,7 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut ras = RasterizerScanlineAa::new();
 
     let text_height = font_scale * 12.0;
-    let texts: [(&str, bool); 4] = [
-        (TEXT1, false),
-        (TEXT2, true),
-        (TEXT3, false),
-        (TEXT4, true),
-    ];
+    let texts: [(&str, bool); 4] = [(TEXT1, false), (TEXT2, true), (TEXT3, false), (TEXT4, true)];
 
     if grayscale {
         // Grayscale rendering: standard RGBA32 pipeline at 1x scale.
@@ -2568,8 +2605,8 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut y = height as f64 - 20.0;
         for &(text, italic) in &texts {
             let font_data = if italic { font_italic } else { font_regular };
-            let mut fman = FontCacheManager::from_data(font_data.to_vec())
-                .expect("Failed to load font");
+            let mut fman =
+                FontCacheManager::from_data(font_data.to_vec()).expect("Failed to load font");
 
             y = draw_text_lcd(
                 &mut ras,
@@ -2601,8 +2638,8 @@ pub fn truetype_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut y = height as f64 - 20.0;
         for &(text, italic) in &texts {
             let font_data = if italic { font_italic } else { font_regular };
-            let mut fman = FontCacheManager::from_data(font_data.to_vec())
-                .expect("Failed to load font");
+            let mut fman =
+                FontCacheManager::from_data(font_data.to_vec()).expect("Failed to load font");
 
             y = draw_text_lcd(
                 &mut ras,
@@ -2751,7 +2788,20 @@ mod tests {
         let w = 640u32;
         let h = 560u32;
         // [0..11]: default values with invert enabled.
-        let params = [4.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 / 3.0, 0.0, 1.0, 1.0, 1.0];
+        let params = [
+            4.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0 / 3.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+        ];
         let buf = truetype_test(w, h, &params);
 
         // Pick a pixel inside the control area (y < 120): should not be pure black.
@@ -2762,14 +2812,31 @@ mod tests {
         // Pick a background pixel in the text area with no text: should be black after invert.
         let text_i = ((150 * w + 630) * 4) as usize;
         let text_rgb = (buf[text_i], buf[text_i + 1], buf[text_i + 2]);
-        assert_eq!(text_rgb, (0, 0, 0), "text region background should be inverted");
+        assert_eq!(
+            text_rgb,
+            (0, 0, 0),
+            "text region background should be inverted"
+        );
     }
 
     #[test]
     fn truetype_test_renders_controls_in_top_panel() {
         let w = 640u32;
         let h = 560u32;
-        let params = [4.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 / 3.0, 0.0, 1.0, 1.0, 0.0];
+        let params = [
+            4.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0 / 3.0,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+        ];
         let buf = truetype_test(w, h, &params);
 
         // Sample the top panel and ensure not all pixels are white.
@@ -2782,7 +2849,11 @@ mod tests {
                 }
             }
         }
-        assert!(non_white > 1000, "expected many control pixels in top panel, got {}", non_white);
+        assert!(
+            non_white > 1000,
+            "expected many control pixels in top panel, got {}",
+            non_white
+        );
     }
 
     #[test]
@@ -2856,9 +2927,7 @@ mod tests {
                 "raster_text",
                 &width.to_string(),
                 &height.to_string(),
-                out_path
-                    .to_str()
-                    .expect("temp path must be valid UTF-8"),
+                out_path.to_str().expect("temp path must be valid UTF-8"),
             ])
             .status()
             .expect("failed to run C++ renderer");
@@ -2893,12 +2962,9 @@ mod tests {
         }
 
         assert_eq!(
-            different_pixels,
-            0,
+            different_pixels, 0,
             "raster_text mismatch: {} differing pixels, max_channel_diff={}, first_diff={:?}",
-            different_pixels,
-            max_channel_diff,
-            first_diff
+            different_pixels, max_channel_diff, first_diff
         );
     }
 
@@ -2941,7 +3007,10 @@ mod tests {
             "blur".to_string(),
             width.to_string(),
             height.to_string(),
-            out_path.to_str().expect("temp path must be valid UTF-8").to_string(),
+            out_path
+                .to_str()
+                .expect("temp path must be valid UTF-8")
+                .to_string(),
         ];
         args.extend(params.iter().map(|v| v.to_string()));
 
@@ -2980,13 +3049,9 @@ mod tests {
         }
 
         assert_eq!(
-            different_pixels,
-            0,
+            different_pixels, 0,
             "blur mismatch: {} differing pixels, max_channel_diff={}, first_diff={:?}",
-            different_pixels,
-            max_channel_diff,
-            first_diff
+            different_pixels, max_channel_diff, first_diff
         );
     }
 }
-

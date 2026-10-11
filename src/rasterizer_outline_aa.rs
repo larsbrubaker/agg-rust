@@ -212,13 +212,7 @@ impl RasterizerOutlineAa {
     }
 
     /// Process a single vertex command. Port of C++ `add_vertex`.
-    fn add_vertex<R: OutlineAaRenderer>(
-        &mut self,
-        x: f64,
-        y: f64,
-        cmd: u32,
-        ren: &mut R,
-    ) {
+    fn add_vertex<R: OutlineAaRenderer>(&mut self, x: f64, y: f64, cmd: u32, ren: &mut R) {
         if is_move_to(cmd) {
             self.render(ren, false);
             self.move_to_d(x, y);
@@ -256,13 +250,7 @@ impl RasterizerOutlineAa {
     // draw() — Port of C++ draw(draw_vars&, unsigned start, unsigned end)
     // ========================================================================
 
-    fn draw<R: OutlineAaRenderer>(
-        &self,
-        dv: &mut DrawVars,
-        start: usize,
-        end: usize,
-        ren: &mut R,
-    ) {
+    fn draw<R: OutlineAaRenderer>(&self, dv: &mut DrawVars, start: usize, end: usize, ren: &mut R) {
         for _i in start..end {
             if self.line_join == OutlineAaJoin::Round {
                 dv.xb1 = dv.curr.x1 + (dv.curr.y2 - dv.curr.y1);
@@ -343,11 +331,7 @@ impl RasterizerOutlineAa {
     // render() — Port of C++ render(bool close_polygon)
     // ========================================================================
 
-    pub fn render<R: OutlineAaRenderer>(
-        &mut self,
-        ren: &mut R,
-        close_polygon: bool,
-    ) {
+    pub fn render<R: OutlineAaRenderer>(&mut self, ren: &mut R, close_polygon: bool) {
         self.src_vertices.close(close_polygon);
 
         // Match C++ behavior: when the renderer only supports accurate joins
@@ -364,11 +348,18 @@ impl RasterizerOutlineAa {
             if self.src_vertices.size() >= 3 {
                 let mut dv = DrawVars {
                     idx: 2,
-                    x1: 0, y1: 0, x2: 0, y2: 0,
+                    x1: 0,
+                    y1: 0,
+                    x2: 0,
+                    y2: 0,
                     curr: LineParameters::new(0, 0, 1, 0, 1), // placeholder
                     next: LineParameters::new(0, 0, 1, 0, 1),
-                    lcurr: 0, lnext: 0,
-                    xb1: 0, yb1: 0, xb2: 0, yb2: 0,
+                    lcurr: 0,
+                    lnext: 0,
+                    xb1: 0,
+                    yb1: 0,
+                    xb2: 0,
+                    yb2: 0,
                     flags: 0,
                 };
 
@@ -401,8 +392,16 @@ impl RasterizerOutlineAa {
                         dv.flags = 3;
                     }
                     OutlineAaJoin::Miter | OutlineAaJoin::Round => {
-                        let f1 = if prev.diagonal_quadrant() == dv.curr.diagonal_quadrant() { 1 } else { 0 };
-                        let f2 = if dv.curr.diagonal_quadrant() == dv.next.diagonal_quadrant() { 2 } else { 0 };
+                        let f1 = if prev.diagonal_quadrant() == dv.curr.diagonal_quadrant() {
+                            1
+                        } else {
+                            0
+                        };
+                        let f2 = if dv.curr.diagonal_quadrant() == dv.next.diagonal_quadrant() {
+                            2
+                        } else {
+                            0
+                        };
                         dv.flags = f1 | f2;
                     }
                     OutlineAaJoin::MiterAccurate => {
@@ -436,23 +435,17 @@ impl RasterizerOutlineAa {
                     let lp = LineParameters::new(x1, y1, x2, y2, lprev);
 
                     if self.round_cap {
-                        ren.semidot(
-                            cmp_dist_start,
-                            x1, y1,
-                            x1 + (y2 - y1), y1 - (x2 - x1),
-                        );
+                        ren.semidot(cmp_dist_start, x1, y1, x1 + (y2 - y1), y1 - (x2 - x1));
                     }
                     ren.line3(
                         &lp,
-                        x1 + (y2 - y1), y1 - (x2 - x1),
-                        x2 + (y2 - y1), y2 - (x2 - x1),
+                        x1 + (y2 - y1),
+                        y1 - (x2 - x1),
+                        x2 + (y2 - y1),
+                        y2 - (x2 - x1),
                     );
                     if self.round_cap {
-                        ren.semidot(
-                            cmp_dist_end,
-                            x2, y2,
-                            x2 + (y2 - y1), y2 - (x2 - x1),
-                        );
+                        ren.semidot(cmp_dist_end, x2, y2, x2 + (y2 - y1), y2 - (x2 - x1));
                     }
                 }
                 3 => {
@@ -471,61 +464,59 @@ impl RasterizerOutlineAa {
                     let lp2 = LineParameters::new(x2, y2, x3, y3, lnext);
 
                     if self.round_cap {
-                        ren.semidot(
-                            cmp_dist_start,
-                            x1, y1,
-                            x1 + (y2 - y1), y1 - (x2 - x1),
-                        );
+                        ren.semidot(cmp_dist_start, x1, y1, x1 + (y2 - y1), y1 - (x2 - x1));
                     }
 
                     if self.line_join == OutlineAaJoin::Round {
                         ren.line3(
                             &lp1,
-                            x1 + (y2 - y1), y1 - (x2 - x1),
-                            x2 + (y2 - y1), y2 - (x2 - x1),
+                            x1 + (y2 - y1),
+                            y1 - (x2 - x1),
+                            x2 + (y2 - y1),
+                            y2 - (x2 - x1),
                         );
                         ren.pie(
-                            x2, y2,
-                            x2 + (y2 - y1), y2 - (x2 - x1),
-                            x2 + (y3 - y2), y2 - (x3 - x2),
+                            x2,
+                            y2,
+                            x2 + (y2 - y1),
+                            y2 - (x2 - x1),
+                            x2 + (y3 - y2),
+                            y2 - (x3 - x2),
                         );
                         ren.line3(
                             &lp2,
-                            x2 + (y3 - y2), y2 - (x3 - x2),
-                            x3 + (y3 - y2), y3 - (x3 - x2),
+                            x2 + (y3 - y2),
+                            y2 - (x3 - x2),
+                            x3 + (y3 - y2),
+                            y3 - (x3 - x2),
                         );
                     } else {
                         let (mut xb1, mut yb1) = (0i32, 0i32);
                         bisectrix(&lp1, &lp2, &mut xb1, &mut yb1);
-                        ren.line3(
-                            &lp1,
-                            x1 + (y2 - y1), y1 - (x2 - x1),
-                            xb1, yb1,
-                        );
-                        ren.line3(
-                            &lp2,
-                            xb1, yb1,
-                            x3 + (y3 - y2), y3 - (x3 - x2),
-                        );
+                        ren.line3(&lp1, x1 + (y2 - y1), y1 - (x2 - x1), xb1, yb1);
+                        ren.line3(&lp2, xb1, yb1, x3 + (y3 - y2), y3 - (x3 - x2));
                     }
 
                     if self.round_cap {
-                        ren.semidot(
-                            cmp_dist_end,
-                            x3, y3,
-                            x3 + (y3 - y2), y3 - (x3 - x2),
-                        );
+                        ren.semidot(cmp_dist_end, x3, y3, x3 + (y3 - y2), y3 - (x3 - x2));
                     }
                 }
                 _ => {
                     // General case: 4+ vertices, open polyline
                     let mut dv = DrawVars {
                         idx: 3,
-                        x1: 0, y1: 0, x2: 0, y2: 0,
+                        x1: 0,
+                        y1: 0,
+                        x2: 0,
+                        y2: 0,
                         curr: LineParameters::new(0, 0, 1, 0, 1),
                         next: LineParameters::new(0, 0, 1, 0, 1),
-                        lcurr: 0, lnext: 0,
-                        xb1: 0, yb1: 0, xb2: 0, yb2: 0,
+                        lcurr: 0,
+                        lnext: 0,
+                        xb1: 0,
+                        yb1: 0,
+                        xb2: 0,
+                        yb2: 0,
                         flags: 0,
                     };
 
@@ -556,8 +547,16 @@ impl RasterizerOutlineAa {
                             dv.flags = 3;
                         }
                         OutlineAaJoin::Miter | OutlineAaJoin::Round => {
-                            let f1 = if prev.diagonal_quadrant() == dv.curr.diagonal_quadrant() { 1 } else { 0 };
-                            let f2 = if dv.curr.diagonal_quadrant() == dv.next.diagonal_quadrant() { 2 } else { 0 };
+                            let f1 = if prev.diagonal_quadrant() == dv.curr.diagonal_quadrant() {
+                                1
+                            } else {
+                                0
+                            };
+                            let f2 = if dv.curr.diagonal_quadrant() == dv.next.diagonal_quadrant() {
+                                2
+                            } else {
+                                0
+                            };
                             dv.flags = f1 | f2;
                         }
                         OutlineAaJoin::MiterAccurate => {
@@ -567,11 +566,7 @@ impl RasterizerOutlineAa {
 
                     // Start cap
                     if self.round_cap {
-                        ren.semidot(
-                            cmp_dist_start,
-                            x1, y1,
-                            x1 + (y2 - y1), y1 - (x2 - x1),
-                        );
+                        ren.semidot(cmp_dist_start, x1, y1, x1 + (y2 - y1), y1 - (x2 - x1));
                     }
 
                     // First segment
@@ -579,28 +574,25 @@ impl RasterizerOutlineAa {
                         if self.line_join == OutlineAaJoin::Round {
                             ren.line3(
                                 &prev,
-                                x1 + (y2 - y1), y1 - (x2 - x1),
-                                x2 + (y2 - y1), y2 - (x2 - x1),
+                                x1 + (y2 - y1),
+                                y1 - (x2 - x1),
+                                x2 + (y2 - y1),
+                                y2 - (x2 - x1),
                             );
                             ren.pie(
-                                prev.x2, prev.y2,
-                                x2 + (y2 - y1), y2 - (x2 - x1),
+                                prev.x2,
+                                prev.y2,
+                                x2 + (y2 - y1),
+                                y2 - (x2 - x1),
                                 dv.curr.x1 + (dv.curr.y2 - dv.curr.y1),
                                 dv.curr.y1 - (dv.curr.x2 - dv.curr.x1),
                             );
                         } else {
                             bisectrix(&prev, &dv.curr, &mut dv.xb1, &mut dv.yb1);
-                            ren.line3(
-                                &prev,
-                                x1 + (y2 - y1), y1 - (x2 - x1),
-                                dv.xb1, dv.yb1,
-                            );
+                            ren.line3(&prev, x1 + (y2 - y1), y1 - (x2 - x1), dv.xb1, dv.yb1);
                         }
                     } else {
-                        ren.line1(
-                            &prev,
-                            x1 + (y2 - y1), y1 - (x2 - x1),
-                        );
+                        ren.line1(&prev, x1 + (y2 - y1), y1 - (x2 - x1));
                     }
 
                     if (dv.flags & 2) == 0 && self.line_join != OutlineAaJoin::Round {
@@ -623,7 +615,8 @@ impl RasterizerOutlineAa {
                         } else {
                             ren.line3(
                                 &dv.curr,
-                                dv.xb1, dv.yb1,
+                                dv.xb1,
+                                dv.yb1,
                                 dv.curr.x2 + (dv.curr.y2 - dv.curr.y1),
                                 dv.curr.y2 - (dv.curr.x2 - dv.curr.x1),
                             );
@@ -640,7 +633,8 @@ impl RasterizerOutlineAa {
                     if self.round_cap {
                         ren.semidot(
                             cmp_dist_end,
-                            dv.curr.x2, dv.curr.y2,
+                            dv.curr.x2,
+                            dv.curr.y2,
                             dv.curr.x2 + (dv.curr.y2 - dv.curr.y1),
                             dv.curr.y2 - (dv.curr.x2 - dv.curr.x1),
                         );
@@ -671,7 +665,6 @@ fn cmp_dist_end(dist: i32) -> bool {
     dist <= 0
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,15 +691,35 @@ mod tests {
         assert!(!ras.round_cap());
     }
 
-    fn scan_for_color(ren_aa: &RendererOutlineAa<PixfmtRgba32>, cx: i32, cy: i32, radius: i32, channel: &str) -> bool {
+    fn scan_for_color(
+        ren_aa: &RendererOutlineAa<PixfmtRgba32>,
+        cx: i32,
+        cy: i32,
+        radius: i32,
+        channel: &str,
+    ) -> bool {
         for y in (cy - radius)..=(cy + radius) {
             for x in (cx - radius)..=(cx + radius) {
-                if x < 0 || y < 0 { continue; }
+                if x < 0 || y < 0 {
+                    continue;
+                }
                 let p = ren_aa.ren().pixel(x, y);
                 match channel {
-                    "r" => { if p.r > 0 { return true; } }
-                    "g" => { if p.g > 0 { return true; } }
-                    "b" => { if p.b > 0 { return true; } }
+                    "r" => {
+                        if p.r > 0 {
+                            return true;
+                        }
+                    }
+                    "g" => {
+                        if p.g > 0 {
+                            return true;
+                        }
+                    }
+                    "b" => {
+                        if p.b > 0 {
+                            return true;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -728,7 +741,10 @@ mod tests {
         ras.line_to_d(90.0, 50.0);
         ras.render(&mut ren_aa, false);
 
-        assert!(scan_for_color(&ren_aa, 50, 50, 2, "r"), "Expected red pixels near (50,50)");
+        assert!(
+            scan_for_color(&ren_aa, 50, 50, 2, "r"),
+            "Expected red pixels near (50,50)"
+        );
     }
 
     #[test]
@@ -747,7 +763,10 @@ mod tests {
         ras.line_to_d(90.0, 10.0);
         ras.render(&mut ren_aa, false);
 
-        assert!(scan_for_color(&ren_aa, 50, 50, 2, "g"), "Expected green pixels near (50,50)");
+        assert!(
+            scan_for_color(&ren_aa, 50, 50, 2, "g"),
+            "Expected green pixels near (50,50)"
+        );
     }
 
     #[test]
@@ -766,6 +785,9 @@ mod tests {
         ras.line_to_d(20.0, 80.0);
         ras.render(&mut ren_aa, true);
 
-        assert!(scan_for_color(&ren_aa, 50, 20, 2, "b"), "Expected blue pixels near (50,20)");
+        assert!(
+            scan_for_color(&ren_aa, 50, 20, 2, "b"),
+            "Expected blue pixels near (50,20)"
+        );
     }
 }

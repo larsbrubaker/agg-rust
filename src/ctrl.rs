@@ -9,9 +9,7 @@
 //! In our WASM demos, the JS sidebar handles interaction and passes values
 //! as params; these controls render the visual representation on the canvas.
 
-use crate::basics::{
-    is_stop, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP,
-};
+use crate::basics::{is_stop, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
 use crate::bspline::Bspline;
 use crate::color::Rgba8;
 use crate::conv_stroke::ConvStroke;
@@ -212,8 +210,8 @@ impl SliderCtrl {
                 Rgba8::new(255, 230, 204, 255), // 0: background (1.0, 0.9, 0.8)
                 Rgba8::new(179, 153, 153, 255), // 1: triangle (0.7, 0.6, 0.6)
                 Rgba8::new(0, 0, 0, 255),       // 2: text (black)
-                Rgba8::new(153, 102, 102, 102),  // 3: preview pointer (0.6,0.4,0.4, 0.4)
-                Rgba8::new(204, 0, 0, 153),      // 4: pointer (0.8, 0, 0, 0.6)
+                Rgba8::new(153, 102, 102, 102), // 3: preview pointer (0.6,0.4,0.4, 0.4)
+                Rgba8::new(204, 0, 0, 153),     // 4: pointer (0.8, 0, 0, 0.6)
                 Rgba8::new(0, 0, 0, 255),       // 5: step markers (black)
             ],
             vertices: Vec::new(),
@@ -398,10 +396,16 @@ impl SliderCtrl {
         for i in 0..=self.num_steps {
             let x = self.xs1 + (self.xs2 - self.xs1) * i as f64 / self.num_steps as f64;
             self.vertices.push((x, self.y1, PATH_CMD_MOVE_TO));
-            self.vertices
-                .push((x - d * (self.x2 - self.x1), self.y1 - self.border_extra, PATH_CMD_LINE_TO));
-            self.vertices
-                .push((x + d * (self.x2 - self.x1), self.y1 - self.border_extra, PATH_CMD_LINE_TO));
+            self.vertices.push((
+                x - d * (self.x2 - self.x1),
+                self.y1 - self.border_extra,
+                PATH_CMD_LINE_TO,
+            ));
+            self.vertices.push((
+                x + d * (self.x2 - self.x1),
+                self.y1 - self.border_extra,
+                PATH_CMD_LINE_TO,
+            ));
         }
     }
 }
@@ -675,9 +679,9 @@ impl CboxCtrl {
             label: label.to_string(),
             status: false,
             colors: [
-                Rgba8::new(0, 0, 0, 255),     // 0: border (black)
-                Rgba8::new(0, 0, 0, 255),     // 1: text (black)
-                Rgba8::new(102, 0, 0, 255),   // 2: checkmark (dark red, 0.4,0,0)
+                Rgba8::new(0, 0, 0, 255),   // 0: border (black)
+                Rgba8::new(0, 0, 0, 255),   // 1: text (black)
+                Rgba8::new(102, 0, 0, 255), // 2: checkmark (dark red, 0.4,0,0)
             ],
             vertices: Vec::new(),
             vertex_idx: 0,
@@ -707,10 +711,14 @@ impl CboxCtrl {
         self.vertices.push((self.x2, self.y2, PATH_CMD_LINE_TO));
         self.vertices.push((self.x1, self.y2, PATH_CMD_LINE_TO));
         // Inner rectangle (winding creates hollow)
-        self.vertices.push((self.x1 + t, self.y1 + t, PATH_CMD_MOVE_TO));
-        self.vertices.push((self.x1 + t, self.y2 - t, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 - t, self.y2 - t, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 - t, self.y1 + t, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 + t, self.y1 + t, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x1 + t, self.y2 - t, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 - t, self.y2 - t, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 - t, self.y1 + t, PATH_CMD_LINE_TO));
     }
 
     /// Build text vertices (path 1).
@@ -749,14 +757,34 @@ impl CboxCtrl {
         let d2 = (self.y2 - self.y1) / 2.0;
         let t = self.text_thickness * 1.5;
         // 8-vertex star pattern matching C++ cbox_ctrl exactly
-        self.vertices.push((self.x1 + self.text_thickness, self.y1 + self.text_thickness, PATH_CMD_MOVE_TO));
-        self.vertices.push((self.x1 + d2, self.y1 + d2 - t, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 - self.text_thickness, self.y1 + self.text_thickness, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x1 + d2 + t, self.y1 + d2, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 - self.text_thickness, self.y2 - self.text_thickness, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x1 + d2, self.y1 + d2 + t, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x1 + self.text_thickness, self.y2 - self.text_thickness, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x1 + d2 - t, self.y1 + d2, PATH_CMD_LINE_TO));
+        self.vertices.push((
+            self.x1 + self.text_thickness,
+            self.y1 + self.text_thickness,
+            PATH_CMD_MOVE_TO,
+        ));
+        self.vertices
+            .push((self.x1 + d2, self.y1 + d2 - t, PATH_CMD_LINE_TO));
+        self.vertices.push((
+            self.x2 - self.text_thickness,
+            self.y1 + self.text_thickness,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices
+            .push((self.x1 + d2 + t, self.y1 + d2, PATH_CMD_LINE_TO));
+        self.vertices.push((
+            self.x2 - self.text_thickness,
+            self.y2 - self.text_thickness,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices
+            .push((self.x1 + d2, self.y1 + d2 + t, PATH_CMD_LINE_TO));
+        self.vertices.push((
+            self.x1 + self.text_thickness,
+            self.y2 - self.text_thickness,
+            PATH_CMD_LINE_TO,
+        ));
+        self.vertices
+            .push((self.x1 + d2 - t, self.y1 + d2, PATH_CMD_LINE_TO));
     }
 }
 
@@ -903,10 +931,14 @@ impl RboxCtrl {
     fn calc_background(&mut self) {
         self.vertices.clear();
         let be = self.border_extra;
-        self.vertices.push((self.x1 - be, self.y1 - be, PATH_CMD_MOVE_TO));
-        self.vertices.push((self.x2 + be, self.y1 - be, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 + be, self.y2 + be, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x1 - be, self.y2 + be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 - be, self.y1 - be, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y1 - be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 + be, self.y2 + be, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 - be, self.y2 + be, PATH_CMD_LINE_TO));
     }
 
     /// Build border (path 1): outer rect + inner rect (hollow).
@@ -919,10 +951,14 @@ impl RboxCtrl {
         self.vertices.push((self.x2, self.y2, PATH_CMD_LINE_TO));
         self.vertices.push((self.x1, self.y2, PATH_CMD_LINE_TO));
         // Inner
-        self.vertices.push((self.x1 + bw, self.y1 + bw, PATH_CMD_MOVE_TO));
-        self.vertices.push((self.x1 + bw, self.y2 - bw, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 - bw, self.y2 - bw, PATH_CMD_LINE_TO));
-        self.vertices.push((self.x2 - bw, self.y1 + bw, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x1 + bw, self.y1 + bw, PATH_CMD_MOVE_TO));
+        self.vertices
+            .push((self.x1 + bw, self.y2 - bw, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 - bw, self.y2 - bw, PATH_CMD_LINE_TO));
+        self.vertices
+            .push((self.x2 - bw, self.y1 + bw, PATH_CMD_LINE_TO));
     }
 
     /// Build all item text labels (path 2).
@@ -932,7 +968,10 @@ impl RboxCtrl {
 
         for (i, item) in self.items.iter().enumerate() {
             let mut txt = GsvText::new();
-            txt.start_point(self.xs1 + dy * 1.5, self.ys1 + dy * (i as f64 + 1.0) - dy / 2.0);
+            txt.start_point(
+                self.xs1 + dy * 1.5,
+                self.ys1 + dy * (i as f64 + 1.0) - dy / 2.0,
+            );
             txt.size(self.text_height, self.text_width);
             txt.text(item);
 
@@ -1279,7 +1318,10 @@ impl SplineCtrl {
     fn calc_curve(&mut self) {
         self.vertices.clear();
         let mut path = PathStorage::new();
-        path.move_to(self.xs1, self.ys1 + (self.ys2 - self.ys1) * self.spline_values[0]);
+        path.move_to(
+            self.xs1,
+            self.ys1 + (self.ys2 - self.ys1) * self.spline_values[0],
+        );
         for i in 1..256 {
             path.line_to(
                 self.xs1 + (self.xs2 - self.xs1) * i as f64 / 255.0,
@@ -1728,14 +1770,10 @@ impl GammaCtrl {
         self.vertices.clear();
         let bw = self.border_width;
         // Outer rectangle
-        self.vertices
-            .push((self.x1, self.y1, PATH_CMD_MOVE_TO));
-        self.vertices
-            .push((self.x2, self.y1, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((self.x2, self.y2, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((self.x1, self.y2, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x1, self.y1, PATH_CMD_MOVE_TO));
+        self.vertices.push((self.x2, self.y1, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x2, self.y2, PATH_CMD_LINE_TO));
+        self.vertices.push((self.x1, self.y2, PATH_CMD_LINE_TO));
         // Inner hollow
         self.vertices
             .push((self.x1 + bw, self.y1 + bw, PATH_CMD_MOVE_TO));
@@ -1822,42 +1860,31 @@ impl GammaCtrl {
 
         // Vertical center line
         self.vertices.push((xmid - gw * 0.5, ys1, PATH_CMD_MOVE_TO));
-        self.vertices
-            .push((xmid - gw * 0.5, ys2, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xmid + gw * 0.5, ys2, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xmid + gw * 0.5, ys1, PATH_CMD_LINE_TO));
+        self.vertices.push((xmid - gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices.push((xmid + gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices.push((xmid + gw * 0.5, ys1, PATH_CMD_LINE_TO));
 
         // Crosshair at point 1
         let (xp1, yp1) = (self.xp1, self.yp1);
-        self.vertices
-            .push((xs1, yp1 - gw * 0.5, PATH_CMD_MOVE_TO));
+        self.vertices.push((xs1, yp1 - gw * 0.5, PATH_CMD_MOVE_TO));
         self.vertices
             .push((xp1 - gw * 0.5, yp1 - gw * 0.5, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xp1 - gw * 0.5, ys1, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xp1 + gw * 0.5, ys1, PATH_CMD_LINE_TO));
+        self.vertices.push((xp1 - gw * 0.5, ys1, PATH_CMD_LINE_TO));
+        self.vertices.push((xp1 + gw * 0.5, ys1, PATH_CMD_LINE_TO));
         self.vertices
             .push((xp1 + gw * 0.5, yp1 + gw * 0.5, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xs1, yp1 + gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices.push((xs1, yp1 + gw * 0.5, PATH_CMD_LINE_TO));
 
         // Crosshair at point 2
         let (xp2, yp2) = (self.xp2, self.yp2);
-        self.vertices
-            .push((xs2, yp2 + gw * 0.5, PATH_CMD_MOVE_TO));
+        self.vertices.push((xs2, yp2 + gw * 0.5, PATH_CMD_MOVE_TO));
         self.vertices
             .push((xp2 + gw * 0.5, yp2 + gw * 0.5, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xp2 + gw * 0.5, ys2, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xp2 - gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices.push((xp2 + gw * 0.5, ys2, PATH_CMD_LINE_TO));
+        self.vertices.push((xp2 - gw * 0.5, ys2, PATH_CMD_LINE_TO));
         self.vertices
             .push((xp2 - gw * 0.5, yp2 - gw * 0.5, PATH_CMD_LINE_TO));
-        self.vertices
-            .push((xs2, yp2 - gw * 0.5, PATH_CMD_LINE_TO));
+        self.vertices.push((xs2, yp2 - gw * 0.5, PATH_CMD_LINE_TO));
     }
 
     /// Path 4: Inactive control point (ellipse).
@@ -2274,7 +2301,10 @@ mod tests {
             }
             count += 1;
         }
-        assert!(count > 10, "Curve path should have many vertices, got {count}");
+        assert!(
+            count > 10,
+            "Curve path should have many vertices, got {count}"
+        );
     }
 
     #[test]

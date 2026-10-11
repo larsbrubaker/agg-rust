@@ -2,28 +2,31 @@
 //! gradient_focal, idea, graph_test, gamma_tuner, image_filters2, conv_dash_marker,
 //! aa_test.
 
-use agg_rust::color::Rgba8;
-use agg_rust::curves::Curve4Div;
-use agg_rust::ctrl::{render_ctrl, SliderCtrl, CboxCtrl, RboxCtrl};
+use super::{load_spheres_image, load_spheres_image_native, setup_renderer};
 use agg_rust::arrowhead::Arrowhead;
+use agg_rust::basics::{
+    is_move_to, is_vertex, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP,
+};
+use agg_rust::color::Rgba8;
 use agg_rust::conv_curve::ConvCurve;
 use agg_rust::conv_dash::ConvDash;
 use agg_rust::conv_marker::ConvMarker;
 use agg_rust::conv_smooth_poly1::ConvSmoothPoly1;
 use agg_rust::conv_stroke::ConvStroke;
 use agg_rust::conv_transform::ConvTransform;
+use agg_rust::ctrl::{render_ctrl, CboxCtrl, RboxCtrl, SliderCtrl};
+use agg_rust::curves::Curve4Div;
 use agg_rust::ellipse::Ellipse;
 use agg_rust::gradient_lut::GradientLut;
 use agg_rust::gsv_text::GsvText;
-use agg_rust::image_accessors::{ImageAccessorClone, ImageAccessorClip};
+use agg_rust::image_accessors::{ImageAccessorClip, ImageAccessorClone};
 use agg_rust::image_filters::{
-    ImageFilterBilinear, ImageFilterBicubic, ImageFilterSpline16, ImageFilterSpline36,
-    ImageFilterHanning, ImageFilterHamming, ImageFilterHermite, ImageFilterKaiser,
-    ImageFilterQuadric, ImageFilterCatrom, ImageFilterGaussian, ImageFilterBessel,
-    ImageFilterMitchell, ImageFilterSinc, ImageFilterLanczos, ImageFilterBlackman,
-    ImageFilterFunction, ImageFilterLut, IMAGE_FILTER_SCALE,
+    ImageFilterBessel, ImageFilterBicubic, ImageFilterBilinear, ImageFilterBlackman,
+    ImageFilterCatrom, ImageFilterFunction, ImageFilterGaussian, ImageFilterHamming,
+    ImageFilterHanning, ImageFilterHermite, ImageFilterKaiser, ImageFilterLanczos, ImageFilterLut,
+    ImageFilterMitchell, ImageFilterQuadric, ImageFilterSinc, ImageFilterSpline16,
+    ImageFilterSpline36, IMAGE_FILTER_SCALE,
 };
-use agg_rust::basics::{is_move_to, is_vertex, VertexSource, PATH_CMD_LINE_TO, PATH_CMD_MOVE_TO, PATH_CMD_STOP};
 use agg_rust::math_stroke::LineCap;
 use agg_rust::path_storage::PathStorage;
 use agg_rust::pixfmt_rgba::PixfmtRgba32;
@@ -35,16 +38,14 @@ use agg_rust::scanline_u::ScanlineU8;
 use agg_rust::span_allocator::SpanAllocator;
 use agg_rust::span_gouraud_rgba::SpanGouraudRgba;
 use agg_rust::span_gradient::{
-    GradientRadial, GradientRadialFocus, GradientReflectAdaptor, GradientX,
-    SpanGradient,
+    GradientRadial, GradientRadialFocus, GradientReflectAdaptor, GradientX, SpanGradient,
 };
 use agg_rust::span_image_filter_rgba::{
-    SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaNn,
-    SpanImageFilterRgba2x2, SpanImageFilterRgbaGen,
+    SpanImageFilterRgba2x2, SpanImageFilterRgbaBilinearClip, SpanImageFilterRgbaGen,
+    SpanImageFilterRgbaNn,
 };
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
-use super::{setup_renderer, load_spheres_image, load_spheres_image_native};
 
 // ============================================================================
 // Image Filter Graph — filter kernel visualization
@@ -110,10 +111,8 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Filter names for checkboxes
     let filter_names = [
-        "bilinear", "bicubic", "spline16", "spline36",
-        "hanning", "hamming", "hermite", "kaiser",
-        "quadric", "catrom", "gaussian", "bessel",
-        "mitchell", "sinc", "lanczos", "blackman",
+        "bilinear", "bicubic", "spline16", "spline36", "hanning", "hamming", "hermite", "kaiser",
+        "quadric", "catrom", "gaussian", "bessel", "mitchell", "sinc", "lanczos", "blackman",
     ];
 
     // Helper: plot weight, cumulative, and normalized LUT curves for a filter
@@ -155,7 +154,8 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                             sum += $filter.calc_weight(xf.abs());
                         }
                     }
-                    let x = x_center + ((-128.0 + xint as f64) / 128.0) * r * (x_end - x_start) / 16.0;
+                    let x =
+                        x_center + ((-128.0 + xint as f64) / 128.0) * r * (x_end - x_start) / 16.0;
                     let y = ys + sum * 256.0 - 256.0;
                     if xint == 0 {
                         path.move_to(x, y);
@@ -192,7 +192,12 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     stroke.set_width(1.5);
                     ras.reset();
                     ras.add_path(&mut stroke, 0);
-                    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 0, 128, 255));
+                    render_scanlines_aa_solid(
+                        &mut ras,
+                        &mut sl,
+                        &mut rb,
+                        &Rgba8::new(0, 0, 128, 255),
+                    );
                 }
             }
         }};
@@ -211,7 +216,10 @@ pub fn image_fltr_graph(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             4 => plot_filter_curves!(ImageFilterHanning, ImageFilterHanning.radius()),
             5 => plot_filter_curves!(ImageFilterHamming, ImageFilterHamming.radius()),
             6 => plot_filter_curves!(ImageFilterHermite, ImageFilterHermite.radius()),
-            7 => plot_filter_curves!(ImageFilterKaiser::new(5.0), ImageFilterKaiser::new(5.0).radius()),
+            7 => plot_filter_curves!(
+                ImageFilterKaiser::new(5.0),
+                ImageFilterKaiser::new(5.0).radius()
+            ),
             8 => plot_filter_curves!(ImageFilterQuadric, ImageFilterQuadric.radius()),
             9 => plot_filter_curves!(ImageFilterCatrom, ImageFilterCatrom.radius()),
             10 => plot_filter_curves!(ImageFilterGaussian, ImageFilterGaussian.radius()),
@@ -295,14 +303,20 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Source (ellipse) transform — matching C++ image1.cpp src_mtx
     let mut src_mtx = TransAffine::new();
-    src_mtx.multiply(&TransAffine::new_translation(-iw / 2.0 - 10.0, -ih / 2.0 - 20.0 - 10.0));
+    src_mtx.multiply(&TransAffine::new_translation(
+        -iw / 2.0 - 10.0,
+        -ih / 2.0 - 20.0 - 10.0,
+    ));
     src_mtx.multiply(&TransAffine::new_rotation(angle_rad));
     src_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
     src_mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0 + 20.0));
 
     // Image transform — matching C++ image1.cpp img_mtx (inverted for sampling)
     let mut img_mtx = TransAffine::new();
-    img_mtx.multiply(&TransAffine::new_translation(-iw / 2.0 + 10.0, -ih / 2.0 + 20.0 + 10.0));
+    img_mtx.multiply(&TransAffine::new_translation(
+        -iw / 2.0 + 10.0,
+        -ih / 2.0 + 20.0 + 10.0,
+    ));
     img_mtx.multiply(&TransAffine::new_rotation(angle_rad));
     img_mtx.multiply(&TransAffine::new_scaling_uniform(scale));
     img_mtx.multiply(&TransAffine::new_translation(iw / 2.0, ih / 2.0 + 20.0));
@@ -385,11 +399,11 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 use std::cell::RefCell;
 
 struct ImageFiltersCache {
-    image_data: Vec<u8>,  // current image (src after last transform)
-    scratch: Vec<u8>,     // reusable scratch buffer for transforms
+    image_data: Vec<u8>, // current image (src after last transform)
+    scratch: Vec<u8>,    // reusable scratch buffer for transforms
     img_w: u32,
     img_h: u32,
-    num_steps: usize,     // how many step-deg transforms applied (excl. initial)
+    num_steps: usize, // how many step-deg transforms applied (excl. initial)
     filter_idx: usize,
     normalize: bool,
     radius: f64,
@@ -446,7 +460,9 @@ fn apply_image_transform(
 
     // Clipping ellipse — transformed by src_mtx, matching C++
     let mut r = iw;
-    if ih < r { r = ih; }
+    if ih < r {
+        r = ih;
+    }
     r *= 0.5;
     r -= 4.0;
     let mut ell = Ellipse::new(iw / 2.0, ih / 2.0, r, r, 200, false);
@@ -545,15 +561,21 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         // Determine if we can use cached state or need a full rebuild
         let need_full_rebuild = if incremental {
             match cache.as_mut() {
-                Some(state) if state.filter_idx == filter_idx
-                    && state.normalize == normalize
-                    && (filter_idx < 14 || state.radius == radius) =>
+                Some(state)
+                    if state.filter_idx == filter_idx
+                        && state.normalize == normalize
+                        && (filter_idx < 14 || state.radius == radius) =>
                 {
                     // Cache hit: do one incremental transform
                     apply_image_transform(
-                        &mut state.image_data, &mut state.scratch,
-                        state.img_w, state.img_h,
-                        step_deg, filter_idx, normalize, radius,
+                        &mut state.image_data,
+                        &mut state.scratch,
+                        state.img_w,
+                        state.img_h,
+                        step_deg,
+                        filter_idx,
+                        normalize,
+                        radius,
                     );
                     state.num_steps += 1;
                     false
@@ -572,19 +594,26 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut dst = vec![255u8; (img_w * img_h * 4) as usize];
 
             // Initial transform_image(0.0) — C++ does this at startup
-            apply_image_transform(&mut src, &mut dst, img_w, img_h, 0.0, filter_idx, normalize, radius);
+            apply_image_transform(
+                &mut src, &mut dst, img_w, img_h, 0.0, filter_idx, normalize, radius,
+            );
 
             // Apply num_steps additional transforms
             for _ in 0..num_steps {
-                apply_image_transform(&mut src, &mut dst, img_w, img_h, step_deg, filter_idx, normalize, radius);
+                apply_image_transform(
+                    &mut src, &mut dst, img_w, img_h, step_deg, filter_idx, normalize, radius,
+                );
             }
 
             *cache = Some(ImageFiltersCache {
                 image_data: src,
                 scratch: dst,
-                img_w, img_h,
+                img_w,
+                img_h,
                 num_steps,
-                filter_idx, normalize, radius,
+                filter_idx,
+                normalize,
+                radius,
             });
         }
 
@@ -670,9 +699,23 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
         // Filter selection radio box
         let filter_names = [
-            "simple (NN)", "bilinear", "bicubic", "spline16", "spline36",
-            "hanning", "hamming", "hermite", "kaiser", "quadric", "catrom",
-            "gaussian", "bessel", "mitchell", "sinc", "lanczos", "blackman",
+            "simple (NN)",
+            "bilinear",
+            "bicubic",
+            "spline16",
+            "spline36",
+            "hanning",
+            "hamming",
+            "hermite",
+            "kaiser",
+            "quadric",
+            "catrom",
+            "gaussian",
+            "bessel",
+            "mitchell",
+            "sinc",
+            "lanczos",
+            "blackman",
         ];
         let mut r_filters = RboxCtrl::new(0.0, 0.0, 110.0, 210.0);
         r_filters.border_width(0.0, 0.0);
@@ -738,10 +781,10 @@ pub fn gradient_focal(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Build gradient LUT with 4 color stops, matching C++ gradient_focal.cpp
     let mut lut = GradientLut::new(1024);
-    lut.add_color(0.0, Rgba8::new(0, 255, 0, 255));      // Green
-    lut.add_color(0.2, Rgba8::new(120, 0, 0, 255));       // Dark red
-    lut.add_color(0.7, Rgba8::new(120, 120, 0, 255));     // Yellow-brown
-    lut.add_color(1.0, Rgba8::new(0, 0, 255, 255));       // Blue
+    lut.add_color(0.0, Rgba8::new(0, 255, 0, 255)); // Green
+    lut.add_color(0.2, Rgba8::new(120, 0, 0, 255)); // Dark red
+    lut.add_color(0.7, Rgba8::new(120, 120, 0, 255)); // Yellow-brown
+    lut.add_color(1.0, Rgba8::new(0, 0, 255, 255)); // Blue
     lut.build_lut();
 
     // Gradient setup: radial focus with reflect adaptor
@@ -843,91 +886,276 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     let attrs = [
-        PathAttr { fill: Rgba8::new(255, 255, 0, 255), stroke: Rgba8::new(0, 0, 0, 255), stroke_width: 1.0 },
-        PathAttr { fill: Rgba8::new(255, 255, 200, 255), stroke: Rgba8::new(90, 0, 0, 255), stroke_width: 0.7 },
-        PathAttr { fill: Rgba8::new(0, 0, 0, 255), stroke: Rgba8::new(0, 0, 0, 255), stroke_width: 0.0 },
+        PathAttr {
+            fill: Rgba8::new(255, 255, 0, 255),
+            stroke: Rgba8::new(0, 0, 0, 255),
+            stroke_width: 1.0,
+        },
+        PathAttr {
+            fill: Rgba8::new(255, 255, 200, 255),
+            stroke: Rgba8::new(90, 0, 0, 255),
+            stroke_width: 0.7,
+        },
+        PathAttr {
+            fill: Rgba8::new(0, 0, 0, 255),
+            stroke: Rgba8::new(0, 0, 0, 255),
+            stroke_width: 0.0,
+        },
     ];
 
     // Exact polygon data from C++ idea.cpp
 
     // Lightbulb outline — 20 points
     let poly_bulb: &[(f64, f64)] = &[
-        (-6.0,-67.0), (-6.0,-71.0), (-7.0,-74.0), (-8.0,-76.0), (-10.0,-79.0),
-        (-10.0,-82.0), (-9.0,-84.0), (-6.0,-86.0), (-4.0,-87.0), (-2.0,-86.0),
-        (-1.0,-86.0), (1.0,-84.0), (2.0,-82.0), (2.0,-79.0), (0.0,-77.0),
-        (-2.0,-73.0), (-2.0,-71.0), (-2.0,-69.0), (-3.0,-67.0), (-4.0,-65.0),
+        (-6.0, -67.0),
+        (-6.0, -71.0),
+        (-7.0, -74.0),
+        (-8.0, -76.0),
+        (-10.0, -79.0),
+        (-10.0, -82.0),
+        (-9.0, -84.0),
+        (-6.0, -86.0),
+        (-4.0, -87.0),
+        (-2.0, -86.0),
+        (-1.0, -86.0),
+        (1.0, -84.0),
+        (2.0, -82.0),
+        (2.0, -79.0),
+        (0.0, -77.0),
+        (-2.0, -73.0),
+        (-2.0, -71.0),
+        (-2.0, -69.0),
+        (-3.0, -67.0),
+        (-4.0, -65.0),
     ];
 
     // Light beams — 5 points each
     let poly_beam1: &[(f64, f64)] = &[
-        (-14.0,-84.0), (-22.0,-85.0), (-23.0,-87.0), (-22.0,-88.0), (-21.0,-88.0),
+        (-14.0, -84.0),
+        (-22.0, -85.0),
+        (-23.0, -87.0),
+        (-22.0, -88.0),
+        (-21.0, -88.0),
     ];
     let poly_beam2: &[(f64, f64)] = &[
-        (-10.0,-92.0), (-14.0,-96.0), (-14.0,-98.0), (-12.0,-99.0), (-11.0,-97.0),
+        (-10.0, -92.0),
+        (-14.0, -96.0),
+        (-14.0, -98.0),
+        (-12.0, -99.0),
+        (-11.0, -97.0),
     ];
     let poly_beam3: &[(f64, f64)] = &[
-        (-1.0,-92.0), (-2.0,-98.0), (0.0,-100.0), (2.0,-100.0), (1.0,-98.0),
+        (-1.0, -92.0),
+        (-2.0, -98.0),
+        (0.0, -100.0),
+        (2.0, -100.0),
+        (1.0, -98.0),
     ];
     let poly_beam4: &[(f64, f64)] = &[
-        (5.0,-89.0), (11.0,-94.0), (13.0,-93.0), (13.0,-92.0), (12.0,-91.0),
+        (5.0, -89.0),
+        (11.0, -94.0),
+        (13.0, -93.0),
+        (13.0, -92.0),
+        (12.0, -91.0),
     ];
 
     // Figure parts — complex polygons
     let poly_fig1: &[(f64, f64)] = &[
-        (1.0,-48.0), (-3.0,-54.0), (-7.0,-58.0), (-12.0,-58.0), (-17.0,-55.0),
-        (-20.0,-52.0), (-21.0,-47.0), (-20.0,-40.0), (-17.0,-33.0), (-11.0,-28.0),
-        (-6.0,-26.0), (-2.0,-25.0), (2.0,-26.0), (4.0,-28.0), (5.0,-33.0),
-        (5.0,-39.0), (3.0,-44.0), (12.0,-48.0), (12.0,-50.0), (12.0,-51.0),
-        (3.0,-46.0),
+        (1.0, -48.0),
+        (-3.0, -54.0),
+        (-7.0, -58.0),
+        (-12.0, -58.0),
+        (-17.0, -55.0),
+        (-20.0, -52.0),
+        (-21.0, -47.0),
+        (-20.0, -40.0),
+        (-17.0, -33.0),
+        (-11.0, -28.0),
+        (-6.0, -26.0),
+        (-2.0, -25.0),
+        (2.0, -26.0),
+        (4.0, -28.0),
+        (5.0, -33.0),
+        (5.0, -39.0),
+        (3.0, -44.0),
+        (12.0, -48.0),
+        (12.0, -50.0),
+        (12.0, -51.0),
+        (3.0, -46.0),
     ];
     let poly_fig2: &[(f64, f64)] = &[
-        (11.0,-27.0), (6.0,-23.0), (4.0,-22.0), (3.0,-19.0), (5.0,-16.0),
-        (6.0,-15.0), (11.0,-17.0), (19.0,-23.0), (25.0,-30.0), (32.0,-38.0),
-        (32.0,-41.0), (32.0,-50.0), (30.0,-64.0), (32.0,-72.0), (32.0,-75.0),
-        (31.0,-77.0), (28.0,-78.0), (26.0,-80.0), (28.0,-87.0), (27.0,-89.0),
-        (25.0,-88.0), (24.0,-79.0), (24.0,-76.0), (23.0,-75.0), (20.0,-76.0),
-        (17.0,-76.0), (17.0,-74.0), (19.0,-73.0), (22.0,-73.0), (24.0,-71.0),
-        (26.0,-69.0), (27.0,-64.0), (28.0,-55.0), (28.0,-47.0), (28.0,-40.0),
-        (26.0,-38.0), (20.0,-33.0), (14.0,-30.0),
+        (11.0, -27.0),
+        (6.0, -23.0),
+        (4.0, -22.0),
+        (3.0, -19.0),
+        (5.0, -16.0),
+        (6.0, -15.0),
+        (11.0, -17.0),
+        (19.0, -23.0),
+        (25.0, -30.0),
+        (32.0, -38.0),
+        (32.0, -41.0),
+        (32.0, -50.0),
+        (30.0, -64.0),
+        (32.0, -72.0),
+        (32.0, -75.0),
+        (31.0, -77.0),
+        (28.0, -78.0),
+        (26.0, -80.0),
+        (28.0, -87.0),
+        (27.0, -89.0),
+        (25.0, -88.0),
+        (24.0, -79.0),
+        (24.0, -76.0),
+        (23.0, -75.0),
+        (20.0, -76.0),
+        (17.0, -76.0),
+        (17.0, -74.0),
+        (19.0, -73.0),
+        (22.0, -73.0),
+        (24.0, -71.0),
+        (26.0, -69.0),
+        (27.0, -64.0),
+        (28.0, -55.0),
+        (28.0, -47.0),
+        (28.0, -40.0),
+        (26.0, -38.0),
+        (20.0, -33.0),
+        (14.0, -30.0),
     ];
     let poly_fig3: &[(f64, f64)] = &[
-        (-6.0,-20.0), (-9.0,-21.0), (-15.0,-21.0), (-20.0,-17.0), (-28.0,-8.0),
-        (-32.0,-1.0), (-32.0,1.0), (-30.0,6.0), (-26.0,8.0), (-20.0,10.0),
-        (-16.0,12.0), (-14.0,14.0), (-15.0,16.0), (-18.0,20.0), (-22.0,20.0),
-        (-25.0,19.0), (-27.0,20.0), (-26.0,22.0), (-23.0,23.0), (-18.0,23.0),
-        (-14.0,22.0), (-11.0,20.0), (-10.0,17.0), (-9.0,14.0), (-11.0,11.0),
-        (-16.0,9.0), (-22.0,8.0), (-26.0,5.0), (-28.0,2.0), (-27.0,-2.0),
-        (-23.0,-8.0), (-19.0,-11.0), (-12.0,-14.0), (-6.0,-15.0), (-6.0,-18.0),
+        (-6.0, -20.0),
+        (-9.0, -21.0),
+        (-15.0, -21.0),
+        (-20.0, -17.0),
+        (-28.0, -8.0),
+        (-32.0, -1.0),
+        (-32.0, 1.0),
+        (-30.0, 6.0),
+        (-26.0, 8.0),
+        (-20.0, 10.0),
+        (-16.0, 12.0),
+        (-14.0, 14.0),
+        (-15.0, 16.0),
+        (-18.0, 20.0),
+        (-22.0, 20.0),
+        (-25.0, 19.0),
+        (-27.0, 20.0),
+        (-26.0, 22.0),
+        (-23.0, 23.0),
+        (-18.0, 23.0),
+        (-14.0, 22.0),
+        (-11.0, 20.0),
+        (-10.0, 17.0),
+        (-9.0, 14.0),
+        (-11.0, 11.0),
+        (-16.0, 9.0),
+        (-22.0, 8.0),
+        (-26.0, 5.0),
+        (-28.0, 2.0),
+        (-27.0, -2.0),
+        (-23.0, -8.0),
+        (-19.0, -11.0),
+        (-12.0, -14.0),
+        (-6.0, -15.0),
+        (-6.0, -18.0),
     ];
     let poly_fig4: &[(f64, f64)] = &[
-        (11.0,-6.0), (8.0,-16.0), (5.0,-21.0), (-1.0,-23.0), (-7.0,-22.0),
-        (-10.0,-17.0), (-9.0,-10.0), (-8.0,0.0), (-8.0,10.0), (-10.0,18.0),
-        (-11.0,22.0), (-10.0,26.0), (-7.0,28.0), (-3.0,30.0), (0.0,31.0),
-        (5.0,31.0), (10.0,27.0), (14.0,18.0), (14.0,11.0), (11.0,2.0),
+        (11.0, -6.0),
+        (8.0, -16.0),
+        (5.0, -21.0),
+        (-1.0, -23.0),
+        (-7.0, -22.0),
+        (-10.0, -17.0),
+        (-9.0, -10.0),
+        (-8.0, 0.0),
+        (-8.0, 10.0),
+        (-10.0, 18.0),
+        (-11.0, 22.0),
+        (-10.0, 26.0),
+        (-7.0, 28.0),
+        (-3.0, 30.0),
+        (0.0, 31.0),
+        (5.0, 31.0),
+        (10.0, 27.0),
+        (14.0, 18.0),
+        (14.0, 11.0),
+        (11.0, 2.0),
     ];
     let poly_fig5: &[(f64, f64)] = &[
-        (0.0,22.0), (-5.0,21.0), (-8.0,22.0), (-9.0,26.0), (-8.0,49.0),
-        (-8.0,54.0), (-10.0,64.0), (-10.0,75.0), (-9.0,81.0), (-10.0,84.0),
-        (-16.0,89.0), (-18.0,95.0), (-18.0,97.0), (-13.0,100.0), (-12.0,99.0),
-        (-12.0,95.0), (-10.0,90.0), (-8.0,87.0), (-6.0,86.0), (-4.0,83.0),
-        (-3.0,82.0), (-5.0,80.0), (-6.0,79.0), (-7.0,74.0), (-6.0,63.0),
-        (-3.0,52.0), (0.0,42.0), (1.0,31.0),
+        (0.0, 22.0),
+        (-5.0, 21.0),
+        (-8.0, 22.0),
+        (-9.0, 26.0),
+        (-8.0, 49.0),
+        (-8.0, 54.0),
+        (-10.0, 64.0),
+        (-10.0, 75.0),
+        (-9.0, 81.0),
+        (-10.0, 84.0),
+        (-16.0, 89.0),
+        (-18.0, 95.0),
+        (-18.0, 97.0),
+        (-13.0, 100.0),
+        (-12.0, 99.0),
+        (-12.0, 95.0),
+        (-10.0, 90.0),
+        (-8.0, 87.0),
+        (-6.0, 86.0),
+        (-4.0, 83.0),
+        (-3.0, 82.0),
+        (-5.0, 80.0),
+        (-6.0, 79.0),
+        (-7.0, 74.0),
+        (-6.0, 63.0),
+        (-3.0, 52.0),
+        (0.0, 42.0),
+        (1.0, 31.0),
     ];
     let poly_fig6: &[(f64, f64)] = &[
-        (12.0,31.0), (12.0,24.0), (8.0,21.0), (3.0,21.0), (2.0,24.0),
-        (3.0,30.0), (5.0,40.0), (8.0,47.0), (10.0,56.0), (11.0,64.0),
-        (11.0,71.0), (10.0,76.0), (8.0,77.0), (8.0,79.0), (10.0,81.0),
-        (13.0,82.0), (17.0,82.0), (26.0,84.0), (28.0,87.0), (32.0,86.0),
-        (33.0,81.0), (32.0,80.0), (25.0,79.0), (17.0,79.0), (14.0,79.0),
-        (13.0,76.0), (14.0,72.0), (14.0,64.0), (13.0,55.0), (12.0,44.0),
-        (12.0,34.0),
+        (12.0, 31.0),
+        (12.0, 24.0),
+        (8.0, 21.0),
+        (3.0, 21.0),
+        (2.0, 24.0),
+        (3.0, 30.0),
+        (5.0, 40.0),
+        (8.0, 47.0),
+        (10.0, 56.0),
+        (11.0, 64.0),
+        (11.0, 71.0),
+        (10.0, 76.0),
+        (8.0, 77.0),
+        (8.0, 79.0),
+        (10.0, 81.0),
+        (13.0, 82.0),
+        (17.0, 82.0),
+        (26.0, 84.0),
+        (28.0, 87.0),
+        (32.0, 86.0),
+        (33.0, 81.0),
+        (32.0, 80.0),
+        (25.0, 79.0),
+        (17.0, 79.0),
+        (14.0, 79.0),
+        (13.0, 76.0),
+        (14.0, 72.0),
+        (14.0, 64.0),
+        (13.0, 55.0),
+        (12.0, 44.0),
+        (12.0, 34.0),
     ];
 
     // Group paths by attribute: (polygons, attr_index)
     let groups: [(&[&[(f64, f64)]], usize); 3] = [
         (&[poly_bulb], 0),
         (&[poly_beam1, poly_beam2, poly_beam3, poly_beam4], 1),
-        (&[poly_fig1, poly_fig2, poly_fig3, poly_fig4, poly_fig5, poly_fig6], 2),
+        (
+            &[
+                poly_fig1, poly_fig2, poly_fig3, poly_fig4, poly_fig5, poly_fig6,
+            ],
+            2,
+        ),
     ];
 
     // Transform chain matches C++ idea.cpp exactly:
@@ -938,7 +1166,9 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let m_dx = 250.0_f64;
     let m_dy = 280.0_f64;
     let mut mtx = TransAffine::new();
-    mtx.multiply(&TransAffine::new_rotation(angle_deg * std::f64::consts::PI / 180.0));
+    mtx.multiply(&TransAffine::new_rotation(
+        angle_deg * std::f64::consts::PI / 180.0,
+    ));
     mtx.multiply(&TransAffine::new_translation(m_dx / 2.0, m_dy / 2.0 + 10.0));
     mtx.multiply(&TransAffine::new_scaling(w / m_dx, h / m_dy));
 
@@ -956,7 +1186,11 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 } else {
                     (*px, *py)
                 };
-                if i == 0 { path.move_to(x, y); } else { path.line_to(x, y); }
+                if i == 0 {
+                    path.move_to(x, y);
+                } else {
+                    path.line_to(x, y);
+                }
             }
             path.close_polygon(0);
 
@@ -981,7 +1215,11 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 } else {
                     let mut path2 = PathStorage::new();
                     for (i, (px, py)) in poly.iter().enumerate() {
-                        if i == 0 { path2.move_to(*px, *py); } else { path2.line_to(*px, *py); }
+                        if i == 0 {
+                            path2.move_to(*px, *py);
+                        } else {
+                            path2.line_to(*px, *py);
+                        }
                     }
                     path2.close_polygon(0);
 
@@ -1031,7 +1269,9 @@ pub fn idea(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 /// Simple portable PRNG matching C's srand(100)/rand() pattern.
 struct SimpleRng(u32);
 impl SimpleRng {
-    fn new(seed: u32) -> Self { SimpleRng(seed) }
+    fn new(seed: u32) -> Self {
+        SimpleRng(seed)
+    }
     fn next(&mut self) -> u32 {
         self.0 = self.0.wrapping_mul(1103515245).wrapping_add(12345);
         (self.0 >> 16) & 0x7FFF
@@ -1041,16 +1281,24 @@ impl SimpleRng {
     }
 }
 
-struct GraphNode { x: f64, y: f64 }
-struct GraphEdge { n1: usize, n2: usize }
+struct GraphNode {
+    x: f64,
+    y: f64,
+}
+struct GraphEdge {
+    n1: usize,
+    n2: usize,
+}
 
 /// Generate a random graph with seeded PRNG.
 fn generate_graph(num_nodes: usize, num_edges: usize) -> (Vec<GraphNode>, Vec<GraphEdge>) {
     let mut rng = SimpleRng::new(100);
-    let nodes: Vec<GraphNode> = (0..num_nodes).map(|_| GraphNode {
-        x: rng.next_f64() * 0.75 + 0.2,
-        y: rng.next_f64() * 0.85 + 0.1,
-    }).collect();
+    let nodes: Vec<GraphNode> = (0..num_nodes)
+        .map(|_| GraphNode {
+            x: rng.next_f64() * 0.75 + 0.2,
+            y: rng.next_f64() * 0.85 + 0.1,
+        })
+        .collect();
 
     let mut edges = Vec::with_capacity(num_edges);
     while edges.len() < num_edges {
@@ -1109,7 +1357,9 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Deterministic random colors for edges
     let mut color_rng = SimpleRng::new(100);
     // Skip the node generation RNG calls to stay in sync
-    for _ in 0..(200 * 2 + 100 * 2) { color_rng.next(); }
+    for _ in 0..(200 * 2 + 100 * 2) {
+        color_rng.next();
+    }
 
     let alpha: u32 = if translucent { 80 } else { 255 };
 
@@ -1145,10 +1395,14 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     // Bezier curves
                     let k = 0.5;
                     let curve = Curve4Div::new_with_points(
-                        x1, y1,
-                        x1 - (y2 - y1) * k, y1 + (x2 - x1) * k,
-                        x2 + (y2 - y1) * k, y2 - (x2 - x1) * k,
-                        x2, y2,
+                        x1,
+                        y1,
+                        x1 - (y2 - y1) * k,
+                        y1 + (x2 - x1) * k,
+                        x2 + (y2 - y1) * k,
+                        y2 - (x2 - x1) * k,
+                        x2,
+                        y2,
                     );
                     let mut stroke = ConvStroke::new(curve);
                     stroke.set_width(stroke_width);
@@ -1160,10 +1414,14 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     // Dashed curves
                     let k = 0.5;
                     let curve = Curve4Div::new_with_points(
-                        x1, y1,
-                        x1 - (y2 - y1) * k, y1 + (x2 - x1) * k,
-                        x2 + (y2 - y1) * k, y2 - (x2 - x1) * k,
-                        x2, y2,
+                        x1,
+                        y1,
+                        x1 - (y2 - y1) * k,
+                        y1 + (x2 - x1) * k,
+                        x2 + (y2 - y1) * k,
+                        y2 - (x2 - x1) * k,
+                        x2,
+                        y2,
                     );
                     let mut dash = ConvDash::new(curve);
                     dash.add_dash(6.0, 3.0);
@@ -1177,10 +1435,14 @@ pub fn graph_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     // Polygons (AA for type 3, threshold for type 4)
                     let k = 0.5;
                     let mut curve = Curve4Div::new_with_points(
-                        x1, y1,
-                        x1 - (y2 - y1) * k, y1 + (x2 - x1) * k,
-                        x2 + (y2 - y1) * k, y2 - (x2 - x1) * k,
-                        x2, y2,
+                        x1,
+                        y1,
+                        x1 - (y2 - y1) * k,
+                        y1 + (x2 - x1) * k,
+                        x2 + (y2 - y1) * k,
+                        y2 - (x2 - x1) * k,
+                        x2,
+                        y2,
                     );
                     ras.reset();
                     ras.add_path(&mut curve, 0);
@@ -1318,7 +1580,14 @@ pub fn gamma_tuner(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     // Black square background
-    rb.blend_bar(x_start, y_start, x_start + square_size - 1, y_start + square_size - 1, &black, 255);
+    rb.blend_bar(
+        x_start,
+        y_start,
+        x_start + square_size - 1,
+        y_start + square_size - 1,
+        &black,
+        255,
+    );
 
     // Alpha pattern
     let mut span1 = vec![Rgba8::new(0, 0, 0, 0); square_size as usize];
@@ -1338,37 +1607,71 @@ pub fn gamma_tuner(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             match pattern {
                 0 => {
                     // Horizontal: span1 = increasing alpha, span2 = decreasing
-                    span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_fwd };
-                    span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_rev };
+                    span1[j] = Rgba8 {
+                        r: c.r,
+                        g: c.g,
+                        b: c.b,
+                        a: alpha_fwd,
+                    };
+                    span2[j] = Rgba8 {
+                        r: c.r,
+                        g: c.g,
+                        b: c.b,
+                        a: alpha_rev,
+                    };
                 }
                 1 => {
                     // Vertical: odd columns = increasing, even = decreasing
                     let a = if (j & 1) != 0 { alpha_fwd } else { alpha_rev };
-                    span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a };
-                    span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a };
+                    span1[j] = Rgba8 {
+                        r: c.r,
+                        g: c.g,
+                        b: c.b,
+                        a,
+                    };
+                    span2[j] = Rgba8 {
+                        r: c.r,
+                        g: c.g,
+                        b: c.b,
+                        a,
+                    };
                 }
                 _ => {
                     // Checkered: alternate odd/even columns between spans
                     if (j & 1) != 0 {
-                        span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_fwd };
-                        span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_rev };
+                        span1[j] = Rgba8 {
+                            r: c.r,
+                            g: c.g,
+                            b: c.b,
+                            a: alpha_fwd,
+                        };
+                        span2[j] = Rgba8 {
+                            r: c.r,
+                            g: c.g,
+                            b: c.b,
+                            a: alpha_rev,
+                        };
                     } else {
-                        span2[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_fwd };
-                        span1[j] = Rgba8 { r: c.r, g: c.g, b: c.b, a: alpha_rev };
+                        span2[j] = Rgba8 {
+                            r: c.r,
+                            g: c.g,
+                            b: c.b,
+                            a: alpha_fwd,
+                        };
+                        span1[j] = Rgba8 {
+                            r: c.r,
+                            g: c.g,
+                            b: c.b,
+                            a: alpha_rev,
+                        };
                     }
                 }
             }
         }
 
-        rb.blend_color_hspan(
-            x_start, i + y_start, square_size,
-            &span1, &[], 255,
-        );
+        rb.blend_color_hspan(x_start, i + y_start, square_size, &span1, &[], 255);
         if i + 1 < square_size {
-            rb.blend_color_hspan(
-                x_start, i + 1 + y_start, square_size,
-                &span2, &[], 255,
-            );
+            rb.blend_color_hspan(x_start, i + 1 + y_start, square_size, &span2, &[], 255);
         }
     }
 
@@ -1492,7 +1795,7 @@ pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             10 => filter.calculate(&ImageFilterCatrom, normalize),
             11 => filter.calculate(&ImageFilterGaussian, normalize),
             12 => filter.calculate(&ImageFilterBessel, normalize),
-            13 => filter.calculate(&ImageFilterMitchell::new(1.0/3.0, 1.0/3.0), normalize),
+            13 => filter.calculate(&ImageFilterMitchell::new(1.0 / 3.0, 1.0 / 3.0), normalize),
             14 => filter.calculate(&ImageFilterSinc::new(radius), normalize),
             15 => filter.calculate(&ImageFilterLanczos::new(radius), normalize),
             _ => filter.calculate(&ImageFilterBlackman::new(radius), normalize),
@@ -1580,10 +1883,23 @@ pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     let filter_names = [
-        "simple (NN)", "bilinear", "bicubic", "spline16", "spline36",
-        "hanning", "hamming", "hermite", "kaiser", "quadric",
-        "catrom", "gaussian", "bessel", "mitchell", "sinc",
-        "lanczos", "blackman",
+        "simple (NN)",
+        "bilinear",
+        "bicubic",
+        "spline16",
+        "spline36",
+        "hanning",
+        "hamming",
+        "hermite",
+        "kaiser",
+        "quadric",
+        "catrom",
+        "gaussian",
+        "bessel",
+        "mitchell",
+        "sinc",
+        "lanczos",
+        "blackman",
     ];
     let mut m_filters = RboxCtrl::new(0.0, 0.0, 110.0, 210.0);
     m_filters.border_width(0.0, 0.0);
@@ -1782,8 +2098,7 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     // 1. Fill the solid triangles
     ras.reset();
     ras.add_path(&mut path, 0);
-    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-        &Rgba8::new(179, 128, 26, 128)); // rgba(0.7, 0.5, 0.1, 0.5)
+    render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(179, 128, 26, 128)); // rgba(0.7, 0.5, 0.1, 0.5)
 
     // 2. Smooth fill layer (matches C++ translucent smooth poly pass).
     {
@@ -1791,8 +2106,8 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         smooth_fill.set_smooth_value(smooth);
         ras.reset();
         ras.add_path(&mut smooth_fill, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-            &Rgba8::new(26, 128, 179, 26)); // rgba(0.1, 0.5, 0.7, 0.1)
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(26, 128, 179, 26));
+        // rgba(0.1, 0.5, 0.7, 0.1)
     }
 
     // 3. Outline stroke
@@ -1803,8 +2118,8 @@ pub fn conv_dash_marker_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
         outline.set_width(1.0);
         ras.reset();
         ras.add_path(&mut outline, 0);
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-            &Rgba8::new(0, 153, 0, 204)); // rgba(0.0, 0.6, 0.0, 0.8)
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(0, 153, 0, 204));
+        // rgba(0.0, 0.6, 0.0, 0.8)
     }
 
     // 4. Dashed stroked path
@@ -1940,8 +2255,8 @@ pub fn aa_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             ras.reset();
             ras.add_path(&mut stroke, 0);
         }
-        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb,
-            &Rgba8::new(255, 255, 255, 51)); // rgba(1,1,1,0.2)
+        render_scanlines_aa_solid(&mut ras, &mut sl, &mut rb, &Rgba8::new(255, 255, 255, 51));
+        // rgba(1,1,1,0.2)
     }
 
     // 20 ellipses — Group 1: Integral point sizes
@@ -2172,11 +2487,8 @@ pub fn aa_test(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             255,
         );
 
-        let mut gouraud = SpanGouraudRgba::new_with_triangle(
-            c1, c2, c2,
-            x1, y1, x2, y2, x3, y3,
-            0.0,
-        );
+        let mut gouraud =
+            SpanGouraudRgba::new_with_triangle(c1, c2, c2, x1, y1, x2, y2, x3, y3, 0.0);
         gouraud.prepare();
         ras.reset();
         ras.move_to_d(x1, y1);

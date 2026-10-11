@@ -89,7 +89,8 @@ impl<PF: PixelFormat> PixelFormat for PixfmtTransposer<PF> {
     ) {
         if !covers.is_empty() {
             for i in 0..len as usize {
-                self.pixf.blend_pixel(y, x + i as i32, &colors[i], covers[i]);
+                self.pixf
+                    .blend_pixel(y, x + i as i32, &colors[i], covers[i]);
             }
         } else {
             for i in 0..len as usize {

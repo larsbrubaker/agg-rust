@@ -29,7 +29,11 @@ pub fn render_demo(name: &str, width: u32, height: u32, params: &[f64]) -> Optio
         "simple_line" => render_simple_line(width, height, params),
         _ => return None,
     };
-    Some(PixelBuffer { width, height, data })
+    Some(PixelBuffer {
+        width,
+        height,
+        data,
+    })
 }
 
 /// List all available demo names.
@@ -54,12 +58,12 @@ pub fn available_demos() -> &'static [&'static str] {
 /// Render a simple line test for comparison debugging.
 fn render_simple_line(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     use agg_rust::color::Rgba8;
+    use agg_rust::path_storage::PathStorage;
     use agg_rust::pixfmt_rgba::PixfmtRgba32;
     use agg_rust::rasterizer_outline_aa::{OutlineAaJoin, RasterizerOutlineAa};
     use agg_rust::renderer_base::RendererBase;
     use agg_rust::renderer_outline_aa::{LineProfileAa, RendererOutlineAa};
     use agg_rust::rendering_buffer::RowAccessor;
-    use agg_rust::path_storage::PathStorage;
 
     let stride = (width * 4) as i32;
     let mut buf = vec![255u8; (width * height * 4) as usize];
@@ -75,8 +79,8 @@ fn render_simple_line(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     ras_oaa.set_round_cap(false);
     ras_oaa.set_line_join(OutlineAaJoin::Round);
 
-    use agg_rust::trans_affine::TransAffine;
     use agg_rust::conv_transform::ConvTransform;
+    use agg_rust::trans_affine::TransAffine;
 
     // Draw closed polygons (3+ vertices) through a transform, like lion_outline
     let mut path = PathStorage::new();
@@ -201,7 +205,12 @@ mod demo_smoke_tests {
 
     #[test]
     fn compositing_section_demos_render() {
-        for name in ["compositing", "compositing2", "flash_rasterizer", "flash_rasterizer2"] {
+        for name in [
+            "compositing",
+            "compositing2",
+            "flash_rasterizer",
+            "flash_rasterizer2",
+        ] {
             let out = render_demo(name, 64, 48, &[]);
             assert!(out.is_some(), "missing renderer for {name}");
             let out = out.unwrap();
@@ -214,7 +223,12 @@ mod demo_smoke_tests {
     #[test]
     fn demos_list_includes_compositing_section() {
         let demos = available_demos();
-        for name in ["compositing", "compositing2", "flash_rasterizer", "flash_rasterizer2"] {
+        for name in [
+            "compositing",
+            "compositing2",
+            "flash_rasterizer",
+            "flash_rasterizer2",
+        ] {
             assert!(demos.contains(&name), "available_demos missing {name}");
         }
     }

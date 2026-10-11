@@ -261,14 +261,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
     ///
     /// Exact port of C++ `pixfmt_rgb24_lcd::blend_solid_hspan`, adapted for
     /// RGBA32 byte layout.
-    fn blend_solid_hspan(
-        &mut self,
-        x: i32,
-        y: i32,
-        len: u32,
-        c: &Rgba8,
-        covers: &[CoverType],
-    ) {
+    fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Rgba8, covers: &[CoverType]) {
         let len = len as usize;
 
         // Step 1: Distribute coverage across 5-tap kernel
@@ -328,8 +321,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
                 if alpha == 255 * 255 {
                     row[byte_off] = rgb[channel];
                 } else {
-                    row[byte_off] =
-                        Self::blend_byte(row[byte_off], rgb[channel], alpha);
+                    row[byte_off] = Self::blend_byte(row[byte_off], rgb[channel], alpha);
                 }
                 // Ensure alpha channel is opaque for any touched pixel
                 row[pixel * BPP + 3] = 255;
@@ -358,11 +350,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
             }
 
             let c = &colors[k];
-            let cov = if !covers.is_empty() {
-                covers[k]
-            } else {
-                cover
-            };
+            let cov = if !covers.is_empty() { covers[k] } else { cover };
             let alpha = cov as i32 * c.a as i32;
             if alpha != 0 {
                 let byte_off = pixel * BPP + channel;
@@ -370,8 +358,7 @@ impl<'a> PixelFormat for PixfmtRgba32Lcd<'a> {
                 if alpha == 255 * 255 {
                     row[byte_off] = rgb[channel];
                 } else {
-                    row[byte_off] =
-                        Self::blend_byte(row[byte_off], rgb[channel], alpha);
+                    row[byte_off] = Self::blend_byte(row[byte_off], rgb[channel], alpha);
                 }
                 row[pixel * BPP + 3] = 255;
             }
@@ -399,9 +386,8 @@ mod tests {
 
         // Coverage 255 should distribute fully
         // prim + 2*sec + 2*tert should approximately equal 255
-        let total = lut.primary(255) as u32
-            + 2 * lut.secondary(255) as u32
-            + 2 * lut.tertiary(255) as u32;
+        let total =
+            lut.primary(255) as u32 + 2 * lut.secondary(255) as u32 + 2 * lut.tertiary(255) as u32;
         // Due to floor(), total may be slightly less than 255
         assert!(total <= 255);
         assert!(total >= 250, "total distribution = {}", total);
