@@ -1,0 +1,26 @@
+# Publishes agg-rust to crates.io from GitHub's network.
+#
+# Same route as agg-gui's publish workflow: the development machine's network path drops HTTPS
+# uploads larger than ~1.1MB, and publishing from CI keeps the token off the machine.
+#
+# Requires the repository secret CARGO_REGISTRY_TOKEN (a crates.io token with the
+# publish-update scope for agg-rust).
+#
+# agg-gui depends on agg-rust as `{ version, path }`: publish agg-rust first, then raise the
+# version requirement in agg-gui's member Cargo.toml files if agg-gui needs the new APIs, then
+# publish agg-gui.
+name: publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
