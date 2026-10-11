@@ -160,7 +160,7 @@ impl<'a, B: RgbBlender> PixfmtAlphaBlendRgb<'a, B> {
     /// Clear the entire buffer to a solid color.
     pub fn clear(&mut self, c: &Rgba8) {
         for y in 0..self.rbuf.height() as i32 {
-            for px in self.row_mut(y).chunks_exact_mut(BPP) {
+            for px in self.row_mut(y).as_chunks_mut::<BPP>().0 {
                 set(px, c);
             }
         }

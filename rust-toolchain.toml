@@ -1,0 +1,8 @@
+# Pins the toolchain so local checks and CI run the same clippy and rustfmt (a newer stable
+# clippy can fail CI on lints the local one does not have). Matches agg-gui's and
+# mattercad-rust's pin, the main consumers, so all three repos lint with the same rules.
+# Bump deliberately. The crate's MSRV is separate: `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

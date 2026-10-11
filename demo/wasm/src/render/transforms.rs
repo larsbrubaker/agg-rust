@@ -2761,7 +2761,7 @@ mod tests {
         let mut has_red = false;
         let mut has_green = false;
 
-        for px in buf.chunks_exact(4) {
+        for px in buf.as_chunks::<4>().0 {
             let r = px[0];
             let g = px[1];
             let b = px[2];
@@ -2871,7 +2871,9 @@ mod tests {
         ];
         let buf = blur_demo(w, h, &params);
         let non_white = buf
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|px| !(px[0] == 255 && px[1] == 255 && px[2] == 255))
             .count();
         assert!(

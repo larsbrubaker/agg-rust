@@ -122,7 +122,7 @@ render_scanlines_aa_solid(&mut ras, &mut sl, &mut ren_base, &Rgba8::new(200, 80,
 
 ### Prerequisites
 
-- Rust 1.70+ (`rustup install stable`)
+- Rust 1.88+ (the minimum supported version); `rust-toolchain.toml` pins the toolchain CI and local checks use, which rustup installs automatically
 - wasm-pack (for WASM demos)
 - Bun (for demo dev server)
 

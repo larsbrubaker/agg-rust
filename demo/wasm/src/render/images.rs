@@ -434,7 +434,7 @@ fn apply_image_transform(
     let angle_rad = angle_deg * std::f64::consts::PI / 180.0;
 
     // Clear destination to white
-    for chunk in dst.chunks_exact_mut(4) {
+    for chunk in dst.as_chunks_mut::<4>().0 {
         chunk[0] = 255;
         chunk[1] = 255;
         chunk[2] = 255;

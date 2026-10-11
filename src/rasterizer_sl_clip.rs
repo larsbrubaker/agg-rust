@@ -6,6 +6,9 @@
 //! Provides two concrete clipper types:
 //! - `RasterizerSlClipInt` — default, with viewport clipping
 //! - `RasterizerSlNoClip` — passthrough, no clipping
+//!
+//! The clip interpolation runs in `i64` where C++ overflows `int` on
+//! coordinates far outside the 24.8 range (see `interpolate`).
 
 use crate::basics::{iround, Rect, POLY_SUBPIXEL_SCALE};
 use crate::clip_liang_barsky::{clipping_flags, clipping_flags_y};
@@ -33,10 +36,40 @@ fn yi(v: i32) -> i32 {
     v
 }
 
-/// Mul-div for integer coordinates: round(a * b / c).
+/// Mul-div for integer coordinates: round(a * b / c), rounding half away
+/// from zero like `iround`, in `i64` (see `interpolate`).
 #[inline]
-fn mul_div(a: i32, b: i32, c: i32) -> i32 {
-    iround(a as f64 * b as f64 / c as f64)
+fn mul_div(a: i64, b: i64, c: i64) -> i64 {
+    let v = a as f64 * b as f64 / c as f64;
+    if v < 0.0 {
+        (v - 0.5) as i64
+    } else {
+        (v + 0.5) as i64
+    }
+}
+
+/// The coordinate `q` where the segment (a1, q1)-(a2, q2) crosses
+/// `a = bound`: C++'s `q1 + mul_div(bound - a1, q2 - q1, a2 - a1)`.
+///
+/// Divergence from C++: `agg_rasterizer_sl_clip.h` evaluates those
+/// differences and the sum in `int`. A coordinate far outside the 24.8
+/// fixed-point range (1e12 pixels, say) upscales to a saturated
+/// `i32::MIN`/`MAX`, and `x2 - x1` then overflows: undefined behaviour in
+/// C++, a panic in an overflow-checked Rust build, and an answer right only
+/// by luck in a wrapping one. Everything here is computed in `i64`, where
+/// the differences of two `i32`s cannot overflow. For input whose
+/// differences fit in `i32` the result is identical to C++'s (the `f64`
+/// product and quotient see the same exact integers). The crossing lies
+/// between `q1` and `q2`, so it fits in `i32`; the clamp only guards
+/// against `f64` rounding at the extremes.
+#[inline]
+fn interpolate(bound: i32, a1: i32, a2: i32, q1: i32, q2: i32) -> i32 {
+    let d = mul_div(
+        bound as i64 - a1 as i64,
+        q2 as i64 - q1 as i64,
+        a2 as i64 - a1 as i64,
+    );
+    (q1 as i64 + d).clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
 // ============================================================================
@@ -118,14 +151,14 @@ impl RasterizerSlClipInt {
                 }
                 1 => {
                     // x2 > clip.x2
-                    let y3 = y1 + mul_div(self.clip_box.x2 - x1, y2 - y1, x2 - x1);
+                    let y3 = interpolate(self.clip_box.x2, x1, x2, y1, y2);
                     let f3 = clipping_flags_y(y3, &self.clip_box);
                     self.line_clip_y(ras, x1, y1, self.clip_box.x2, y3, f1, f3);
                     self.line_clip_y(ras, self.clip_box.x2, y3, self.clip_box.x2, y2, f3, f2);
                 }
                 2 => {
                     // x1 > clip.x2
-                    let y3 = y1 + mul_div(self.clip_box.x2 - x1, y2 - y1, x2 - x1);
+                    let y3 = interpolate(self.clip_box.x2, x1, x2, y1, y2);
                     let f3 = clipping_flags_y(y3, &self.clip_box);
                     self.line_clip_y(ras, self.clip_box.x2, y1, self.clip_box.x2, y3, f1, f3);
                     self.line_clip_y(ras, self.clip_box.x2, y3, x2, y2, f3, f2);
@@ -136,15 +169,15 @@ impl RasterizerSlClipInt {
                 }
                 4 => {
                     // x2 < clip.x1
-                    let y3 = y1 + mul_div(self.clip_box.x1 - x1, y2 - y1, x2 - x1);
+                    let y3 = interpolate(self.clip_box.x1, x1, x2, y1, y2);
                     let f3 = clipping_flags_y(y3, &self.clip_box);
                     self.line_clip_y(ras, x1, y1, self.clip_box.x1, y3, f1, f3);
                     self.line_clip_y(ras, self.clip_box.x1, y3, self.clip_box.x1, y2, f3, f2);
                 }
                 6 => {
                     // x1 > clip.x2 && x2 < clip.x1
-                    let y3 = y1 + mul_div(self.clip_box.x2 - x1, y2 - y1, x2 - x1);
-                    let y4 = y1 + mul_div(self.clip_box.x1 - x1, y2 - y1, x2 - x1);
+                    let y3 = interpolate(self.clip_box.x2, x1, x2, y1, y2);
+                    let y4 = interpolate(self.clip_box.x1, x1, x2, y1, y2);
                     let f3 = clipping_flags_y(y3, &self.clip_box);
                     let f4 = clipping_flags_y(y4, &self.clip_box);
                     self.line_clip_y(ras, self.clip_box.x2, y1, self.clip_box.x2, y3, f1, f3);
@@ -153,15 +186,15 @@ impl RasterizerSlClipInt {
                 }
                 8 => {
                     // x1 < clip.x1
-                    let y3 = y1 + mul_div(self.clip_box.x1 - x1, y2 - y1, x2 - x1);
+                    let y3 = interpolate(self.clip_box.x1, x1, x2, y1, y2);
                     let f3 = clipping_flags_y(y3, &self.clip_box);
                     self.line_clip_y(ras, self.clip_box.x1, y1, self.clip_box.x1, y3, f1, f3);
                     self.line_clip_y(ras, self.clip_box.x1, y3, x2, y2, f3, f2);
                 }
                 9 => {
                     // x1 < clip.x1 && x2 > clip.x2
-                    let y3 = y1 + mul_div(self.clip_box.x1 - x1, y2 - y1, x2 - x1);
-                    let y4 = y1 + mul_div(self.clip_box.x2 - x1, y2 - y1, x2 - x1);
+                    let y3 = interpolate(self.clip_box.x1, x1, x2, y1, y2);
+                    let y4 = interpolate(self.clip_box.x2, x1, x2, y1, y2);
                     let f3 = clipping_flags_y(y3, &self.clip_box);
                     let f4 = clipping_flags_y(y4, &self.clip_box);
                     self.line_clip_y(ras, self.clip_box.x1, y1, self.clip_box.x1, y3, f1, f3);
@@ -216,25 +249,25 @@ impl RasterizerSlClipInt {
 
             if f1 & 8 != 0 {
                 // y1 < clip.y1
-                tx1 = x1 + mul_div(self.clip_box.y1 - y1, x2 - x1, y2 - y1);
+                tx1 = interpolate(self.clip_box.y1, y1, y2, x1, x2);
                 ty1 = self.clip_box.y1;
             }
 
             if f1 & 2 != 0 {
                 // y1 > clip.y2
-                tx1 = x1 + mul_div(self.clip_box.y2 - y1, x2 - x1, y2 - y1);
+                tx1 = interpolate(self.clip_box.y2, y1, y2, x1, x2);
                 ty1 = self.clip_box.y2;
             }
 
             if f2 & 8 != 0 {
                 // y2 < clip.y1
-                tx2 = x1 + mul_div(self.clip_box.y1 - y1, x2 - x1, y2 - y1);
+                tx2 = interpolate(self.clip_box.y1, y1, y2, x1, x2);
                 ty2 = self.clip_box.y1;
             }
 
             if f2 & 2 != 0 {
                 // y2 > clip.y2
-                tx2 = x1 + mul_div(self.clip_box.y2 - y1, x2 - x1, y2 - y1);
+                tx2 = interpolate(self.clip_box.y2, y1, y2, x1, x2);
                 ty2 = self.clip_box.y2;
             }
 
@@ -331,6 +364,7 @@ mod tests {
         assert_eq!(mul_div(10, 20, 5), 40);
         assert_eq!(mul_div(0, 100, 1), 0);
         assert_eq!(mul_div(7, 3, 2), 11); // round(10.5) = 11
+        assert_eq!(mul_div(-7, 3, 2), -11); // half away from zero, as iround
     }
 
     // ------------------------------------------------------------------
@@ -460,6 +494,83 @@ mod tests {
         ras.sort_cells();
 
         assert!(ras.total_cells() > 0);
+    }
+
+    /// Sorted (x, y, cover, area) of every cell, for comparing two outlines.
+    fn cell_list(ras: &mut RasterizerCellsAa) -> Vec<(i32, i32, i32, i32)> {
+        ras.sort_cells();
+        let mut cells: Vec<_> = ras
+            .cells()
+            .iter()
+            .map(|c| (c.x, c.y, c.cover, c.area))
+            .collect();
+        cells.sort_unstable();
+        cells
+    }
+
+    /// Feeds a closed polygon in double coordinates through a clipper with
+    /// a 100x100 pixel clip box and returns its cells.
+    fn clipped_polygon_cells(points: &[(f64, f64)]) -> Vec<(i32, i32, i32, i32)> {
+        let s = POLY_SUBPIXEL_SCALE as i32;
+        let mut clip = RasterizerSlClipInt::new();
+        clip.clip_box(0, 0, 100 * s, 100 * s);
+        let mut ras = RasterizerCellsAa::new();
+        clip.move_to_d(points[0].0, points[0].1);
+        for &(x, y) in &points[1..] {
+            clip.line_to_d(&mut ras, x, y);
+        }
+        clip.line_to_d(&mut ras, points[0].0, points[0].1);
+        cell_list(&mut ras)
+    }
+
+    /// Divergence from C++: `agg_rasterizer_sl_clip.h` computes `x2 - x1`,
+    /// `y2 - y1` and `clip - x1` in `int`. A coordinate far outside the
+    /// 24.8 range (1e12 here) saturates to `i32::MIN`/`MAX` on upscale, and
+    /// those differences overflow (undefined behaviour in C++, a panic in
+    /// an overflow-checked Rust build). The clip computes them in `i64`, so
+    /// extreme coordinates clip to the same cells as in-range ones.
+    #[test]
+    fn test_clip_int_extreme_coordinates_clip_like_in_range_ones() {
+        let huge = 1e12;
+        // Every clip case with both x endpoints outside (9, 6) and the
+        // y clip on both ends: a diagonal through the box, both directions.
+        let diag_huge = clipped_polygon_cells(&[(-huge, -huge), (huge, huge), (huge, -huge)]);
+        let diag_in_range =
+            clipped_polygon_cells(&[(-50.0, -50.0), (150.0, 150.0), (150.0, -50.0)]);
+        assert!(!diag_in_range.is_empty());
+        assert_eq!(diag_huge, diag_in_range);
+
+        // A rectangle covering the whole box.
+        let rect_huge =
+            clipped_polygon_cells(&[(-huge, -huge), (huge, -huge), (huge, huge), (-huge, huge)]);
+        let rect_in_range =
+            clipped_polygon_cells(&[(-8.0, -8.0), (108.0, -8.0), (108.0, 108.0), (-8.0, 108.0)]);
+        assert!(!rect_in_range.is_empty());
+        assert_eq!(rect_huge, rect_in_range);
+
+        // One edge running far off the right (cases 1 and 2): the clipped
+        // y at the box edge is exact for a horizontal band.
+        let band_huge =
+            clipped_polygon_cells(&[(10.0, 10.0), (huge, 10.0), (huge, 20.0), (10.0, 20.0)]);
+        let band_in_range =
+            clipped_polygon_cells(&[(10.0, 10.0), (200.0, 10.0), (200.0, 20.0), (10.0, 20.0)]);
+        assert!(!band_in_range.is_empty());
+        assert_eq!(band_huge, band_in_range);
+    }
+
+    /// The interpolated y of a segment from `i32::MIN` to `i32::MAX` in both
+    /// axes, clipped at x = 0, is 0 (the midpoint), not an `i32` wrap.
+    #[test]
+    fn test_clip_int_saturated_segment_interpolates_in_i64() {
+        let s = POLY_SUBPIXEL_SCALE as i32;
+        let mut clip = RasterizerSlClipInt::new();
+        clip.clip_box(0, 0, 100 * s, 100 * s);
+        let mut ras = RasterizerCellsAa::new();
+        clip.move_to(i32::MIN, i32::MIN);
+        clip.line_to(&mut ras, i32::MAX, i32::MAX);
+        let mut expected = RasterizerCellsAa::new();
+        expected.line(0, 0, 100 * s, 100 * s);
+        assert_eq!(cell_list(&mut ras), cell_list(&mut expected));
     }
 
     #[test]

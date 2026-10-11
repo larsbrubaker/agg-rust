@@ -83,7 +83,7 @@ agg-rust/
 name = "agg-rust"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.88"
 license = "BSD-3-Clause"
 description = "Pure Rust port of Anti-Grain Geometry (AGG) 2.6 - high quality 2D vector graphics rendering"
 repository = "https://github.com/anthropics/agg-rust"

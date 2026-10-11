@@ -232,10 +232,13 @@ impl<'a> RgbaRaw<'a> {
         let start = x as usize * BPP;
         // Fill a whole pixel at a time via a chunked pattern copy. The C++ equivalent
         // stores one pixel_type per pixel; writing the 4-byte pattern over
-        // chunks_exact_mut lets the optimizer vectorize the fill instead of emitting
+        // as_chunks_mut lets the optimizer vectorize the fill instead of emitting
         // four individually-indexed byte stores per pixel.
         let pat = [c.r, c.g, c.b, c.a];
-        for px in row[start..start + len as usize * BPP].chunks_exact_mut(BPP) {
+        for px in row[start..start + len as usize * BPP]
+            .as_chunks_mut::<BPP>()
+            .0
+        {
             px.copy_from_slice(&pat);
         }
     }

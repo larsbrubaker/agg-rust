@@ -69,7 +69,7 @@ impl<'a> PixfmtRgb24<'a> {
     /// Port of C++ `pixfmt_alpha_blend_rgb::apply_gamma_dir` (`apply_gamma_dir_rgb`).
     pub fn apply_gamma_dir(&mut self, gamma: &crate::gamma::GammaLut) {
         for y in 0..self.rbuf.height() as i32 {
-            for p in self.row_mut(y).chunks_exact_mut(BPP) {
+            for p in self.row_mut(y).as_chunks_mut::<BPP>().0 {
                 p[0] = gamma.dir(p[0]);
                 p[1] = gamma.dir(p[1]);
                 p[2] = gamma.dir(p[2]);
@@ -82,7 +82,7 @@ impl<'a> PixfmtRgb24<'a> {
     /// Port of C++ `pixfmt_alpha_blend_rgb::apply_gamma_inv` (`apply_gamma_inv_rgb`).
     pub fn apply_gamma_inv(&mut self, gamma: &crate::gamma::GammaLut) {
         for y in 0..self.rbuf.height() as i32 {
-            for p in self.row_mut(y).chunks_exact_mut(BPP) {
+            for p in self.row_mut(y).as_chunks_mut::<BPP>().0 {
                 p[0] = gamma.inv(p[0]);
                 p[1] = gamma.inv(p[1]);
                 p[2] = gamma.inv(p[2]);

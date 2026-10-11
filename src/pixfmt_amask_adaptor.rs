@@ -275,7 +275,7 @@ mod tests {
     }
 
     fn alphas(buf: &[u8]) -> Vec<u8> {
-        buf.chunks_exact(4).map(|p| p[3]).collect()
+        buf.as_chunks::<4>().0.iter().map(|p| p[3]).collect()
     }
 
     #[test]

@@ -21,7 +21,7 @@ fn flat_field_stays_exact() {
     ] {
         let color = [value as u8, (255 - value) as u8, (value / 2) as u8, 255];
         let mut image = Image::new(60, 40);
-        for px in image.buf.chunks_exact_mut(4) {
+        for px in image.buf.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&color);
         }
 

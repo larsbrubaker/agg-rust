@@ -1019,8 +1019,6 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let a = c.a;
             // Iterate fixed [u8; 4] pixels so each blend sees a bounds-check-free
             // 4-byte array, letting the load/compute/store stay in XMM registers.
-            #[allow(clippy::incompatible_msrv)]
-            // slice::as_chunks_mut is 1.88; reported against rust-version 1.70
             let (pixels, _rem) = span.as_chunks_mut::<BPP>();
             for px in pixels {
                 blend(px, r, g, b, a, cover);
@@ -1038,8 +1036,6 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             let g = Rgba8::multiply(c.g, c.a);
             let b = Rgba8::multiply(c.b, c.a);
             let a = c.a;
-            #[allow(clippy::incompatible_msrv)]
-            // slice::as_chunks_mut is 1.88; reported against rust-version 1.70
             let (pixels, _rem) = span.as_chunks_mut::<BPP>();
             for (px, &cov) in pixels.iter_mut().zip(covers.iter()) {
                 blend(px, r, g, b, a, cov);
@@ -1063,8 +1059,6 @@ impl<'a> PixelFormat for PixfmtRgba32CompOp<'a> {
             // Colour differs per pixel here, so the premultiply must stay per pixel
             // (matching comp_op_adaptor_rgba). The single outer op-dispatch and the
             // pre-sliced span are what remove the overhead.
-            #[allow(clippy::incompatible_msrv)]
-            // slice::as_chunks_mut is 1.88; reported against rust-version 1.70
             let (pixels, _rem) = span.as_chunks_mut::<BPP>();
             if covers.is_empty() {
                 for (px, c) in pixels.iter_mut().zip(colors.iter()) {

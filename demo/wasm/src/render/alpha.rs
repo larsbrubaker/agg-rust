@@ -2541,7 +2541,9 @@ mod tests {
         assert_eq!(img.len(), 400 * 400 * 4);
         // At least one pixel should differ from the white clear color.
         assert!(img
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px[0] != 255 || px[1] != 255 || px[2] != 255 || px[3] != 255));
     }
 
@@ -2551,7 +2553,9 @@ mod tests {
         let img = alpha_mask3(640, 520, &[3.0, 0.0, 320.0, 260.0]);
         assert_eq!(img.len(), 640 * 520 * 4);
         assert!(img
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px[0] != 255 || px[1] != 255 || px[2] != 255 || px[3] != 255));
     }
 }

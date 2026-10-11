@@ -42,7 +42,7 @@ impl Image {
 impl Image {
     /// Every pixel set to `color`.
     pub fn fill(&mut self, color: [u8; 4]) {
-        for px in self.buf.chunks_exact_mut(4) {
+        for px in self.buf.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&color);
         }
     }

@@ -79,7 +79,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let angle_rad = angle_deg * std::f64::consts::PI / 180.0;
 
         // Clear destination to white
-        for chunk in dst_data.chunks_exact_mut(4) {
+        for chunk in dst_data.as_chunks_mut::<4>().0 {
             chunk[0] = 255;
             chunk[1] = 255;
             chunk[2] = 255;

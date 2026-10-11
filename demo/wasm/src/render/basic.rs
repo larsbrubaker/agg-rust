@@ -1337,7 +1337,9 @@ mod circles_tests {
     use super::circles;
 
     fn non_white_pixels(buf: &[u8]) -> usize {
-        buf.chunks_exact(4)
+        buf.as_chunks::<4>()
+            .0
+            .iter()
             .filter(|px| px[0] != 255 || px[1] != 255 || px[2] != 255)
             .count()
     }
