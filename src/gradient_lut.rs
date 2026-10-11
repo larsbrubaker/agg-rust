@@ -259,18 +259,32 @@ impl ColorFunction for GradientLut {
 
 /// Simple 2-color linear gradient color function.
 ///
-/// Interpolates between two colors based on index/size ratio.
+/// Port of C++ `gradient_linear_color<rgba8>`: color `v` is
+/// `c1.gradient(c2, v * mult)` with the stored reciprocal
+/// `mult = 1 / (size - 1)`. C++ multiplies by the reciprocal rather than
+/// dividing by `size - 1`; the two round differently (for `size = 7`,
+/// `v = 5` the 8-bit weight is 212 one way and 213 the other), so the
+/// multiplication is kept to match C++ bit for bit.
 ///
-/// Port of C++ `gradient_linear_color<ColorT>`.
+/// Sizes below 2 use `mult = 1`: C++'s `1 / (size - 1)` is infinite for
+/// `size = 1`, making color 0 `gradient(c2, 0 * inf)`, a NaN weight whose
+/// integer conversion is undefined behaviour in C++. With `mult = 1` the
+/// only valid index, 0, yields `c1`.
 pub struct GradientLinearColor {
     c1: Rgba8,
     c2: Rgba8,
     size: usize,
+    mult: f64,
 }
 
 impl GradientLinearColor {
     pub fn new(c1: Rgba8, c2: Rgba8, size: usize) -> Self {
-        Self { c1, c2, size }
+        Self {
+            c1,
+            c2,
+            size,
+            mult: 1.0 / (size.max(2) as f64 - 1.0),
+        }
     }
 
     pub fn colors(&mut self, c1: Rgba8, c2: Rgba8) {
@@ -287,8 +301,7 @@ impl ColorFunction for GradientLinearColor {
     }
 
     fn get(&self, index: usize) -> Rgba8 {
-        self.c1
-            .gradient(&self.c2, index as f64 / (self.size - 1).max(1) as f64)
+        self.c1.gradient(&self.c2, index as f64 * self.mult)
     }
 }
 
@@ -343,6 +356,43 @@ impl ColorFunction for GradientLinearColorF32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C++ `gradient_linear_color<rgba8>` weights color `v` by `v * (1 / (size - 1))`,
+    /// not `v / (size - 1)`. The two differ in the last bit for some `v`, which flips
+    /// the 8-bit weight: black to white at size 7, index 5 is 212 in C++ (213 when
+    /// dividing). Every index of a few sizes must match the C++ arithmetic.
+    #[test]
+    fn test_gradient_linear_color_matches_cpp_reciprocal() {
+        let c1 = Rgba8::new(0, 0, 0, 255);
+        let c2 = Rgba8::new(255, 255, 255, 255);
+        assert_eq!(GradientLinearColor::new(c1, c2, 7).get(5).r, 212);
+        assert_eq!(GradientLinearColor::new(c1, c2, 35).get(3).r, 22);
+        assert_eq!(GradientLinearColor::new(c1, c2, 31).get(23).r, 195);
+        let c1 = Rgba8::new(10, 200, 30, 0);
+        let c2 = Rgba8::new(240, 20, 130, 255);
+        for size in [2usize, 7, 13, 31, 35, 69, 256] {
+            let gc = GradientLinearColor::new(c1, c2, size);
+            let mult = 1.0 / (size as f64 - 1.0);
+            for v in 0..size {
+                let c = gc.get(v);
+                let e = c1.gradient(&c2, v as f64 * mult);
+                assert_eq!(
+                    (c.r, c.g, c.b, c.a),
+                    (e.r, e.g, e.b, e.a),
+                    "size {size} v {v}"
+                );
+            }
+        }
+    }
+
+    /// Size 1 is guarded (C++ computes a NaN weight there): its only color is `c1`.
+    #[test]
+    fn test_gradient_linear_color_size_one_is_start_color() {
+        let c1 = Rgba8::new(10, 20, 30, 40);
+        let c2 = Rgba8::new(250, 240, 230, 220);
+        let c = GradientLinearColor::new(c1, c2, 1).get(0);
+        assert_eq!((c.r, c.g, c.b, c.a), (10, 20, 30, 40));
+    }
 
     #[test]
     fn test_gradient_lut_new() {
