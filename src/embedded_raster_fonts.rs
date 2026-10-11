@@ -3828,3 +3828,47 @@ pub static VERDANA18_BOLD: &[u8] = &[
     0x20, 0x08, 0x20, 0x08, 0x20, 0x08, 0x20, 0x08, 0x20, 0x08, 0x20, 0x08, 0x20, 0x08, 0x20, 0x08,
     0x20, 0x08, 0x3f, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
+
+/// Every embedded font with its C++ name, in `agg_embedded_raster_fonts.h`'s order, so a caller
+/// can offer the fonts by name (as agg-sharp's `EmbeddedRasterFonts.Names`/`Get` do).
+pub static FONTS: [(&str, &[u8]); 34] = [
+    ("gse4x6", GSE4X6),
+    ("gse4x8", GSE4X8),
+    ("gse5x7", GSE5X7),
+    ("gse5x9", GSE5X9),
+    ("gse6x12", GSE6X12),
+    ("gse6x9", GSE6X9),
+    ("gse7x11", GSE7X11),
+    ("gse7x11_bold", GSE7X11_BOLD),
+    ("gse7x15", GSE7X15),
+    ("gse7x15_bold", GSE7X15_BOLD),
+    ("gse8x16", GSE8X16),
+    ("gse8x16_bold", GSE8X16_BOLD),
+    ("mcs11_prop", MCS11_PROP),
+    ("mcs11_prop_condensed", MCS11_PROP_CONDENSED),
+    ("mcs12_prop", MCS12_PROP),
+    ("mcs13_prop", MCS13_PROP),
+    ("mcs5x10_mono", MCS5X10_MONO),
+    ("mcs5x11_mono", MCS5X11_MONO),
+    ("mcs6x10_mono", MCS6X10_MONO),
+    ("mcs6x11_mono", MCS6X11_MONO),
+    ("mcs7x12_mono_high", MCS7X12_MONO_HIGH),
+    ("mcs7x12_mono_low", MCS7X12_MONO_LOW),
+    ("verdana12", VERDANA12),
+    ("verdana12_bold", VERDANA12_BOLD),
+    ("verdana13", VERDANA13),
+    ("verdana13_bold", VERDANA13_BOLD),
+    ("verdana14", VERDANA14),
+    ("verdana14_bold", VERDANA14_BOLD),
+    ("verdana16", VERDANA16),
+    ("verdana16_bold", VERDANA16_BOLD),
+    ("verdana17", VERDANA17),
+    ("verdana17_bold", VERDANA17_BOLD),
+    ("verdana18", VERDANA18),
+    ("verdana18_bold", VERDANA18_BOLD),
+];
+
+/// The embedded font named `name` (its C++ identifier, e.g. `"verdana12"`), if there is one.
+pub fn by_name(name: &str) -> Option<&'static [u8]> {
+    FONTS.iter().find(|(n, _)| *n == name).map(|(_, f)| *f)
+}

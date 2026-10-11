@@ -101,7 +101,6 @@ where
         let mut dy = -ry;
 
         loop {
-            ei.next();
             dx += ei.dx();
             dy += ei.dy();
             let lc = self.line_color.clone();
@@ -109,6 +108,8 @@ where
             self.ren.blend_pixel(x + dx, y - dy, &lc, COVER_FULL);
             self.ren.blend_pixel(x - dx, y - dy, &lc, COVER_FULL);
             self.ren.blend_pixel(x - dx, y + dy, &lc, COVER_FULL);
+            // C++ draws with the interpolator's current step, then advances it (`++ei`).
+            ei.next();
             if dy >= 0 {
                 break;
             }
@@ -124,7 +125,6 @@ where
         let mut dx0 = dx;
 
         loop {
-            ei.next();
             dx += ei.dx();
             dy += ei.dy();
 
@@ -137,6 +137,8 @@ where
             }
             dx0 = dx;
             dy0 = dy;
+            // C++ draws with the interpolator's current step, then advances it (`++ei`).
+            ei.next();
             if dy >= 0 {
                 break;
             }
@@ -153,7 +155,6 @@ where
         let mut dy = -ry;
 
         loop {
-            ei.next();
             dx += ei.dx();
             dy += ei.dy();
 
@@ -170,6 +171,8 @@ where
                 self.ren
                     .blend_hline(x - dx + 1, y - dy, x + dx - 1, &fc, COVER_FULL);
             }
+            // C++ draws with the interpolator's current step, then advances it (`++ei`).
+            ei.next();
             if dy >= 0 {
                 break;
             }
