@@ -6,7 +6,7 @@
 //! Provides the `PixelFormat` trait and `PixfmtRgba32` concrete implementation.
 
 use crate::basics::CoverType;
-use crate::color::Rgba8;
+use crate::color::{Gray8, Rgba8};
 use crate::rendering_buffer::RowAccessor;
 
 // ============================================================================
@@ -62,6 +62,69 @@ pub trait PixelFormat {
 
     /// Get the pixel color at (x, y).
     fn pixel(&self, x: i32, y: i32) -> Self::ColorType;
+
+    /// Copy (overwrite) a vertical line of `len` pixels with color `c`.
+    ///
+    /// Port of C++ pixfmt `copy_vline`, which copies the color into each
+    /// pixel of the column in turn.
+    fn copy_vline(&mut self, x: i32, y: i32, len: u32, c: &Self::ColorType) {
+        for i in 0..len as i32 {
+            self.copy_pixel(x, y + i, c);
+        }
+    }
+
+    /// Blend `color` into `len` pixels starting at (xdst, ydst), using each
+    /// byte of the gray8 buffer `from` (one byte per pixel), starting at
+    /// (xsrc, ysrc), as that pixel's coverage, scaled by `cover`.
+    ///
+    /// Port of C++ pixfmt `blend_from_color`: every pixfmt runs
+    /// `copy_or_blend_pix(pdst, color, gray8::scale_cover(cover, *psrc))`,
+    /// which is this format's `blend_pixel`. The caller (`RendererBase`)
+    /// has already clipped the run to both buffers.
+    #[allow(clippy::too_many_arguments)]
+    fn blend_from_color(
+        &mut self,
+        from: &RowAccessor,
+        color: &Self::ColorType,
+        xdst: i32,
+        ydst: i32,
+        xsrc: i32,
+        ysrc: i32,
+        len: u32,
+        cover: CoverType,
+    ) {
+        let src = from.row_slice(ysrc as u32);
+        for i in 0..len as usize {
+            let gray = src[xsrc as usize + i];
+            self.blend_pixel(xdst + i as i32, ydst, color, Gray8::mult_cover(gray, cover));
+        }
+    }
+
+    /// Blend into `len` pixels starting at (xdst, ydst) the colors of
+    /// `color_lut` that the bytes of the gray8 buffer `from` (one byte per
+    /// pixel, starting at (xsrc, ysrc)) index, at coverage `cover`.
+    ///
+    /// Port of C++ pixfmt `blend_from_lut`: `copy_or_blend_pix(pdst,
+    /// color_lut[*psrc], cover)`, which is this format's `blend_pixel`.
+    /// `color_lut` must hold 256 entries.
+    #[allow(clippy::too_many_arguments)]
+    fn blend_from_lut(
+        &mut self,
+        from: &RowAccessor,
+        color_lut: &[Self::ColorType],
+        xdst: i32,
+        ydst: i32,
+        xsrc: i32,
+        ysrc: i32,
+        len: u32,
+        cover: CoverType,
+    ) {
+        let src = from.row_slice(ysrc as u32);
+        for i in 0..len as usize {
+            let index = src[xsrc as usize + i] as usize;
+            self.blend_pixel(xdst + i as i32, ydst, &color_lut[index], cover);
+        }
+    }
 }
 
 const BPP: usize = 4; // bytes per pixel

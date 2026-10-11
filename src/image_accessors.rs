@@ -382,7 +382,10 @@ impl WrapMode for WrapModeReflectAutoPow2 {
 /// Port of C++ `image_accessor_clip<PixFmt>`.
 pub struct ImageAccessorClip<'a, const PIX_WIDTH: usize> {
     rbuf: &'a RowAccessor,
-    bk_buf: [u8; 8], // background color buffer (max 8 bytes per pixel)
+    // Background pixel, laid out as the image's pixels are. Sized by the pixel
+    // width as C++'s `int8u m_bk_buf[pix_width]` is, so wide formats (a float
+    // RGBA pixel is 16 bytes) get their whole background back.
+    bk_buf: [u8; PIX_WIDTH],
     x: i32,
     x0: i32,
     y: i32,
@@ -392,8 +395,8 @@ pub struct ImageAccessorClip<'a, const PIX_WIDTH: usize> {
 
 impl<'a, const PIX_WIDTH: usize> ImageAccessorClip<'a, PIX_WIDTH> {
     pub fn new(rbuf: &'a RowAccessor, bk_color: &[u8]) -> Self {
-        let mut bk_buf = [0u8; 8];
-        let len = bk_color.len().min(8);
+        let mut bk_buf = [0u8; PIX_WIDTH];
+        let len = bk_color.len().min(PIX_WIDTH);
         bk_buf[..len].copy_from_slice(&bk_color[..len]);
         Self {
             rbuf,
@@ -407,7 +410,7 @@ impl<'a, const PIX_WIDTH: usize> ImageAccessorClip<'a, PIX_WIDTH> {
     }
 
     pub fn set_background(&mut self, bk_color: &[u8]) {
-        let len = bk_color.len().min(8);
+        let len = bk_color.len().min(PIX_WIDTH);
         self.bk_buf[..len].copy_from_slice(&bk_color[..len]);
     }
 
@@ -421,7 +424,7 @@ impl<'a, const PIX_WIDTH: usize> ImageAccessorClip<'a, PIX_WIDTH> {
             let off = self.x as usize * PIX_WIDTH;
             &row[off..off + PIX_WIDTH]
         } else {
-            &self.bk_buf[..PIX_WIDTH]
+            &self.bk_buf
         }
     }
 
@@ -870,7 +873,13 @@ mod tests {
         let rbuf = make_rgba_buffer(4, 4, &mut data);
         for y in 0..4u32 {
             for x in 0..4u32 {
-                set_rgba_pixel(&mut data, 4, x, y, [x as u8, y as u8, (x * 4 + y) as u8, 255]);
+                set_rgba_pixel(
+                    &mut data,
+                    4,
+                    x,
+                    y,
+                    [x as u8, y as u8, (x * 4 + y) as u8, 255],
+                );
             }
         }
 

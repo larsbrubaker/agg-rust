@@ -5,6 +5,7 @@
 
 use crate::basics::{CoverType, RectI};
 use crate::pixfmt_rgba::PixelFormat;
+use crate::rendering_buffer::RowAccessor;
 
 // ============================================================================
 // RendererBase — clip-and-delegate renderer
@@ -160,6 +161,176 @@ impl<PF: PixelFormat> RendererBase<PF> {
         x1 = x1.max(self.xmin());
         x2 = x2.min(self.xmax());
         self.ren.copy_hline(x1, y, (x2 - x1 + 1) as u32, c);
+    }
+
+    /// Copy a vertical line (clipped). y1, y2 are inclusive endpoints.
+    ///
+    /// Port of C++ `renderer_base::copy_vline`.
+    pub fn copy_vline(&mut self, x: i32, mut y1: i32, mut y2: i32, c: &PF::ColorType) {
+        if y1 > y2 {
+            std::mem::swap(&mut y1, &mut y2);
+        }
+        if x > self.xmax() || x < self.xmin() || y1 > self.ymax() || y2 < self.ymin() {
+            return;
+        }
+        y1 = y1.max(self.ymin());
+        y2 = y2.min(self.ymax());
+        self.ren.copy_vline(x, y1, (y2 - y1 + 1) as u32, c);
+    }
+
+    /// Clip a source rectangle and its destination placement to the source
+    /// size and this renderer's clip box. Returns the overlap's width and
+    /// height in `x2`/`y2` (`x1`/`y1` stay 0), adjusting `dst` and `src`.
+    ///
+    /// Port of C++ `renderer_base::clip_rect_area`.
+    fn clip_rect_area(&self, dst: &mut RectI, src: &mut RectI, wsrc: i32, hsrc: i32) -> RectI {
+        let mut rc = RectI::new(0, 0, 0, 0);
+        let mut cb = self.clip_box;
+        cb.x2 += 1;
+        cb.y2 += 1;
+
+        if src.x1 < 0 {
+            dst.x1 -= src.x1;
+            src.x1 = 0;
+        }
+        if src.y1 < 0 {
+            dst.y1 -= src.y1;
+            src.y1 = 0;
+        }
+
+        if src.x2 > wsrc {
+            src.x2 = wsrc;
+        }
+        if src.y2 > hsrc {
+            src.y2 = hsrc;
+        }
+
+        if dst.x1 < cb.x1 {
+            src.x1 += cb.x1 - dst.x1;
+            dst.x1 = cb.x1;
+        }
+        if dst.y1 < cb.y1 {
+            src.y1 += cb.y1 - dst.y1;
+            dst.y1 = cb.y1;
+        }
+
+        if dst.x2 > cb.x2 {
+            dst.x2 = cb.x2;
+        }
+        if dst.y2 > cb.y2 {
+            dst.y2 = cb.y2;
+        }
+
+        rc.x2 = dst.x2 - dst.x1;
+        rc.y2 = dst.y2 - dst.y1;
+
+        if rc.x2 > src.x2 - src.x1 {
+            rc.x2 = src.x2 - src.x1;
+        }
+        if rc.y2 > src.y2 - src.y1 {
+            rc.y2 = src.y2 - src.y1;
+        }
+        rc
+    }
+
+    /// Walk the clipped rows of a `blend_from_*` placement, handing each
+    /// row's run (xdst, ydst, xsrc, ysrc, len) to `blend_row`.
+    ///
+    /// The shared body of C++ `renderer_base::blend_from_color` and
+    /// `blend_from_lut` (relative positioning by `dx`, `dy`).
+    fn for_each_from_row(
+        &mut self,
+        src: &RowAccessor,
+        rect_src: Option<&RectI>,
+        dx: i32,
+        dy: i32,
+        mut blend_row: impl FnMut(&mut PF, i32, i32, i32, i32, u32),
+    ) {
+        let mut rsrc = RectI::new(0, 0, src.width() as i32, src.height() as i32);
+        if let Some(r) = rect_src {
+            rsrc.x1 = r.x1;
+            rsrc.y1 = r.y1;
+            rsrc.x2 = r.x2 + 1;
+            rsrc.y2 = r.y2 + 1;
+        }
+
+        let mut rdst = RectI::new(rsrc.x1 + dx, rsrc.y1 + dy, rsrc.x2 + dx, rsrc.y2 + dy);
+        let mut rc = self.clip_rect_area(
+            &mut rdst,
+            &mut rsrc,
+            src.width() as i32,
+            src.height() as i32,
+        );
+
+        if rc.x2 > 0 {
+            let mut incy = 1;
+            if rdst.y1 > rsrc.y1 {
+                rsrc.y1 += rc.y2 - 1;
+                rdst.y1 += rc.y2 - 1;
+                incy = -1;
+            }
+            while rc.y2 > 0 {
+                let rw = src.row(rsrc.y1 as u32);
+                let mut x1src = rsrc.x1;
+                let mut x1dst = rdst.x1;
+                let mut len = rc.x2;
+                if rw.x1 > x1src {
+                    x1dst += rw.x1 - x1src;
+                    len -= rw.x1 - x1src;
+                    x1src = rw.x1;
+                }
+                if len > 0 {
+                    if x1src + len - 1 > rw.x2 {
+                        len -= x1src + len - rw.x2 - 1;
+                    }
+                    if len > 0 {
+                        blend_row(&mut self.ren, x1dst, rdst.y1, x1src, rsrc.y1, len as u32);
+                    }
+                }
+                rdst.y1 += incy;
+                rsrc.y1 += incy;
+                rc.y2 -= 1;
+            }
+        }
+    }
+
+    /// Blend `color` through the gray8 buffer `src` (one byte per pixel),
+    /// each gray value acting as that pixel's coverage (scaled by `cover`).
+    /// `rect_src` selects an inclusive source rectangle (the whole buffer
+    /// when `None`); it lands offset by (`dx`, `dy`), clipped to the source
+    /// and to the clip box.
+    ///
+    /// Port of C++ `renderer_base::blend_from_color`.
+    pub fn blend_from_color(
+        &mut self,
+        src: &RowAccessor,
+        color: &PF::ColorType,
+        rect_src: Option<&RectI>,
+        dx: i32,
+        dy: i32,
+        cover: CoverType,
+    ) {
+        self.for_each_from_row(src, rect_src, dx, dy, |ren, xd, yd, xs, ys, len| {
+            ren.blend_from_color(src, color, xd, yd, xs, ys, len, cover);
+        });
+    }
+
+    /// Blend the colors of the 256-entry `color_lut` that the bytes of the
+    /// gray8 buffer `src` index, placed as in [`Self::blend_from_color`].
+    ///
+    /// Port of C++ `renderer_base::blend_from_lut`.
+    pub fn blend_from_lut(
+        &mut self,
+        src: &RowAccessor,
+        color_lut: &[PF::ColorType],
+        rect_src: Option<&RectI>,
+        dx: i32,
+        dy: i32,
+        cover: CoverType,
+    ) {
+        self.for_each_from_row(src, rect_src, dx, dy, |ren, xd, yd, xs, ys, len| {
+            ren.blend_from_lut(src, color_lut, xd, yd, xs, ys, len, cover);
+        });
     }
 
     /// Blend a horizontal line (clipped). x1, x2 are inclusive endpoints.
@@ -385,8 +556,13 @@ impl<PF: PixelFormat> RendererBase<PF> {
         }
         // Iterate vertically, blending one pixel per row.
         for i in 0..len as usize {
-            let c = if covers.is_empty() { cover } else { covers[covers_offset + i] };
-            self.ren.blend_pixel(x, y + i as i32, &colors[colors_offset + i], c);
+            let c = if covers.is_empty() {
+                cover
+            } else {
+                covers[covers_offset + i]
+            };
+            self.ren
+                .blend_pixel(x, y + i as i32, &colors[colors_offset + i], c);
         }
     }
 }
