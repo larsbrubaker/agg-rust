@@ -10,3 +10,5 @@ mod raster_text_tests;
 mod rasterizer_cells_aa_tests;
 #[path = "agg_sharp/renderer_primitives_tests.rs"]
 mod renderer_primitives_tests;
+#[path = "agg_sharp/stack_blur_tests.rs"]
+mod stack_blur_tests;
