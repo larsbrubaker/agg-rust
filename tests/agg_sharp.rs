@@ -8,6 +8,8 @@ mod common;
 #[path = "agg_sharp/support.rs"]
 mod support;
 
+#[path = "agg_sharp/alpha_mask_adaptor_tests.rs"]
+mod alpha_mask_adaptor_tests;
 #[path = "agg_sharp/apply_gamma_inv_tests.rs"]
 mod apply_gamma_inv_tests;
 #[path = "agg_sharp/blender_comp_op_bgra_tests.rs"]
@@ -42,6 +44,6 @@ mod stack_blur_tests;
 mod trans_warp_magnifier_tests;
 
 // Not ported, each for want of a C++ AGG counterpart or because it pins agg-sharp-only behaviour:
-// AlphaMaskAdaptorTests and PixelFormatBGRAFloatTests / SrgbLutFloatTests (no
-// pixfmt_amask_adaptor, rgba32 float color or sRGB LUT here yet), BlenderGammaBGRATests (C++
+// PixelFormatBGRAFloatTests / SrgbLutFloatTests (no rgba32 float color or sRGB LUT here
+// yet), BlenderGammaBGRATests (C++
 // has no RGBA gamma blender) and BlenderSpanPolicyTests (agg-sharp's blender set and vspans).

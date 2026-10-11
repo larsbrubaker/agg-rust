@@ -91,6 +91,7 @@ pub mod span_solid;
 
 // Phase 6: Transforms, Image Filters, Text & Alpha Masking
 pub mod alpha_mask_u8;
+pub mod pixfmt_amask_adaptor;
 pub mod conv_marker;
 pub mod gsv_text;
 pub mod image_accessors;
