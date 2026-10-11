@@ -30,7 +30,9 @@
 pub mod array;
 pub mod basics;
 pub mod color;
+pub mod color_rgba32;
 pub mod gamma;
+pub mod srgb_lut;
 pub mod math;
 
 // Phase 2: Memory & Geometry Primitives

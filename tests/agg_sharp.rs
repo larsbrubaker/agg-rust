@@ -34,6 +34,8 @@ mod renderer_markers_tests;
 mod renderer_primitives_tests;
 #[path = "agg_sharp/slight_blur_tests.rs"]
 mod slight_blur_tests;
+#[path = "agg_sharp/srgb_lut_float_tests.rs"]
+mod srgb_lut_float_tests;
 #[path = "agg_sharp/stack_blur_gray8_tests.rs"]
 mod stack_blur_gray8_tests;
 #[path = "agg_sharp/scanline_boolean_algebra_tests.rs"]
@@ -44,6 +46,5 @@ mod stack_blur_tests;
 mod trans_warp_magnifier_tests;
 
 // Not ported, each for want of a C++ AGG counterpart or because it pins agg-sharp-only behaviour:
-// PixelFormatBGRAFloatTests / SrgbLutFloatTests (no rgba32 float color or sRGB LUT here
-// yet), BlenderGammaBGRATests (C++
+// PixelFormatBGRAFloatTests (no float pixel format here yet), BlenderGammaBGRATests (C++
 // has no RGBA gamma blender) and BlenderSpanPolicyTests (agg-sharp's blender set and vspans).
