@@ -1,7 +1,10 @@
 // Byte-for-byte regression test for the `rasterizers2` demo.
 //
 // The reference buffer in `tests/refs/rasterizers2_cpp_500x450.raw` was
-// produced by the C++ AGG reference renderer (default parameters, 500x450).
+// produced by the C++ AGG reference renderer (default parameters, 500x450),
+// built with tools/cpp-renderer/patches/agg_image_filter-rounding-fixes.patch
+// applied: agg-rust's pattern_filter_bilinear_rgba rounds where C++ truncates,
+// which moves the image-pattern spiral's pixels by at most one level.
 // The Rust `rasterizers2` renderer must match it exactly.
 //
 // This guards against regressions in the premultiplied pixel format

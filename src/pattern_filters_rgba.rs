@@ -55,6 +55,14 @@ impl PatternFilter for PatternFilterNn {
 ///
 /// Port of C++ `pattern_filter_bilinear_rgba<rgba8>`.
 /// Interpolates between 4 neighboring pixels for smooth pattern rendering.
+///
+/// Divergence from C++: the weighted sums start at half a unit, so the
+/// downshift rounds. C++ starts them at 0 and truncates, darkening every
+/// pattern by half a level on average (a 0/1 pair sampled halfway gives 0),
+/// while C++'s own plain bilinear image filter
+/// (`span_image_filter_rgba_bilinear`) starts at half and rounds. agg-sharp's
+/// `PatternFilterBilinearTests` pins the rounding (ported in
+/// `tests/agg_sharp/pattern_filter_bilinear_tests.rs`).
 pub struct PatternFilterBilinearRgba;
 
 impl PatternFilter for PatternFilterBilinearRgba {
@@ -84,26 +92,31 @@ impl PatternFilter for PatternFilterBilinearRgba {
         let p11 = &row1[x_lr as usize + 1];
 
         let weight = LINE_SUBPIXEL_SCALE;
+        let half = 1 << (LINE_SUBPIXEL_SHIFT * 2 - 1);
 
-        let r = (p00.r as i32 * (weight - x_hr) * (weight - y_hr)
+        let r = (half
+            + p00.r as i32 * (weight - x_hr) * (weight - y_hr)
             + p01.r as i32 * x_hr * (weight - y_hr)
             + p10.r as i32 * (weight - x_hr) * y_hr
             + p11.r as i32 * x_hr * y_hr)
             >> (LINE_SUBPIXEL_SHIFT * 2);
 
-        let g = (p00.g as i32 * (weight - x_hr) * (weight - y_hr)
+        let g = (half
+            + p00.g as i32 * (weight - x_hr) * (weight - y_hr)
             + p01.g as i32 * x_hr * (weight - y_hr)
             + p10.g as i32 * (weight - x_hr) * y_hr
             + p11.g as i32 * x_hr * y_hr)
             >> (LINE_SUBPIXEL_SHIFT * 2);
 
-        let b = (p00.b as i32 * (weight - x_hr) * (weight - y_hr)
+        let b = (half
+            + p00.b as i32 * (weight - x_hr) * (weight - y_hr)
             + p01.b as i32 * x_hr * (weight - y_hr)
             + p10.b as i32 * (weight - x_hr) * y_hr
             + p11.b as i32 * x_hr * y_hr)
             >> (LINE_SUBPIXEL_SHIFT * 2);
 
-        let a = (p00.a as i32 * (weight - x_hr) * (weight - y_hr)
+        let a = (half
+            + p00.a as i32 * (weight - x_hr) * (weight - y_hr)
             + p01.a as i32 * x_hr * (weight - y_hr)
             + p10.a as i32 * (weight - x_hr) * y_hr
             + p11.a as i32 * x_hr * y_hr)

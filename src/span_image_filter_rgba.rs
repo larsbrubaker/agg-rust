@@ -3,6 +3,20 @@
 //! Port of `agg_span_image_filter_rgba.h` — span generators for transforming
 //! RGBA images with various filter kernels: nearest neighbor, bilinear,
 //! custom 2x2, general N-tap, and resampling variants.
+//!
+//! Divergence from C++ (rounding): C++'s plain bilinear filter starts its
+//! weighted sums at half a unit, so its downshift rounds, but its
+//! `bilinear_clip`, `2x2` and general filters start them at 0 and truncate,
+//! and the resamplers divide the bare sums by the total weight. Truncating
+//! darkens every sample by half a level on average: a 0/1 pair sampled
+//! halfway gives 0, and a flat 255 through spline36's normalized table (whose
+//! rounded weight products can sum to just under a whole) comes out 254.
+//! Here every filter starts at half a unit (`BILINEAR_HALF`,
+//! `IMAGE_FILTER_SCALE / 2`) and the resamplers add half the total weight
+//! before dividing, so all of them round as the plain bilinear filter does.
+//! agg-sharp's span image filter tests pin this (ported in
+//! `tests/agg_sharp/span_image_filter_rgba*_tests.rs` and
+//! `tests/agg_sharp/span_image_resample_rgba_tests.rs`).
 
 use crate::color::Rgba8;
 use crate::image_accessors::ImageSource;
@@ -12,12 +26,18 @@ use crate::image_filters::{
 };
 use crate::renderer_scanline::SpanGenerator;
 use crate::rendering_buffer::RowAccessor;
-use crate::span_image_filter::{SpanImageFilterBase, SpanImageResampleAffine};
-use crate::span_interpolator_linear::{SpanInterpolator, SpanInterpolatorLinear};
+use crate::span_image_filter::{SpanImageFilterBase, SpanImageResample, SpanImageResampleAffine};
+use crate::span_interpolator_linear::{
+    SpanInterpolator, SpanInterpolatorLinear, SpanInterpolatorLocalScale,
+};
 use crate::trans_affine::TransAffine;
 
 /// Base mask for 8-bit color (255).
 const BASE_MASK: i32 = 255;
+
+/// Half a unit of a bilinear sum (weights total `IMAGE_SUBPIXEL_SCALE^2`):
+/// the start value that makes the downshift round (see the module docs).
+const BILINEAR_HALF: i32 = (IMAGE_SUBPIXEL_SCALE * IMAGE_SUBPIXEL_SCALE / 2) as i32;
 
 // ============================================================================
 // SpanImageFilterRgbaNn — nearest neighbor
@@ -129,7 +149,7 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaB
             .interpolator_mut()
             .begin(x as f64 + dx_dbl, y as f64 + dy_dbl, len);
 
-        let half = (IMAGE_SUBPIXEL_SCALE * IMAGE_SUBPIXEL_SCALE / 2) as i32;
+        let half = BILINEAR_HALF;
 
         for pixel in span.iter_mut().take(len as usize) {
             let mut x_hr = 0i32;
@@ -273,7 +293,7 @@ impl<I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaBilinearClip<'_, 
 
             if x_lr >= 0 && y_lr >= 0 && x_lr < maxx && y_lr < maxy {
                 // All 4 pixels in bounds — fast path
-                fg = [0; 4];
+                fg = [BILINEAR_HALF; 4];
                 let x_frac = x_hr & IMAGE_SUBPIXEL_MASK as i32;
                 let y_frac = y_hr & IMAGE_SUBPIXEL_MASK as i32;
 
@@ -315,7 +335,7 @@ impl<I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaBilinearClip<'_, 
                 fg = [back_r, back_g, back_b, back_a];
             } else {
                 // Partially outside — blend with background
-                fg = [0; 4];
+                fg = [BILINEAR_HALF; 4];
                 let x_frac = x_hr & IMAGE_SUBPIXEL_MASK as i32;
                 let y_frac = y_hr & IMAGE_SUBPIXEL_MASK as i32;
 
@@ -461,7 +481,7 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgba2
             let x_lr = x_hr >> IMAGE_SUBPIXEL_SHIFT;
             let y_lr = y_hr >> IMAGE_SUBPIXEL_SHIFT;
 
-            let mut fg = [0i32; 4];
+            let mut fg = [IMAGE_FILTER_SCALE / 2; 4];
             let x_frac = (x_hr & IMAGE_SUBPIXEL_MASK as i32) as usize;
             let y_frac = (y_hr & IMAGE_SUBPIXEL_MASK as i32) as usize;
             let subpix = IMAGE_SUBPIXEL_SCALE as usize;
@@ -597,7 +617,7 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaG
             let x_lr = cx >> IMAGE_SUBPIXEL_SHIFT;
             let y_lr = cy >> IMAGE_SUBPIXEL_SHIFT;
 
-            let mut fg = [0i32; 4];
+            let mut fg = [IMAGE_FILTER_SCALE / 2; 4];
             let x_fract = cx & IMAGE_SUBPIXEL_MASK as i32;
 
             let mut y_count = diameter as u32;
@@ -775,11 +795,150 @@ impl<S: ImageSource> SpanGenerator for SpanImageResampleRgbaAffine<'_, S> {
                 fg_ptr = self.source.next_y();
             }
 
+            // Half the total weight first, so the division rounds (module docs).
             if total_weight > 0 {
-                fg[0] /= total_weight;
-                fg[1] /= total_weight;
-                fg[2] /= total_weight;
-                fg[3] /= total_weight;
+                let half = total_weight / 2;
+                fg[0] = (fg[0] + half) / total_weight;
+                fg[1] = (fg[1] + half) / total_weight;
+                fg[2] = (fg[2] + half) / total_weight;
+                fg[3] = (fg[3] + half) / total_weight;
+            }
+
+            fg[3] = fg[3].clamp(0, BASE_MASK);
+            fg[0] = fg[0].max(0).min(fg[3]);
+            fg[1] = fg[1].max(0).min(fg[3]);
+            fg[2] = fg[2].max(0).min(fg[3]);
+
+            *pixel = Rgba8::new(fg[0] as u32, fg[1] as u32, fg[2] as u32, fg[3] as u32);
+            self.base.base_mut().interpolator_mut().next();
+        }
+    }
+}
+
+// ============================================================================
+// SpanImageResampleRgba — resampling under any interpolator
+// ============================================================================
+
+/// Resampling for RGBA images under a non-affine interpolator.
+///
+/// Unlike the affine variant, the filter footprint is recomputed per pixel
+/// from the interpolator's local scale (clamped and blurred by
+/// `SpanImageResample::adjust_scale`), so it follows a perspective.
+///
+/// Port of C++ `span_image_resample_rgba<Source, Interpolator>`, with two
+/// fixes. The division by the total weight rounds (module docs). And C++
+/// clamps each colour channel with `if(fg[R] > fg[R]) fg[R] = fg[R]`, a
+/// self-comparison that never fires, so a channel above alpha (or above 255,
+/// which the `value_type` cast then wraps) went through unclamped; here each
+/// channel is clamped to alpha, as C++'s affine variant does.
+pub struct SpanImageResampleRgba<'a, S: ImageSource, I> {
+    base: SpanImageResample<'a, I>,
+    source: &'a mut S,
+}
+
+impl<'a, S: ImageSource, I> SpanImageResampleRgba<'a, S, I> {
+    pub fn new(source: &'a mut S, interpolator: &'a mut I, filter: &'a ImageFilterLut) -> Self {
+        Self {
+            base: SpanImageResample::new(interpolator, filter),
+            source,
+        }
+    }
+
+    pub fn resample_base(&self) -> &SpanImageResample<'a, I> {
+        &self.base
+    }
+
+    pub fn resample_base_mut(&mut self) -> &mut SpanImageResample<'a, I> {
+        &mut self.base
+    }
+}
+
+impl<S: ImageSource, I: SpanInterpolatorLocalScale> SpanGenerator
+    for SpanImageResampleRgba<'_, S, I>
+{
+    type Color = Rgba8;
+
+    fn prepare(&mut self) {}
+
+    fn generate(&mut self, span: &mut [Rgba8], x: i32, y: i32, len: u32) {
+        let dx_dbl = self.base.base().filter_dx_dbl();
+        let dy_dbl = self.base.base().filter_dy_dbl();
+        let dx_int = self.base.base().filter_dx_int() as i32;
+        let dy_int = self.base.base().filter_dy_int() as i32;
+        self.base
+            .base_mut()
+            .interpolator_mut()
+            .begin(x as f64 + dx_dbl, y as f64 + dy_dbl, len);
+
+        let Some(filter) = self.base.base().filter_lut() else {
+            return;
+        };
+        let diameter = filter.diameter() as i32;
+        let filter_scale = diameter << IMAGE_SUBPIXEL_SHIFT;
+        let weight_array: &[i16] = filter.weight_array();
+        let subpix = IMAGE_SUBPIXEL_SCALE as i32;
+        let mask = IMAGE_SUBPIXEL_MASK as i32;
+
+        for pixel in span.iter_mut().take(len as usize) {
+            let (mut cx, mut cy) = (0i32, 0i32);
+            let (mut rx, mut ry) = (0i32, 0i32);
+            let interpolator = self.base.base().interpolator();
+            interpolator.coordinates(&mut cx, &mut cy);
+            interpolator.local_scale(&mut rx, &mut ry);
+            self.base.adjust_scale(&mut rx, &mut ry);
+
+            let rx_inv = subpix * subpix / rx;
+            let ry_inv = subpix * subpix / ry;
+
+            let radius_x = (diameter * rx) >> 1;
+            let radius_y = (diameter * ry) >> 1;
+            let len_x_lr = (diameter * rx + mask) >> IMAGE_SUBPIXEL_SHIFT;
+
+            cx += dx_int - radius_x;
+            cy += dy_int - radius_y;
+
+            let mut fg = [0i32; 4];
+
+            let y_lr = cy >> IMAGE_SUBPIXEL_SHIFT;
+            let mut y_hr = ((mask - (cy & mask)) * ry_inv) >> IMAGE_SUBPIXEL_SHIFT;
+            let mut total_weight = 0i32;
+            let x_lr = cx >> IMAGE_SUBPIXEL_SHIFT;
+            let x_hr2 = ((mask - (cx & mask)) * rx_inv) >> IMAGE_SUBPIXEL_SHIFT;
+
+            let mut fg_ptr = self.source.span(x_lr, y_lr, len_x_lr as u32);
+            loop {
+                let weight_y = weight_array[y_hr as usize] as i32;
+                let mut x_hr = x_hr2;
+                loop {
+                    let weight = (weight_y * weight_array[x_hr as usize] as i32
+                        + IMAGE_FILTER_SCALE / 2)
+                        >> IMAGE_FILTER_SHIFT;
+                    fg[0] += fg_ptr[0] as i32 * weight;
+                    fg[1] += fg_ptr[1] as i32 * weight;
+                    fg[2] += fg_ptr[2] as i32 * weight;
+                    fg[3] += fg_ptr[3] as i32 * weight;
+                    total_weight += weight;
+                    x_hr += rx_inv;
+                    if x_hr >= filter_scale {
+                        break;
+                    }
+                    fg_ptr = self.source.next_x();
+                }
+                y_hr += ry_inv;
+                if y_hr >= filter_scale {
+                    break;
+                }
+                fg_ptr = self.source.next_y();
+            }
+
+            // Half the total weight first, so the division rounds (module docs).
+            // C++ divides unguarded; a zero total (no weight reached) leaves 0.
+            if total_weight > 0 {
+                let half = total_weight / 2;
+                fg[0] = (fg[0] + half) / total_weight;
+                fg[1] = (fg[1] + half) / total_weight;
+                fg[2] = (fg[2] + half) / total_weight;
+                fg[3] = (fg[3] + half) / total_weight;
             }
 
             fg[3] = fg[3].clamp(0, BASE_MASK);
@@ -1079,6 +1238,34 @@ mod tests {
         filter.prepare();
         filter.generate(&mut span, 0, 0, 1);
         assert_eq!(span[0].r, 0);
+    }
+
+    #[test]
+    fn test_resample_generic_clamps_color_to_alpha() {
+        // C++ span_image_resample_rgba's colour clamp compares each channel
+        // with itself and never fires; a channel above alpha must come out
+        // at alpha, as in the affine variant.
+        use crate::span_interpolator_persp::SpanInterpolatorPerspLerp;
+        use crate::span_subdiv_adaptor::SpanSubdivAdaptor;
+
+        let mut data = Vec::new();
+        let rbuf = make_rgba_buffer(8, 8, &mut data);
+        for y in 0..8 {
+            for x in 0..8 {
+                set_pixel(&mut data, 8, x, y, [255, 40, 200, 100]);
+            }
+        }
+        let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, false);
+        let mut acc = ImageAccessorClone::<4>::new(&rbuf);
+        let quad = [0.0, 0.0, 8.0, 0.0, 8.0, 8.0, 0.0, 8.0];
+        let lerp = SpanInterpolatorPerspLerp::new_quad_to_rect(&quad, 0.0, 0.0, 8.0, 8.0);
+        let mut interp = SpanSubdivAdaptor::new(lerp);
+        let mut filter = SpanImageResampleRgba::new(&mut acc, &mut interp, &lut);
+
+        let mut span = vec![Rgba8::new(0, 0, 0, 0); 1];
+        filter.prepare();
+        filter.generate(&mut span, 3, 3, 1);
+        assert_eq!(span[0], Rgba8::new(100, 40, 100, 100));
     }
 
     // -- ImageSource trait tests --

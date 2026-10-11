@@ -65,12 +65,19 @@ impl GradientFunction for GradientY {
 /// Radial gradient using fast integer square root.
 ///
 /// Port of C++ `gradient_radial` / `gradient_circle`.
+///
+/// C++ passes `x*x + y*y` to `fast_sqrt(unsigned)`, so a sum of 2^31 or more
+/// (a coordinate past about 46341 subpixels) is a valid unsigned input. The
+/// sum is formed in `u32` here: in `i32` it overflowed (a panic in debug
+/// builds) for exactly those inputs.
 pub struct GradientRadial;
 
 impl GradientFunction for GradientRadial {
     #[inline]
     fn calculate(&self, x: i32, y: i32, _d: i32) -> i32 {
-        fast_sqrt((x * x + y * y) as u32) as i32
+        let ax = x.unsigned_abs();
+        let ay = y.unsigned_abs();
+        fast_sqrt(ax.wrapping_mul(ax).wrapping_add(ay.wrapping_mul(ay))) as i32
     }
 }
 
@@ -124,7 +131,9 @@ pub struct GradientSqrtXY;
 impl GradientFunction for GradientSqrtXY {
     #[inline]
     fn calculate(&self, x: i32, y: i32, _d: i32) -> i32 {
-        fast_sqrt((x.abs() * y.abs()) as u32) as i32
+        // `|x|*|y|` in `u32`, as C++'s `fast_sqrt(unsigned)` takes it; in
+        // `i32` it overflowed past 2^31.
+        fast_sqrt(x.unsigned_abs().wrapping_mul(y.unsigned_abs())) as i32
     }
 }
 

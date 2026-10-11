@@ -62,6 +62,15 @@ pub trait SpanInterpolator {
     fn coordinates(&self, x: &mut i32, y: &mut i32);
 }
 
+/// Span interpolators that also report the local scale of the inverse
+/// transform at the current pixel, in subpixel units (C++'s
+/// `local_scale(int* x, int* y)`, provided by the perspective interpolators
+/// and by `span_subdiv_adaptor` over one of them). The generic
+/// `span_image_resample_*` generators size their filter footprint from it.
+pub trait SpanInterpolatorLocalScale: SpanInterpolator {
+    fn local_scale(&self, x: &mut i32, y: &mut i32);
+}
+
 // ============================================================================
 // SpanInterpolatorLinear
 // ============================================================================

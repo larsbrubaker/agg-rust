@@ -8,6 +8,7 @@
 use crate::basics::{iround, uround};
 use crate::dda_line::Dda2LineInterpolator;
 use crate::span_interpolator_linear::SpanInterpolator;
+use crate::span_interpolator_linear::SpanInterpolatorLocalScale;
 use crate::trans_perspective::{PerspectiveIteratorX, TransPerspective};
 
 /// Subpixel precision for perspective interpolation.
@@ -245,6 +246,46 @@ impl SpanInterpolatorPerspLerp {
 
     pub fn trans_inv(&self) -> &TransPerspective {
         &self.trans_inv
+    }
+
+    /// Restart the coordinate and scale lines from where they are now to the
+    /// transformed point (`xe`, `ye`) over `len` pixels: C++
+    /// `span_interpolator_persp_lerp::resynchronize`, which
+    /// `span_subdiv_adaptor` calls at each subdivision boundary.
+    pub fn resynchronize(&mut self, xe: f64, ye: f64, len: u32) {
+        // Assume x1,y1 are equal to the ones at the previous end point.
+        let x1 = self.coord_x.y();
+        let y1 = self.coord_y.y();
+        let sx1 = self.scale_x.y();
+        let sy1 = self.scale_y.y();
+
+        // Calculate transformed coordinates at x2,y2.
+        let mut xt = xe;
+        let mut yt = ye;
+        self.trans_dir.transform(&mut xt, &mut yt);
+        let x2 = iround(xt * SUBPIXEL_SCALE as f64);
+        let y2 = iround(yt * SUBPIXEL_SCALE as f64);
+
+        let delta = 1.0 / SUBPIXEL_SCALE as f64;
+        let sx2 = calc_scale(xt, yt, xe, ye, &self.trans_inv, delta, 0.0);
+        let sy2 = calc_scale(xt, yt, xe, ye, &self.trans_inv, 0.0, delta);
+
+        self.coord_x = Dda2LineInterpolator::new_forward(x1, x2, len as i32);
+        self.coord_y = Dda2LineInterpolator::new_forward(y1, y2, len as i32);
+        self.scale_x = Dda2LineInterpolator::new_forward(sx1, sx2, len as i32);
+        self.scale_y = Dda2LineInterpolator::new_forward(sy1, sy2, len as i32);
+    }
+}
+
+impl SpanInterpolatorLocalScale for SpanInterpolatorPerspLerp {
+    fn local_scale(&self, x: &mut i32, y: &mut i32) {
+        SpanInterpolatorPerspLerp::local_scale(self, x, y);
+    }
+}
+
+impl SpanInterpolatorLocalScale for SpanInterpolatorPerspExact {
+    fn local_scale(&self, x: &mut i32, y: &mut i32) {
+        SpanInterpolatorPerspExact::local_scale(self, x, y);
     }
 }
 

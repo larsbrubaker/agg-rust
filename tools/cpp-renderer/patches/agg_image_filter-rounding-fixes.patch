@@ -1,0 +1,173 @@
+C++ AGG 2.6 image and pattern filter fixes that agg-rust carries: every RGB/RGBA span image
+filter and pattern_filter_bilinear_rgba starts its weighted sums at half a unit (C++ starts most
+at 0 and truncates, darkening by half a level on average), the resamplers add half the total
+weight before dividing, and span_image_resample_rgba clamps colour to alpha (C++ compares each
+channel with itself). Apply from the repo root to render the patched C++ references:
+  patch -p0 < tools/cpp-renderer/patches/agg_image_filter-rounding-fixes.patch
+then revert with patch -R -p0 so cpp-references stays pristine.
+
+--- cpp-references/agg-src/include/agg_span_image_filter_rgba.h
++++ cpp-references/agg-src/include/agg_span_image_filter_rgba.h
+@@ -236,7 +236,7 @@
+                 if(x_lr >= 0    && y_lr >= 0 &&
+                    x_lr <  maxx && y_lr <  maxy) 
+                 {
+-                    fg[0] = fg[1] = fg[2] = fg[3] = 0;
++                    fg[0] = fg[1] = fg[2] = fg[3] = image_subpixel_scale * image_subpixel_scale / 2;
+ 
+                     x_hr &= image_subpixel_mask;
+                     y_hr &= image_subpixel_mask;
+@@ -290,7 +290,7 @@
+                     }
+                     else
+                     {
+-                        fg[0] = fg[1] = fg[2] = fg[3] = 0;
++                        fg[0] = fg[1] = fg[2] = fg[3] = image_subpixel_scale * image_subpixel_scale / 2;
+ 
+                         x_hr &= image_subpixel_mask;
+                         y_hr &= image_subpixel_mask;
+@@ -455,7 +455,7 @@
+                 int y_lr = y_hr >> image_subpixel_shift;
+ 
+                 unsigned weight;
+-                fg[0] = fg[1] = fg[2] = fg[3] = 0;
++                fg[0] = fg[1] = fg[2] = fg[3] = image_filter_scale / 2;
+ 
+                 x_hr &= image_subpixel_mask;
+                 y_hr &= image_subpixel_mask;
+@@ -575,7 +575,7 @@
+                 int x_lr = x_hr >> image_subpixel_shift;
+                 int y_lr = y_hr >> image_subpixel_shift;
+ 
+-                fg[0] = fg[1] = fg[2] = fg[3] = 0;
++                fg[0] = fg[1] = fg[2] = fg[3] = image_filter_scale / 2;
+ 
+                 int x_fract = x_hr & image_subpixel_mask;
+                 unsigned y_count = diameter;
+@@ -729,10 +729,10 @@
+                     fg_ptr = (const value_type*)base_type::source().next_y();
+                 }
+ 
+-                fg[0] /= total_weight;
+-                fg[1] /= total_weight;
+-                fg[2] /= total_weight;
+-                fg[3] /= total_weight;
++                fg[0] = (fg[0] + total_weight / 2) / total_weight;
++                fg[1] = (fg[1] + total_weight / 2) / total_weight;
++                fg[2] = (fg[2] + total_weight / 2) / total_weight;
++                fg[3] = (fg[3] + total_weight / 2) / total_weight;
+ 
+                 if(fg[0] < 0) fg[0] = 0;
+                 if(fg[1] < 0) fg[1] = 0;
+@@ -854,10 +854,10 @@
+                     fg_ptr = (const value_type*)base_type::source().next_y();
+                 }
+ 
+-                fg[0] /= total_weight;
+-                fg[1] /= total_weight;
+-                fg[2] /= total_weight;
+-                fg[3] /= total_weight;
++                fg[0] = (fg[0] + total_weight / 2) / total_weight;
++                fg[1] = (fg[1] + total_weight / 2) / total_weight;
++                fg[2] = (fg[2] + total_weight / 2) / total_weight;
++                fg[3] = (fg[3] + total_weight / 2) / total_weight;
+ 
+                 if(fg[0] < 0) fg[0] = 0;
+                 if(fg[1] < 0) fg[1] = 0;
+@@ -865,9 +865,9 @@
+                 if(fg[3] < 0) fg[3] = 0;
+ 
+                 if(fg[order_type::A] > color_type::full_value()) fg[order_type::A] = color_type::full_value();
+-                if(fg[order_type::R] > fg[order_type::R]) fg[order_type::R] = fg[order_type::R];
+-                if(fg[order_type::G] > fg[order_type::G]) fg[order_type::G] = fg[order_type::G];
+-                if(fg[order_type::B] > fg[order_type::B]) fg[order_type::B] = fg[order_type::B];
++                if(fg[order_type::R] > fg[order_type::A]) fg[order_type::R] = fg[order_type::A];
++                if(fg[order_type::G] > fg[order_type::A]) fg[order_type::G] = fg[order_type::A];
++                if(fg[order_type::B] > fg[order_type::A]) fg[order_type::B] = fg[order_type::A];
+ 
+                 span->r = (value_type)fg[order_type::R];
+                 span->g = (value_type)fg[order_type::G];
+--- cpp-references/agg-src/include/agg_span_image_filter_rgb.h
++++ cpp-references/agg-src/include/agg_span_image_filter_rgb.h
+@@ -123,7 +123,7 @@
+ 
+                 unsigned weight;
+ 
+-                fg[0] = fg[1] = fg[2] = 0;
++                fg[0] = fg[1] = fg[2] = image_subpixel_scale * image_subpixel_scale / 2;
+ 
+                 x_hr &= image_subpixel_mask;
+                 y_hr &= image_subpixel_mask;
+@@ -227,7 +227,7 @@
+                 if(x_lr >= 0    && y_lr >= 0 &&
+                    x_lr <  maxx && y_lr <  maxy) 
+                 {
+-                    fg[0] = fg[1] = fg[2] = 0;
++                    fg[0] = fg[1] = fg[2] = image_subpixel_scale * image_subpixel_scale / 2;
+ 
+                     x_hr &= image_subpixel_mask;
+                     y_hr &= image_subpixel_mask;
+@@ -277,7 +277,7 @@
+                     }
+                     else
+                     {
+-                        fg[0] = fg[1] = fg[2] = src_alpha = 0;
++                        fg[0] = fg[1] = fg[2] = src_alpha = image_subpixel_scale * image_subpixel_scale / 2;
+ 
+                         x_hr &= image_subpixel_mask;
+                         y_hr &= image_subpixel_mask;
+@@ -442,7 +442,7 @@
+                 int y_lr = y_hr >> image_subpixel_shift;
+ 
+                 unsigned weight;
+-                fg[0] = fg[1] = fg[2] = 0;
++                fg[0] = fg[1] = fg[2] = image_filter_scale / 2;
+ 
+                 x_hr &= image_subpixel_mask;
+                 y_hr &= image_subpixel_mask;
+@@ -557,7 +557,7 @@
+                 int x_lr = x_hr >> image_subpixel_shift;
+                 int y_lr = y_hr >> image_subpixel_shift;
+ 
+-                fg[0] = fg[1] = fg[2] = 0;
++                fg[0] = fg[1] = fg[2] = image_filter_scale / 2;
+ 
+                 int x_fract = x_hr & image_subpixel_mask;
+                 unsigned y_count = diameter;
+@@ -707,9 +707,9 @@
+                     fg_ptr = (const value_type*)base_type::source().next_y();
+                 }
+ 
+-                fg[0] /= total_weight;
+-                fg[1] /= total_weight;
+-                fg[2] /= total_weight;
++                fg[0] = (fg[0] + total_weight / 2) / total_weight;
++                fg[1] = (fg[1] + total_weight / 2) / total_weight;
++                fg[2] = (fg[2] + total_weight / 2) / total_weight;
+ 
+                 if(fg[0] < 0) fg[0] = 0;
+                 if(fg[1] < 0) fg[1] = 0;
+@@ -828,9 +828,9 @@
+                     fg_ptr = (const value_type*)base_type::source().next_y();
+                 }
+ 
+-                fg[0] /= total_weight;
+-                fg[1] /= total_weight;
+-                fg[2] /= total_weight;
++                fg[0] = (fg[0] + total_weight / 2) / total_weight;
++                fg[1] = (fg[1] + total_weight / 2) / total_weight;
++                fg[2] = (fg[2] + total_weight / 2) / total_weight;
+ 
+                 if(fg[0] < 0) fg[0] = 0;
+                 if(fg[1] < 0) fg[1] = 0;
+--- cpp-references/agg-src/include/agg_pattern_filters_rgba.h
++++ cpp-references/agg-src/include/agg_pattern_filters_rgba.h
+@@ -67,7 +67,7 @@
+                                               color_type* p, int x, int y)
+         {
+             calc_type r, g, b, a;
+-            r = g = b = a = 0;
++            r = g = b = a = line_subpixel_scale * line_subpixel_scale / 2;
+ 
+             calc_type weight;
+             int x_lr = x >> line_subpixel_shift;
