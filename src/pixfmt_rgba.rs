@@ -3,7 +3,8 @@
 //! Port of `agg_pixfmt_rgba.h` — pixel format that reads and writes RGBA32
 //! pixels (4 bytes per pixel, non-premultiplied alpha) with alpha blending.
 //!
-//! Provides the `PixelFormat` trait and `PixfmtRgba32` concrete implementation.
+//! Provides the `PixelFormat` and `PixfmtBlendFrom` traits and the `PixfmtRgba32`
+//! concrete implementation (the float formats are in `pixfmt_rgba_float`).
 
 use crate::basics::CoverType;
 use crate::color::{Gray8, Rgba8};
@@ -125,6 +126,27 @@ pub trait PixelFormat {
             self.blend_pixel(xdst + i as i32, ydst, &color_lut[index], cover);
         }
     }
+}
+
+/// A pixel format that can blend rows of another pixel format `Src` into
+/// itself (C++ pixfmt `blend_from(from, xdst, ydst, xsrc, ysrc, len, cover)`,
+/// templated on the source pixel format). `RendererBase::blend_from` clips the
+/// placement and calls this once per row.
+pub trait PixfmtBlendFrom<Src: PixelFormat>: PixelFormat {
+    /// Blend `len` pixels of `from`, starting at (xsrc, ysrc), into this
+    /// format starting at (xdst, ydst), each at coverage `cover`. The caller
+    /// has already clipped the run to both formats.
+    #[allow(clippy::too_many_arguments)]
+    fn blend_from(
+        &mut self,
+        from: &Src,
+        xdst: i32,
+        ydst: i32,
+        xsrc: i32,
+        ysrc: i32,
+        len: u32,
+        cover: CoverType,
+    );
 }
 
 const BPP: usize = 4; // bytes per pixel

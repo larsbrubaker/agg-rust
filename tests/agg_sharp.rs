@@ -22,6 +22,8 @@ mod blender_pre_mult_bgr_tests;
 mod blender_pre_mult_bgra_tests;
 #[path = "agg_sharp/blender_table_tests.rs"]
 mod blender_table_tests;
+#[path = "agg_sharp/pixel_format_bgra_float_tests.rs"]
+mod pixel_format_bgra_float_tests;
 #[path = "agg_sharp/raster_text_tests.rs"]
 mod raster_text_tests;
 #[path = "agg_sharp/rasterizer_cells_aa_tests.rs"]
@@ -46,5 +48,5 @@ mod stack_blur_tests;
 mod trans_warp_magnifier_tests;
 
 // Not ported, each for want of a C++ AGG counterpart or because it pins agg-sharp-only behaviour:
-// PixelFormatBGRAFloatTests (no float pixel format here yet), BlenderGammaBGRATests (C++
-// has no RGBA gamma blender) and BlenderSpanPolicyTests (agg-sharp's blender set and vspans).
+// BlenderGammaBGRATests (C++ has no RGBA gamma blender) and BlenderSpanPolicyTests (agg-sharp's
+// blender set and vspans).

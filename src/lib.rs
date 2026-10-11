@@ -66,6 +66,7 @@ pub mod pixfmt_lcd;
 pub mod pixfmt_rgb;
 pub mod pixfmt_rgb_blenders;
 pub mod pixfmt_rgba;
+pub mod pixfmt_rgba_float;
 pub mod renderer_base;
 pub mod renderer_scanline;
 

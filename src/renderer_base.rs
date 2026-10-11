@@ -4,7 +4,7 @@
 //! ensuring all rendering operations are bounded within the visible area.
 
 use crate::basics::{CoverType, RectI};
-use crate::pixfmt_rgba::PixelFormat;
+use crate::pixfmt_rgba::{PixelFormat, PixfmtBlendFrom};
 use crate::rendering_buffer::RowAccessor;
 
 // ============================================================================
@@ -294,6 +294,53 @@ impl<PF: PixelFormat> RendererBase<PF> {
         }
     }
 
+    /// Blend the pixels of another pixel format `src` as colors. `rect_src`
+    /// selects an inclusive source rectangle (the whole source when `None`);
+    /// it lands offset by (`dx`, `dy`), clipped to the source and to the clip
+    /// box. Rows run bottom-up when the placement moves down, so blending a
+    /// format into a view of itself does not read rows it already wrote.
+    ///
+    /// Port of C++ `renderer_base::blend_from`. C++ also trims each row to
+    /// the source's allocated extent (`row_data::x1..x2`); every source here
+    /// has its whole rows allocated, so that trim never changes the run.
+    pub fn blend_from<Src: PixelFormat>(
+        &mut self,
+        src: &Src,
+        rect_src: Option<&RectI>,
+        dx: i32,
+        dy: i32,
+        cover: CoverType,
+    ) where
+        PF: PixfmtBlendFrom<Src>,
+    {
+        let (w, h) = (src.width() as i32, src.height() as i32);
+        let mut rsrc = RectI::new(0, 0, w, h);
+        if let Some(r) = rect_src {
+            rsrc.x1 = r.x1;
+            rsrc.y1 = r.y1;
+            rsrc.x2 = r.x2 + 1;
+            rsrc.y2 = r.y2 + 1;
+        }
+
+        let mut rdst = RectI::new(rsrc.x1 + dx, rsrc.y1 + dy, rsrc.x2 + dx, rsrc.y2 + dy);
+        let mut rc = self.clip_rect_area(&mut rdst, &mut rsrc, w, h);
+        if rc.x2 > 0 {
+            let mut incy = 1;
+            if rdst.y1 > rsrc.y1 {
+                rsrc.y1 += rc.y2 - 1;
+                rdst.y1 += rc.y2 - 1;
+                incy = -1;
+            }
+            while rc.y2 > 0 {
+                self.ren
+                    .blend_from(src, rdst.x1, rdst.y1, rsrc.x1, rsrc.y1, rc.x2 as u32, cover);
+                rdst.y1 += incy;
+                rsrc.y1 += incy;
+                rc.y2 -= 1;
+            }
+        }
+    }
+
     /// Blend `color` through the gray8 buffer `src` (one byte per pixel),
     /// each gray value acting as that pixel's coverage (scaled by `cover`).
     /// `rect_src` selects an inclusive source rectangle (the whole buffer
@@ -372,6 +419,21 @@ impl<PF: PixelFormat> RendererBase<PF> {
         y2 = y2.min(self.ymax());
         for y in y1..=y2 {
             self.ren.blend_pixel(x, y, c, cover);
+        }
+    }
+
+    /// Copy (overwrite) a filled rectangle: the inclusive corners in either
+    /// order, clipped to the clip box.
+    ///
+    /// Port of C++ `renderer_base::copy_bar`.
+    pub fn copy_bar(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, c: &PF::ColorType) {
+        let mut rc = RectI::new(x1, y1, x2, y2);
+        rc.normalize();
+        if !rc.clip(&self.clip_box) {
+            return;
+        }
+        for y in rc.y1..=rc.y2 {
+            self.ren.copy_hline(rc.x1, y, (rc.x2 - rc.x1 + 1) as u32, c);
         }
     }
 
