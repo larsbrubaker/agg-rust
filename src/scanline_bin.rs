@@ -42,8 +42,9 @@ impl ScanlineBin {
     }
 
     /// Prepare for a new scanline with the given X range.
-    pub fn reset(&mut self, _min_x: i32, max_x: i32) {
-        let max_len = (max_x + 3) as usize;
+    pub fn reset(&mut self, min_x: i32, max_x: i32) {
+        // C++ `scanline_bin::reset`: room for `max_x - min_x + 3` spans.
+        let max_len = (max_x - min_x + 3) as usize;
         if max_len > self.spans.len() {
             self.spans.resize(max_len, BinSpan::default());
         }
@@ -169,5 +170,16 @@ mod tests {
         sl.add_cell(10, 255);
         sl.reset_spans();
         assert_eq!(sl.num_spans(), 0);
+    }
+
+    /// `reset` sizes its spans from the width `max_x - min_x + 3`, as C++ does.
+    #[test]
+    fn test_reset_sizes_from_width_for_negative_x() {
+        let mut sl = ScanlineBin::new();
+        sl.reset(-50, -10);
+        for x in (-50..=-10).step_by(2) {
+            sl.add_cell(x, 255);
+        }
+        assert_eq!(sl.num_spans(), 21);
     }
 }

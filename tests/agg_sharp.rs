@@ -34,6 +34,8 @@ mod renderer_primitives_tests;
 mod slight_blur_tests;
 #[path = "agg_sharp/stack_blur_gray8_tests.rs"]
 mod stack_blur_gray8_tests;
+#[path = "agg_sharp/scanline_boolean_algebra_tests.rs"]
+mod scanline_boolean_algebra_tests;
 #[path = "agg_sharp/stack_blur_tests.rs"]
 mod stack_blur_tests;
 

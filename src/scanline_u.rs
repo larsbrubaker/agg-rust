@@ -118,6 +118,23 @@ impl Scanline for ScanlineU8 {
         self.last_x = xi as i32 + len as i32 - 1;
     }
 
+    /// C++ `scanline_u8::add_cells`: copies the covers into place and extends the last span
+    /// when the cells continue it.
+    fn add_cells(&mut self, x: i32, len: u32, covers: &[u8]) {
+        let xi = (x - self.min_x) as usize;
+        let n = len as usize;
+        self.covers[xi..xi + n].copy_from_slice(&covers[..n]);
+        if xi as i32 == self.last_x + 1 {
+            self.spans[self.cur_span].len += len as i32;
+        } else {
+            self.cur_span += 1;
+            self.spans[self.cur_span].x = x;
+            self.spans[self.cur_span].len = len as i32;
+            self.spans[self.cur_span].cover_offset = xi;
+        }
+        self.last_x = xi as i32 + len as i32 - 1;
+    }
+
     fn finalize(&mut self, y: i32) {
         self.y_val = y;
     }

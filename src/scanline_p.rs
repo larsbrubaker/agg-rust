@@ -53,8 +53,9 @@ impl ScanlineP8 {
     }
 
     /// Prepare for a new scanline with the given X range.
-    pub fn reset(&mut self, _min_x: i32, max_x: i32) {
-        let max_len = (max_x + 3) as usize;
+    pub fn reset(&mut self, min_x: i32, max_x: i32) {
+        // C++ `scanline_p8::reset`: room for `max_x - min_x + 3` spans and covers.
+        let max_len = (max_x - min_x + 3) as usize;
         if max_len > self.spans.len() {
             self.spans.resize(max_len, PackedSpan::default());
             self.covers.resize(max_len, 0);
@@ -113,6 +114,23 @@ impl Scanline for ScanlineP8 {
             self.spans[self.cur_span].x = x;
             self.spans[self.cur_span].len = -(len as i32);
         }
+        self.last_x = x + len as i32 - 1;
+    }
+
+    /// C++ `scanline_p8::add_cells`: copies the covers and extends the last span when it is
+    /// an adjacent span of per-pixel covers.
+    fn add_cells(&mut self, x: i32, len: u32, covers: &[u8]) {
+        let n = len as usize;
+        self.covers[self.cover_ptr..self.cover_ptr + n].copy_from_slice(&covers[..n]);
+        if x == self.last_x + 1 && self.spans[self.cur_span].len > 0 {
+            self.spans[self.cur_span].len += len as i32;
+        } else {
+            self.cur_span += 1;
+            self.spans[self.cur_span].cover_offset = self.cover_ptr;
+            self.spans[self.cur_span].x = x;
+            self.spans[self.cur_span].len = len as i32;
+        }
+        self.cover_ptr += n;
         self.last_x = x + len as i32 - 1;
     }
 
@@ -221,5 +239,31 @@ mod tests {
         sl.add_cell(10, 128);
         sl.reset_spans();
         assert_eq!(sl.num_spans(), 0);
+    }
+
+    /// `reset` sizes its buffers from the width `max_x - min_x + 3`, as C++ does, so a
+    /// scanline entirely left of x = 0 has room for every cell (sizing from `max_x + 3`
+    /// alone overflowed here).
+    #[test]
+    fn test_reset_sizes_from_width_for_negative_x() {
+        let mut sl = ScanlineP8::new();
+        sl.reset(-50, -10);
+        let covers = [77u8; 41];
+        sl.add_cells(-50, 41, &covers);
+        assert_eq!(sl.num_spans(), 1);
+        assert_eq!(sl.begin()[0].x, -50);
+        assert_eq!(sl.begin()[0].len, 41);
+        assert_eq!(sl.covers()[40], 77);
+    }
+
+    #[test]
+    fn test_add_cells_extends_a_cell_span() {
+        let mut sl = ScanlineP8::new();
+        sl.reset(0, 100);
+        sl.add_cell(10, 5);
+        sl.add_cells(11, 2, &[6, 7]);
+        assert_eq!(sl.num_spans(), 1);
+        assert_eq!(sl.begin()[0].len, 3);
+        assert_eq!(&sl.covers()[0..3], &[5, 6, 7]);
     }
 }

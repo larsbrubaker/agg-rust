@@ -42,6 +42,16 @@ pub trait Scanline {
     /// Add a horizontal span of `len` pixels starting at `x`, all with `cover`.
     fn add_span(&mut self, x: i32, len: u32, cover: u32);
 
+    /// Add `len` cells starting at `x`, their covers read from `covers[0..len]`.
+    ///
+    /// C++ scanlines all have `add_cells`; the default adds the cells one by one, which gives
+    /// the same spans as C++ for every scanline that merges adjacent cells.
+    fn add_cells(&mut self, x: i32, len: u32, covers: &[u8]) {
+        for (i, &c) in covers[..len as usize].iter().enumerate() {
+            self.add_cell(x + i as i32, c as u32);
+        }
+    }
+
     /// Finalize the scanline at the given Y coordinate.
     fn finalize(&mut self, y: i32);
 
