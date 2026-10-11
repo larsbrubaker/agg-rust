@@ -13,6 +13,10 @@
 //! push a channel above 1 when it is fed a color that is not premultiplied.
 //! Clamping happens only where a float converts to a byte (`Rgba32::to_rgba8`).
 //!
+//! [`PixfmtCompOpRgbaF32`] is the float counterpart of `comp_op`'s
+//! `PixfmtRgba32CompOp`: C++ `pixfmt_custom_blend_rgba` over
+//! `comp_op_adaptor_rgba<rgba32>`, sharing that module's SVG operators.
+//!
 //! The 8-bit RGBA formats live in `pixfmt_rgba`, which also holds the
 //! [`PixelFormat`] and [`PixfmtBlendFrom`] traits implemented here.
 
@@ -21,9 +25,24 @@ use std::marker::PhantomData;
 use crate::basics::{CoverType, COVER_MASK};
 use crate::color::{OrderAbgr, OrderArgb, OrderBgra, OrderRgba};
 use crate::color_rgba32::Rgba32;
+use crate::comp_op::{comp_op_blend, CompOp};
 use crate::pixfmt_rgba::{PixelFormat, PixfmtBlendFrom};
 
 const PIX_STEP: usize = 4;
+
+/// Panics unless a buffer of `len` floats holds `height` rows of `width`
+/// pixels `stride` floats apart.
+fn check_buffer(len: usize, width: u32, height: u32, stride: usize) {
+    let row = width as usize * PIX_STEP;
+    assert!(
+        stride >= row,
+        "stride {stride} shorter than a row of {row} floats"
+    );
+    if height > 0 {
+        let needed = (height as usize - 1) * stride + row;
+        assert!(len >= needed, "buffer of {len} floats cannot hold {needed}");
+    }
+}
 
 // ============================================================================
 // Component order
@@ -164,19 +183,7 @@ impl<'a, B: BlenderRgbaF32, O: ComponentOrderRgba> PixfmtAlphaBlendRgbaF32<'a, B
     /// # Panics
     /// If `stride` is shorter than a row or `buf` cannot hold every row.
     pub fn new(buf: &'a mut [f32], width: u32, height: u32, stride: usize) -> Self {
-        let row = width as usize * PIX_STEP;
-        assert!(
-            stride >= row,
-            "stride {stride} shorter than a row of {row} floats"
-        );
-        if height > 0 {
-            let needed = (height as usize - 1) * stride + row;
-            assert!(
-                buf.len() >= needed,
-                "buffer of {} floats cannot hold {needed}",
-                buf.len()
-            );
-        }
+        check_buffer(buf.len(), width, height, stride);
         Self {
             buf,
             width,
@@ -469,5 +476,201 @@ where
                 Self::copy_or_blend_pix_cover(p, &c, cover);
             }
         }
+    }
+}
+
+// ============================================================================
+// PixfmtCompOpRgbaF32
+// ============================================================================
+
+/// C++ `pixfmt_custom_blend_rgba<comp_op_adaptor_rgba<rgba32, Order>,
+/// rendering_buffer>`: every blend premultiplies the straight source color in
+/// `f32` and composites it with a runtime-selectable SVG operator. Unlike
+/// [`PixfmtAlphaBlendRgbaF32`] there is no shortcut for opaque or transparent
+/// colors: an operator such as clear or src changes the destination even
+/// where the source is transparent.
+///
+/// The operators are shared with the 8-bit [`PixfmtRgba32CompOp`]
+/// (`comp_op.rs`): they work in `f64` and narrow back to `f32` with no
+/// clamping beyond each operator's own `clip`.
+///
+/// [`PixfmtRgba32CompOp`]: crate::comp_op::PixfmtRgba32CompOp
+pub struct PixfmtCompOpRgbaF32<'a, O: ComponentOrderRgba> {
+    buf: &'a mut [f32],
+    width: u32,
+    height: u32,
+    stride: usize,
+    comp_op: CompOp,
+    _marker: PhantomData<O>,
+}
+
+/// C++ `pixfmt_custom_blend_rgba<comp_op_adaptor_rgba<rgba32, order_rgba>>`.
+pub type PixfmtRgba128CompOp<'a> = PixfmtCompOpRgbaF32<'a, OrderRgba>;
+/// C++ `pixfmt_custom_blend_rgba<comp_op_adaptor_rgba<rgba32, order_bgra>>`.
+pub type PixfmtBgra128CompOp<'a> = PixfmtCompOpRgbaF32<'a, OrderBgra>;
+
+impl<'a, O: ComponentOrderRgba> PixfmtCompOpRgbaF32<'a, O> {
+    /// Attach to `buf` as [`PixfmtAlphaBlendRgbaF32::new`] does, compositing
+    /// with `op`.
+    ///
+    /// # Panics
+    /// If `stride` is shorter than a row or `buf` cannot hold every row.
+    pub fn new(buf: &'a mut [f32], width: u32, height: u32, stride: usize, op: CompOp) -> Self {
+        check_buffer(buf.len(), width, height, stride);
+        Self {
+            buf,
+            width,
+            height,
+            stride,
+            comp_op: op,
+            _marker: PhantomData,
+        }
+    }
+
+    /// C++ `comp_op()`: the operator every blend uses.
+    pub fn comp_op(&self) -> CompOp {
+        self.comp_op
+    }
+
+    /// C++ `comp_op(op)`.
+    pub fn set_comp_op(&mut self, op: CompOp) {
+        self.comp_op = op;
+    }
+
+    /// Stride in floats.
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+
+    /// The whole buffer.
+    pub fn buf(&self) -> &[f32] {
+        self.buf
+    }
+
+    #[inline]
+    fn offset(&self, x: i32, y: i32) -> usize {
+        y as usize * self.stride + x as usize * PIX_STEP
+    }
+
+    /// C++ `blend_pix(p, c, cover)`: `comp_op_adaptor_rgba::blend_pix` on the
+    /// pixel's channels, gathered into RGBA order and scattered back.
+    #[inline]
+    fn blend_pix(&mut self, x: i32, y: i32, c: &Rgba32, cover: CoverType) {
+        let o = self.offset(x, y);
+        let p = &mut self.buf[o..o + PIX_STEP];
+        let mut px = [p[O::R], p[O::G], p[O::B], p[O::A]];
+        comp_op_blend(self.comp_op, &mut px, c.r, c.g, c.b, c.a, cover);
+        p[O::R] = px[0];
+        p[O::G] = px[1];
+        p[O::B] = px[2];
+        p[O::A] = px[3];
+    }
+
+    #[inline]
+    fn set(&mut self, x: i32, y: i32, c: &Rgba32) {
+        let o = self.offset(x, y);
+        let p = &mut self.buf[o..o + PIX_STEP];
+        p[O::R] = c.r;
+        p[O::G] = c.g;
+        p[O::B] = c.b;
+        p[O::A] = c.a;
+    }
+
+    /// C++ `blend_vline`.
+    pub fn blend_vline(&mut self, x: i32, y: i32, len: u32, c: &Rgba32, cover: CoverType) {
+        for i in 0..len as i32 {
+            self.blend_pix(x, y + i, c, cover);
+        }
+    }
+
+    /// C++ `blend_solid_vspan`.
+    pub fn blend_solid_vspan(
+        &mut self,
+        x: i32,
+        y: i32,
+        len: u32,
+        c: &Rgba32,
+        covers: &[CoverType],
+    ) {
+        for (i, &cover) in covers.iter().take(len as usize).enumerate() {
+            self.blend_pix(x, y + i as i32, c, cover);
+        }
+    }
+
+    /// C++ `blend_color_vspan`: per-pixel covers when `covers` is non-empty,
+    /// else `cover` for all.
+    pub fn blend_color_vspan(
+        &mut self,
+        x: i32,
+        y: i32,
+        len: u32,
+        colors: &[Rgba32],
+        covers: &[CoverType],
+        cover: CoverType,
+    ) {
+        for (i, c) in colors.iter().take(len as usize).enumerate() {
+            let cv = if covers.is_empty() { cover } else { covers[i] };
+            self.blend_pix(x, y + i as i32, c, cv);
+        }
+    }
+}
+
+impl<O: ComponentOrderRgba> PixelFormat for PixfmtCompOpRgbaF32<'_, O> {
+    type ColorType = Rgba32;
+
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn blend_pixel(&mut self, x: i32, y: i32, c: &Rgba32, cover: CoverType) {
+        self.blend_pix(x, y, c, cover);
+    }
+
+    fn blend_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba32, cover: CoverType) {
+        for i in 0..len as i32 {
+            self.blend_pix(x + i, y, c, cover);
+        }
+    }
+
+    fn blend_solid_hspan(&mut self, x: i32, y: i32, len: u32, c: &Rgba32, covers: &[CoverType]) {
+        for (i, &cover) in covers.iter().take(len as usize).enumerate() {
+            self.blend_pix(x + i as i32, y, c, cover);
+        }
+    }
+
+    fn copy_hline(&mut self, x: i32, y: i32, len: u32, c: &Rgba32) {
+        for i in 0..len as i32 {
+            self.set(x + i, y, c);
+        }
+    }
+
+    fn copy_pixel(&mut self, x: i32, y: i32, c: &Rgba32) {
+        self.set(x, y, c);
+    }
+
+    /// C++ `blend_color_hspan`: `covers ? *covers++ : cover` per pixel.
+    fn blend_color_hspan(
+        &mut self,
+        x: i32,
+        y: i32,
+        len: u32,
+        colors: &[Rgba32],
+        covers: &[CoverType],
+        cover: CoverType,
+    ) {
+        for (i, c) in colors.iter().take(len as usize).enumerate() {
+            let cv = if covers.is_empty() { cover } else { covers[i] };
+            self.blend_pix(x + i as i32, y, c, cv);
+        }
+    }
+
+    fn pixel(&self, x: i32, y: i32) -> Rgba32 {
+        let o = self.offset(x, y);
+        let p = &self.buf[o..o + PIX_STEP];
+        Rgba32::new(p[O::R], p[O::G], p[O::B], p[O::A])
     }
 }

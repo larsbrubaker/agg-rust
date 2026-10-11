@@ -5,6 +5,7 @@
 
 use crate::basics::uround;
 use crate::color::Rgba8;
+use crate::color_rgba32::Rgba32;
 use crate::dda_line::DdaLineInterpolator;
 
 // ============================================================================
@@ -284,6 +285,50 @@ impl ColorFunction for GradientLinearColor {
     fn get(&self, index: usize) -> Rgba8 {
         self.c1
             .gradient(&self.c2, index as f64 / (self.size - 1).max(1) as f64)
+    }
+}
+
+// ============================================================================
+// GradientLinearColorF32 — 2-color linear interpolation over rgba32
+// ============================================================================
+
+/// C++ `gradient_linear_color<rgba32>`: `size` colors from `c1` to `c2`,
+/// color `v` being `c1.gradient(c2, v * mult)` with `mult = 1 / (size - 1)`
+/// (C++ multiplies by the stored reciprocal rather than dividing, which
+/// rounds differently). `size` should be at least 2; a size of 1 makes the
+/// reciprocal infinite, as in C++.
+pub struct GradientLinearColorF32 {
+    c1: Rgba32,
+    c2: Rgba32,
+    size: usize,
+    mult: f64,
+}
+
+impl GradientLinearColorF32 {
+    pub fn new(c1: Rgba32, c2: Rgba32, size: usize) -> Self {
+        Self {
+            c1,
+            c2,
+            size,
+            mult: 1.0 / (size as f64 - 1.0),
+        }
+    }
+
+    /// C++ `colors(c1, c2, size)`.
+    pub fn colors(&mut self, c1: Rgba32, c2: Rgba32, size: usize) {
+        *self = Self::new(c1, c2, size);
+    }
+}
+
+impl ColorFunction for GradientLinearColorF32 {
+    type Color = Rgba32;
+
+    fn size(&self) -> usize {
+        self.size
+    }
+
+    fn get(&self, index: usize) -> Rgba32 {
+        self.c1.gradient(&self.c2, index as f64 * self.mult)
     }
 }
 

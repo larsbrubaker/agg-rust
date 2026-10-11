@@ -30,6 +30,8 @@ mod raster_text_tests;
 mod rasterizer_cells_aa_tests;
 #[path = "agg_sharp/recursive_blur_tests.rs"]
 mod recursive_blur_tests;
+#[path = "agg_sharp/renderer_base_float_tests.rs"]
+mod renderer_base_float_tests;
 #[path = "agg_sharp/renderer_markers_tests.rs"]
 mod renderer_markers_tests;
 #[path = "agg_sharp/renderer_primitives_tests.rs"]

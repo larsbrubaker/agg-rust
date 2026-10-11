@@ -7,6 +7,7 @@
 
 use crate::basics::CoverType;
 use crate::color::Rgba8;
+use crate::color_rgba32::Rgba32;
 use crate::pixfmt_rgba::PixelFormat;
 use crate::rendering_buffer::RowAccessor;
 
@@ -55,6 +56,55 @@ impl Default for CompOp {
 }
 
 // ============================================================================
+// Channel types the compositing operators run on
+// ============================================================================
+
+/// A channel type of the C++ color types `comp_op_adaptor_rgba` is
+/// instantiated for (`rgba8`'s `int8u`, `rgba32`'s `float`): the color-type
+/// statics the operators call, so one body serves both. The operators work in
+/// `f64` (C++ `blender_base::rgba`) except where C++ uses the color type's own
+/// arithmetic (the premultiply and src-over's `blender_rgba_pre`).
+pub(crate) trait CompChannel: Copy {
+    /// The channel's zero (C++ `value_type(0)`).
+    const ZERO: Self;
+    fn to_double(v: Self) -> f64;
+    fn from_double(v: f64) -> Self;
+    fn multiply(a: Self, b: Self) -> Self;
+    fn mult_cover(a: Self, cover: CoverType) -> Self;
+    fn prelerp(p: Self, q: Self, a: Self) -> Self;
+}
+
+macro_rules! impl_comp_channel {
+    ($t:ty, $color:ty, $zero:expr) => {
+        impl CompChannel for $t {
+            const ZERO: $t = $zero;
+            #[inline(always)]
+            fn to_double(v: $t) -> f64 {
+                <$color>::to_double(v)
+            }
+            #[inline(always)]
+            fn from_double(v: f64) -> $t {
+                <$color>::from_double(v)
+            }
+            #[inline(always)]
+            fn multiply(a: $t, b: $t) -> $t {
+                <$color>::multiply(a, b)
+            }
+            #[inline(always)]
+            fn mult_cover(a: $t, cover: CoverType) -> $t {
+                <$color>::mult_cover(a, cover)
+            }
+            #[inline(always)]
+            fn prelerp(p: $t, q: $t, a: $t) -> $t {
+                <$color>::prelerp(p, q, a)
+            }
+        }
+    };
+}
+impl_comp_channel!(u8, Rgba8, 0);
+impl_comp_channel!(f32, Rgba32, 0.0);
+
+// ============================================================================
 // Premultiplied f64 RGBA working space (like C++ blender_base::rgba)
 // ============================================================================
 
@@ -68,7 +118,7 @@ struct PremulRgba {
 }
 
 impl PremulRgba {
-    /// Read from u8 pixel buffer as premultiplied f64, scaled by cover.
+    /// Read premultiplied channels as f64, scaled by cover (C++ `blender_base::get`).
     ///
     /// `#[inline(always)]`: this sits at the innermost point of every span blend
     /// loop. Forcing it (and the sibling get/set helpers) to inline lets the
@@ -76,7 +126,7 @@ impl PremulRgba {
     /// and coalesce the byte loads/stores — the codegen shape MSVC gets on the C++
     /// raw-pointer walk.
     #[inline(always)]
-    fn get(r: u8, g: u8, b: u8, a: u8, cover: u8) -> Self {
+    fn get<T: CompChannel>(r: T, g: T, b: T, a: T, cover: u8) -> Self {
         if cover == 0 {
             return Self {
                 r: 0.0,
@@ -86,10 +136,10 @@ impl PremulRgba {
             };
         }
         let mut c = Self {
-            r: Rgba8::to_double(r),
-            g: Rgba8::to_double(g),
-            b: Rgba8::to_double(b),
-            a: Rgba8::to_double(a),
+            r: T::to_double(r),
+            g: T::to_double(g),
+            b: T::to_double(b),
+            a: T::to_double(a),
         };
         if cover < 255 {
             let x = cover as f64 / 255.0;
@@ -101,28 +151,28 @@ impl PremulRgba {
         c
     }
 
-    /// Read from a 4-byte pixel (RGBA order) as premultiplied f64.
+    /// Read a four-channel pixel (RGBA order) as premultiplied f64.
     ///
-    /// Taking `&[u8; 4]` (rather than `&[u8]`) makes all four indices provably in
-    /// bounds, so the reads compile to one 32-bit load instead of four
+    /// Taking `&[T; 4]` (rather than a slice) makes all four indices provably in
+    /// bounds, so for `u8` the reads compile to one 32-bit load instead of four
     /// bounds-checked byte loads.
     #[inline(always)]
-    fn get_pix(p: &[u8; 4], cover: u8) -> Self {
+    fn get_pix<T: CompChannel>(p: &[T; 4], cover: u8) -> Self {
         Self::get(p[0], p[1], p[2], p[3], cover)
     }
 
-    /// Write premultiplied f64 back to a 4-byte pixel.
+    /// Write premultiplied f64 back to a four-channel pixel (C++ `blender_base::set`).
     #[inline(always)]
-    fn set(p: &mut [u8; 4], c: &PremulRgba) {
-        p[0] = Rgba8::from_double(c.r);
-        p[1] = Rgba8::from_double(c.g);
-        p[2] = Rgba8::from_double(c.b);
-        p[3] = Rgba8::from_double(c.a);
+    fn set<T: CompChannel>(p: &mut [T; 4], c: &PremulRgba) {
+        p[0] = T::from_double(c.r);
+        p[1] = T::from_double(c.g);
+        p[2] = T::from_double(c.b);
+        p[3] = T::from_double(c.a);
     }
 
     /// Write direct RGBA values.
     #[inline(always)]
-    fn set_rgba(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8) {
+    fn set_rgba<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T) {
         p[0] = r;
         p[1] = g;
         p[2] = b;
@@ -148,16 +198,24 @@ impl PremulRgba {
 // Per-operation blend functions
 // ============================================================================
 
-/// Blend pixel `p` (RGBA u8) with premultiplied source (r,g,b,a) using `op`.
+/// Blend pixel `p` (RGBA order) with premultiplied source (r,g,b,a) using `op`.
 ///
 /// Source colors are NON-premultiplied; this function premultiplies them
 /// before dispatching (matching C++ `comp_op_adaptor_rgba`).
 #[inline]
-fn comp_op_blend(op: CompOp, p: &mut [u8; 4], sr: u8, sg: u8, sb: u8, sa: u8, cover: u8) {
+pub(crate) fn comp_op_blend<T: CompChannel>(
+    op: CompOp,
+    p: &mut [T; 4],
+    sr: T,
+    sg: T,
+    sb: T,
+    sa: T,
+    cover: u8,
+) {
     // Premultiply source by alpha (matching comp_op_adaptor_rgba)
-    let r = Rgba8::multiply(sr, sa);
-    let g = Rgba8::multiply(sg, sa);
-    let b = Rgba8::multiply(sb, sa);
+    let r = T::multiply(sr, sa);
+    let g = T::multiply(sg, sa);
+    let b = T::multiply(sb, sa);
     let a = sa;
 
     match op {
@@ -191,12 +249,12 @@ fn comp_op_blend(op: CompOp, p: &mut [u8; 4], sr: u8, sg: u8, sb: u8, sa: u8, co
 
 // ---- Clear: Dca' = 0, Da' = 0
 #[inline(always)]
-fn blend_clear(p: &mut [u8; 4], cover: u8) {
+fn blend_clear<T: CompChannel>(p: &mut [T; 4], cover: u8) {
     if cover >= 255 {
-        p[0] = 0;
-        p[1] = 0;
-        p[2] = 0;
-        p[3] = 0;
+        p[0] = T::ZERO;
+        p[1] = T::ZERO;
+        p[2] = T::ZERO;
+        p[3] = T::ZERO;
     } else if cover > 0 {
         let d = PremulRgba::get_pix(p, 255 - cover);
         PremulRgba::set(p, &d);
@@ -205,7 +263,7 @@ fn blend_clear(p: &mut [u8; 4], cover: u8) {
 
 // ---- Src: Dca' = Sca, Da' = Sa
 #[inline(always)]
-fn blend_src(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_src<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     if cover >= 255 {
         PremulRgba::set_rgba(p, r, g, b, a);
     } else {
@@ -233,27 +291,27 @@ fn blend_src(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 // path to stay byte-identical. The incoming (r, g, b, a) are already the
 // premultiplied source from `comp_op_blend`.
 #[inline(always)]
-fn blend_src_over(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
-    let cr = Rgba8::mult_cover(r, cover);
-    let cg = Rgba8::mult_cover(g, cover);
-    let cb = Rgba8::mult_cover(b, cover);
-    let ca = Rgba8::mult_cover(a, cover);
+fn blend_src_over<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
+    let cr = T::mult_cover(r, cover);
+    let cg = T::mult_cover(g, cover);
+    let cb = T::mult_cover(b, cover);
+    let ca = T::mult_cover(a, cover);
     // Load the 4 destination bytes once and store once. Each prelerp still reads
     // the ORIGINAL channel value (writes never feed a later read here), so this is
     // bit-identical to the per-channel read-modify-write while giving the compiler
     // a single 32-bit load and store to schedule.
     let d = *p;
     *p = [
-        Rgba8::prelerp(d[0], cr, ca),
-        Rgba8::prelerp(d[1], cg, ca),
-        Rgba8::prelerp(d[2], cb, ca),
-        Rgba8::prelerp(d[3], ca, ca),
+        T::prelerp(d[0], cr, ca),
+        T::prelerp(d[1], cg, ca),
+        T::prelerp(d[2], cb, ca),
+        T::prelerp(d[3], ca, ca),
     ];
 }
 
 // ---- DstOver: Dca' = Dca + Sca.(1 - Da)
 #[inline(always)]
-fn blend_dst_over(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_dst_over<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255);
     let d1a = 1.0 - d.a;
@@ -266,8 +324,8 @@ fn blend_dst_over(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- SrcIn: Dca' = Sca.Da
 #[inline(always)]
-fn blend_src_in(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
-    let da = Rgba8::to_double(p[3]);
+fn blend_src_in<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
+    let da = T::to_double(p[3]);
     if da > 0.0 {
         let s = PremulRgba::get(r, g, b, a, cover);
         let mut d = PremulRgba::get_pix(p, 255 - cover);
@@ -281,8 +339,8 @@ fn blend_src_in(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- DstIn: Dca' = Dca.Sa
 #[inline(always)]
-fn blend_dst_in(p: &mut [u8; 4], a: u8, cover: u8) {
-    let sa = Rgba8::to_double(a);
+fn blend_dst_in<T: CompChannel>(p: &mut [T; 4], a: T, cover: u8) {
+    let sa = T::to_double(a);
     let mut d = PremulRgba::get_pix(p, 255 - cover);
     let d2 = PremulRgba::get_pix(p, cover);
     d.r += d2.r * sa;
@@ -294,10 +352,10 @@ fn blend_dst_in(p: &mut [u8; 4], a: u8, cover: u8) {
 
 // ---- SrcOut: Dca' = Sca.(1 - Da)
 #[inline(always)]
-fn blend_src_out(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_src_out<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255 - cover);
-    let d1a = 1.0 - Rgba8::to_double(p[3]);
+    let d1a = 1.0 - T::to_double(p[3]);
     d.r += s.r * d1a;
     d.g += s.g * d1a;
     d.b += s.b * d1a;
@@ -307,10 +365,10 @@ fn blend_src_out(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- DstOut: Dca' = Dca.(1 - Sa)
 #[inline(always)]
-fn blend_dst_out(p: &mut [u8; 4], a: u8, cover: u8) {
+fn blend_dst_out<T: CompChannel>(p: &mut [T; 4], a: T, cover: u8) {
     let mut d = PremulRgba::get_pix(p, 255 - cover);
     let dc = PremulRgba::get_pix(p, cover);
-    let s1a = 1.0 - Rgba8::to_double(a);
+    let s1a = 1.0 - T::to_double(a);
     d.r += dc.r * s1a;
     d.g += dc.g * s1a;
     d.b += dc.b * s1a;
@@ -320,7 +378,7 @@ fn blend_dst_out(p: &mut [u8; 4], a: u8, cover: u8) {
 
 // ---- SrcAtop: Dca' = Sca.Da + Dca.(1 - Sa), Da' = Da
 #[inline(always)]
-fn blend_src_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_src_atop<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255);
     let s1a = 1.0 - s.a;
@@ -342,12 +400,12 @@ fn blend_src_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- DstAtop: Dca' = Dca.Sa + Sca.(1 - Da), Da' = Sa
 #[inline(always)]
-fn blend_dst_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_dst_atop<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let sc = PremulRgba::get(r, g, b, a, cover);
     let dc = PremulRgba::get_pix(p, cover);
     let mut d = PremulRgba::get_pix(p, 255 - cover);
-    let sa = Rgba8::to_double(a);
-    let d1a = 1.0 - Rgba8::to_double(p[3]);
+    let sa = T::to_double(a);
+    let d1a = 1.0 - T::to_double(p[3]);
     d.r += dc.r * sa + sc.r * d1a;
     d.g += dc.g * sa + sc.g * d1a;
     d.b += dc.b * sa + sc.b * d1a;
@@ -357,11 +415,11 @@ fn blend_dst_atop(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Xor: Dca' = Sca.(1 - Da) + Dca.(1 - Sa)
 #[inline(always)]
-fn blend_xor(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_xor<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     let mut d = PremulRgba::get_pix(p, 255);
     let s1a = 1.0 - s.a;
-    let d1a = 1.0 - Rgba8::to_double(p[3]);
+    let d1a = 1.0 - T::to_double(p[3]);
     d.r = s.r * d1a + d.r * s1a;
     d.g = s.g * d1a + d.g * s1a;
     d.b = s.b * d1a + d.b * s1a;
@@ -371,7 +429,7 @@ fn blend_xor(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Plus: Dca' = Sca + Dca (clamped)
 #[inline(always)]
-fn blend_plus(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_plus<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -386,7 +444,7 @@ fn blend_plus(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Minus: Dca' = Dca - Sca (clamped)
 #[inline(always)]
-fn blend_minus(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_minus<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -401,7 +459,7 @@ fn blend_minus(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Multiply: Dca' = Sca.Dca + Sca.(1 - Da) + Dca.(1 - Sa)
 #[inline(always)]
-fn blend_multiply(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_multiply<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -418,7 +476,7 @@ fn blend_multiply(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Screen: Dca' = Sca + Dca - Sca.Dca
 #[inline(always)]
-fn blend_screen(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_screen<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -442,7 +500,7 @@ fn overlay_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1a: 
 }
 
 #[inline(always)]
-fn blend_overlay(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_overlay<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -460,7 +518,7 @@ fn blend_overlay(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Darken: min(Sca.Da, Dca.Sa) + Sca.(1 - Da) + Dca.(1 - Sa)
 #[inline(always)]
-fn blend_darken(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_darken<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -477,7 +535,7 @@ fn blend_darken(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Lighten: max(Sca.Da, Dca.Sa) + Sca.(1 - Da) + Dca.(1 - Sa)
 #[inline(always)]
-fn blend_lighten(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_lighten<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -505,7 +563,7 @@ fn color_dodge_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s
 }
 
 #[inline(always)]
-fn blend_color_dodge(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_color_dodge<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -544,7 +602,7 @@ fn color_burn_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1
 }
 
 #[inline(always)]
-fn blend_color_burn(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_color_burn<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -575,7 +633,7 @@ fn hard_light_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1
 }
 
 #[inline(always)]
-fn blend_hard_light(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_hard_light<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -609,7 +667,7 @@ fn soft_light_calc(dca: f64, sca: f64, da: f64, sa: f64, sada: f64, d1a: f64, s1
 }
 
 #[inline(always)]
-fn blend_soft_light(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_soft_light<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -631,7 +689,7 @@ fn blend_soft_light(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Difference: Dca' = Sca + Dca - 2.min(Sca.Da, Dca.Sa)
 #[inline(always)]
-fn blend_difference(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_difference<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
@@ -646,7 +704,7 @@ fn blend_difference(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
 
 // ---- Exclusion: (Sca.Da + Dca.Sa - 2.Sca.Dca) + Sca.(1 - Da) + Dca.(1 - Sa)
 #[inline(always)]
-fn blend_exclusion(p: &mut [u8; 4], r: u8, g: u8, b: u8, a: u8, cover: u8) {
+fn blend_exclusion<T: CompChannel>(p: &mut [T; 4], r: T, g: T, b: T, a: T, cover: u8) {
     let s = PremulRgba::get(r, g, b, a, cover);
     if s.a > 0.0 {
         let mut d = PremulRgba::get_pix(p, 255);
