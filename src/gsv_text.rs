@@ -509,6 +509,7 @@ pub struct GsvText {
     x: f64,
     y: f64,
     start_x: f64,
+    start_y: f64,
     width: f64,
     height: f64,
     space: f64,
@@ -535,6 +536,7 @@ impl GsvText {
             x: 0.0,
             y: 0.0,
             start_x: 0.0,
+            start_y: 0.0,
             width: 10.0,
             height: 0.0,
             space: 0.0,
@@ -589,10 +591,17 @@ impl GsvText {
         self.x = x;
         self.start_x = x;
         self.y = y;
+        self.start_y = y;
     }
 
     pub fn text(&mut self, text: &str) {
         self.text = text.as_bytes().to_vec();
+    }
+
+    /// C++ `gsv_text::text` with a possibly-null string: `None` is the empty string, as in C++
+    /// (and agg-sharp's `text(null)`), so the outline is only the stop.
+    pub fn text_opt(&mut self, text: Option<&str>) {
+        self.text(text.unwrap_or(""));
     }
 
     /// Load font data from a byte slice (replaces C++ file-based load_font).
@@ -627,6 +636,13 @@ impl Default for GsvText {
 impl VertexSource for GsvText {
     fn rewind(&mut self, _path_id: u32) {
         self.status = Status::Initial;
+        // Deliberate fix of a C++ bug: `gsv_text::rewind` leaves the pen where the last pass
+        // ended, so a second pass (a stroke's source is read more than once, e.g. by a GPU path
+        // that measures then draws) drew the text shifted by its own width, and a line lower for
+        // each line break. Every pass starts over at the start point, as agg-sharp's port does.
+        // Locked in by `every_pass_starts_at_the_start_point`.
+        self.x = self.start_x;
+        self.y = self.start_y;
         let font = self.active_font();
         if font.is_empty() {
             return;
@@ -783,6 +799,78 @@ impl VertexSource for GsvTextOutline {
 mod tests {
     use super::*;
     use crate::basics::{is_move_to, is_stop, is_vertex};
+
+    /// agg-sharp `gsv_text.Vertices()`: a rewind, then every vertex up to and including the stop.
+    fn vertices(text: &mut GsvText) -> Vec<(u32, f64, f64)> {
+        text.rewind(0);
+        let mut out = Vec::new();
+        loop {
+            let (mut x, mut y) = (0.0, 0.0);
+            let cmd = text.vertex(&mut x, &mut y);
+            out.push((cmd, x, y));
+            if is_stop(cmd) {
+                return out;
+            }
+        }
+    }
+
+    // agg-sharp `Tests/Agg.Tests/Agg/GsvTextTests.cs`.
+
+    /// Like C++, a gsv_text never given text holds the empty string and yields only the stop.
+    #[test]
+    fn without_text_it_draws_nothing() {
+        let mut text = GsvText::new();
+        text.size(10.0, 0.0);
+
+        let commands: Vec<u32> = vertices(&mut text).iter().map(|v| v.0).collect();
+        assert_eq!(commands, vec![PATH_CMD_STOP]);
+
+        text.text_opt(None);
+        assert_eq!(vertices(&mut text).len(), 1);
+    }
+
+    /// C++ flip(true) negates each glyph's y steps and moves a new line down the y axis instead
+    /// of up, so from y = 0 the flipped outline is the plain one mirrored in y exactly, glyph and
+    /// line break alike.
+    #[test]
+    fn flip_mirrors_glyphs_and_lines_in_y() {
+        let mut plain = GsvText::new();
+        plain.size(8.0, 0.0);
+        plain.start_point(10.0, 0.0);
+        plain.text("Ag\nb");
+
+        let mut flipped = GsvText::new();
+        flipped.size(8.0, 0.0);
+        flipped.flip(true);
+        flipped.start_point(10.0, 0.0);
+        flipped.text("Ag\nb");
+
+        let mirrored: Vec<(u32, f64, f64)> = vertices(&mut plain)
+            .into_iter()
+            .map(|(cmd, x, y)| (cmd, x, -y))
+            .collect();
+        let actual = vertices(&mut flipped);
+
+        assert!(actual.len() > 10);
+        assert_eq!(actual, mirrored);
+    }
+
+    /// A rewind starts the outline again from the start point. C++ gsv_text::rewind leaves the
+    /// pen where the last pass ended, so a second pass drew the text shifted by its own width,
+    /// and a line lower for each line break.
+    #[test]
+    fn every_pass_starts_at_the_start_point() {
+        let mut text = GsvText::new();
+        text.size(8.0, 0.0);
+        text.start_point(10.0, 20.0);
+        text.text("Ag\nb");
+
+        let first = vertices(&mut text);
+        let second = vertices(&mut text);
+
+        assert_eq!(first[0], (PATH_CMD_MOVE_TO, 10.0, 20.0));
+        assert_eq!(second, first);
+    }
 
     #[test]
     fn test_new_defaults() {
