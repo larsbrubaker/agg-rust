@@ -38,6 +38,8 @@ mod stack_blur_gray8_tests;
 mod scanline_boolean_algebra_tests;
 #[path = "agg_sharp/stack_blur_tests.rs"]
 mod stack_blur_tests;
+#[path = "agg_sharp/trans_warp_magnifier_tests.rs"]
+mod trans_warp_magnifier_tests;
 
 // Not ported, each for want of a C++ AGG counterpart or because it pins agg-sharp-only behaviour:
 // AlphaMaskAdaptorTests and PixelFormatBGRAFloatTests / SrgbLutFloatTests (no

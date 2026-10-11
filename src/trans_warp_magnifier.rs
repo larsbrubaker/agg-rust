@@ -43,6 +43,14 @@ impl TransWarpMagnifier {
         let dx = *x - self.xc;
         let dy = *y - self.yc;
         let r = (dx * dx + dy * dy).sqrt();
+        // Divergence from C++ AGG: C++ divides 0 by 0 at the centre of a zero-radius lens
+        // (`m = (0 + 0 * (magn - 1)) / 0`) and returns NaN. A zero radius is the identity
+        // (m = (r + 0) / r = 1), so it, and the exact centre, leave the point untouched, as
+        // agg-sharp does. Returning the input unchanged rather than `xc + dx * 1` also keeps
+        // the point bit-exact. See `transform`; pinned by `TransWarpMagnifierTests` (agg_sharp tests).
+        if r == 0.0 || self.radius == 0.0 {
+            return;
+        }
 
         if r < self.radius * self.magn {
             *x = self.xc + dx / self.magn;
@@ -60,6 +68,14 @@ impl Transformer for TransWarpMagnifier {
         let dx = *x - self.xc;
         let dy = *y - self.yc;
         let r = (dx * dx + dy * dy).sqrt();
+        // Divergence from C++ AGG: C++ divides 0 by 0 at the centre of a zero-radius lens
+        // (`m = (0 + 0 * (magn - 1)) / 0`) and returns NaN. A zero radius is the identity
+        // (m = (r + 0) / r = 1), so it, and the exact centre, leave the point untouched, as
+        // agg-sharp does. Returning the input unchanged rather than `xc + dx * 1` also keeps
+        // the point bit-exact. Pinned by `TransWarpMagnifierTests` (agg_sharp tests).
+        if r == 0.0 || self.radius == 0.0 {
+            return;
+        }
         if r < self.radius {
             *x = self.xc + dx * self.magn;
             *y = self.yc + dy * self.magn;
