@@ -15,9 +15,9 @@ jobs:
   # clippy covers every workspace target: the library, its tests, the wasm
   # demo crate (built natively here) and tools/pixel-compare.
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # rust-toolchain.toml pins the version, clippy, rustfmt and the wasm32
       # target; with no argument rustup installs exactly that.
@@ -25,7 +25,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -40,9 +40,9 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # rust-toolchain.toml pins the version, clippy, rustfmt and the wasm32
       # target; with no argument rustup installs exactly that.
@@ -50,7 +50,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
