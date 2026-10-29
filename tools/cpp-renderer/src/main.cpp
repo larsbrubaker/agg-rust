@@ -4,7 +4,15 @@
 //
 // Renders the named AGG example demo (in its default interactive state, or with
 // optional numeric params mirroring the Rust pixel-compare demos) into a raw
-// RGBA file that pixel-compare can byte-compare against the Rust output.
+// RGBA file that pixel-compare can byte-compare against the Rust output (how the
+// two are compared and debugged: the header of tools/pixel-compare/src/main.rs).
+//
+// Build, from the repository root:
+//   cmake -S tools/cpp-renderer -B tools/cpp-renderer/build -DCMAKE_BUILD_TYPE=Release
+//   cmake --build tools/cpp-renderer/build --config Release
+// (add `-A x64` with the Visual Studio generator). It compiles the original headers
+// in cpp-references/agg-src/include/, so anything added to them while debugging
+// changes this renderer's output: remove it afterwards.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

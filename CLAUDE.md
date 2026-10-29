@@ -2,7 +2,7 @@
 
 ## Project Phase
 
-The core AGG 2.6 port is **complete**. The project's goal is now to **improve the library beyond the original C++ version**:
+The core AGG 2.6 port is **complete**; the C++ headers and demos still without a Rust counterpart are listed in `PORTING_PLAN.md`, the open work. The project's goal is now to **improve the library beyond the original C++ version**:
 
 - Fix bugs, including bugs inherited from the C++ original
 - Improve performance
@@ -81,6 +81,20 @@ cargo test -- --nocapture
 **Comments** - Explain *why*, not *what*. The code shows what it does; comments should reveal intent, tradeoffs, and non-obvious reasoning. When porting from C++, comments explaining *why* the Rust approach differs from C++ are especially valuable.
 
 **Refactoring** - Improve code when it serves a purpose, not for aesthetics. Refactor to fix bugs, add features, or improve clarity when you're already working in that area.
+
+## Documentation
+
+- Documentation lives in the code: the header comment of the file or module it describes and
+  the doc comments on its items, where whoever works on that code reads it. A rule that spans
+  several files goes in the crate root's header (`src/lib.rs`, or the tool's `main.rs`/`lib.rs`).
+  Facts and reasons go there; open work goes in `PORTING_PLAN.md`; history and "as of" status
+  are left to git.
+- Markdown lives only in `README.md`, `CLAUDE.md` and `PORTING_PLAN.md` at the root, license
+  and notice files, `.claude/` and `.cursor/` (agent instructions), `cpp-references/` (third-party
+  reference material) and `docs/BENCHMARKS.md`, the table `pixel-compare bench-compare --out`
+  writes (README, "Benchmarks"). Never add a Markdown doc.
+- The gate `tests/markdown_placement.rs` fails on any other `.md` or `.markdown` file, untracked
+  ones included.
 
 ## C++ to Rust Porting Rules
 

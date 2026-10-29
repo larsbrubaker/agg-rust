@@ -1,10 +1,61 @@
 // Copyright 2025. Pixel-perfect comparison CLI for AGG Rust vs C++ demos.
 //
 // Usage:
-//   pixel-compare render <demo> <width> <height> [params...] -o <output.bmp>
+//   pixel-compare render <demo> <width> <height> [params...] -o <output.bmp|raw>
 //   pixel-compare compare <file_a> <file_b> [-d <diff.bmp>] [-s <sidebyside.bmp>]
 //   pixel-compare verify <demo> <width> <height> --cpp <cpp_renderer_exe> [params...]
+//   pixel-compare bench | bench-compare ...   (see `print_usage`)
 //   pixel-compare list
+//
+// How output is checked against the C++
+// -------------------------------------
+// The Rust demos render headlessly here (`src/render/`, or the WASM demo crate's
+// renderers through `agg_wasm::render_demo`); the same demos in the original C++
+// render through `agg-render` (`tools/cpp-renderer/`, built against the headers in
+// `cpp-references/agg-src/include/`; its `main.cpp` header says how to build it).
+// Both write raw RGBA, and `compare` reports IDENTICAL or the diff statistics (pixel
+// count, percentage, max and mean deviation):
+//
+//   cargo run -p pixel-compare -- render lion_outline 512 512 -o rust.raw
+//   tools/cpp-renderer/build/agg-render lion_outline 512 512 cpp.raw
+//   cargo run -p pixel-compare -- compare cpp.raw rust.raw
+//
+// (Visual Studio builds put the renderer at `build/Release/agg-render.exe`.)
+//
+// `verify` does all three in one step. Once a demo matches, its C++ capture is
+// committed as `<demo>_cpp_<w>x<h>.raw` (in `tests/refs/`, older ones at the
+// workspace root) and pinned by a test, `tests/<demo>_reference.rs` or the unit tests
+// in `src/render/mod.rs`, so the match can't drift; the benchmark table's
+// "Byte-identical" column is that set of tests.
+//
+// When the images differ, work from the top down:
+//   1. Isolate. Use the demo's parameters to render less (`lion_outline`'s param 7
+//      caps the paths drawn, so 1 draws only the first; param 6 = 1 hides the
+//      widgets): one path that matches is far easier to reach than all of them.
+//   2. Compare inputs before rendering code: the transform's six components, scale
+//      and derived widths in subpixels, path vertex counts and first coordinates,
+//      bounding box and offsets. Temporary `eprintln!` on the Rust side and
+//      `fprintf(stderr, ...)` in the C++ (removed afterwards), diffed line by line.
+//   3. Compare colours. Any C++ assignment between `rgba8` and `srgba8` runs an
+//      implicit gamma conversion through `rgba8T`'s converting constructor; the Rust
+//      side must make the same conversion explicitly (the lion colours in the WASM
+//      demo's `perspective`, the colour setup in `src/render/rasterizers2.rs`).
+//   4. Compare blends. Log `(kind, x, y, len, covers)` for every
+//      `blend_solid_hspan`/`blend_solid_vspan` on both sides (stderr, `2>file`),
+//      drop zero-coverage calls (no-ops), and compare both content and order; expand
+//      to per-pixel touches to find the first diverging pixel.
+//   5. Compare arithmetic: C++'s integer `fast_sqrt` where it uses it, its truncated
+//      constants digit for digit (`0.707106781` in `TransAffine::get_scale`), and
+//      line-profile widths (255 against 256 subpixels shows).
+//   6. Compare loop bounds: where C++ works then tests (`return ++m_step < m_count`),
+//      the Rust step returns early at the top instead (`step_hor` in
+//      `src/renderer_outline_aa.rs`), so the last step still draws.
+// Other symptoms seen: a missing final `render()` after the vertex loop drops the
+// last polyline segment; opposite stride signs flip the image vertically.
+//
+// Debug output added to the C++ headers changes the reference renderer too, and a
+// C++ bug fix the Rust side carries is rendered from a patched header
+// (`tools/cpp-renderer/patches/`): revert both so `cpp-references` stays pristine.
 
 use pixel_compare::{
     compare_buffers, generate_diff_image, generate_sidebyside, load_image, save_image,
