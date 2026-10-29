@@ -1,13 +1,14 @@
 //! # agg-rust
 //!
-//! Pure Rust port of Anti-Grain Geometry (AGG) 2.6 — a high quality 2D vector
-//! graphics rendering library originally written in C++ by Maxim Shemanarev.
+//! A pure Rust 2D rendering library that began as a port of Anti-Grain Geometry
+//! (AGG) 2.6, the high quality 2D vector graphics rendering library originally
+//! written in C++ by Maxim Shemanarev.
 //!
-//! AGG produces pixel images in memory from vectorial data. It features:
+//! It produces pixel images in memory from vectorial data. It features:
 //!
 //! - Anti-aliased rendering with subpixel accuracy
 //! - Affine and perspective transformations
-//! - Multiple pixel format renderers (RGBA, RGB, grayscale, packed)
+//! - Multiple pixel format renderers (RGBA, RGB, grayscale)
 //! - Gradient and image pattern fills
 //! - Stroke, dash, and contour generation
 //! - Gouraud shading
