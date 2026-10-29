@@ -43,7 +43,3 @@ work live in the code it concerns. The C++ headers named here are in
   controls of `line_thickness.cpp`, and its route.
 - **No `gradients_contour` demo.** It is the one C++ example with neither a page nor a
   reason to leave it out. Needed: `span_gradient_contour` (above), then the page.
-- **Demo pages show no Rust code and no C++ picture.** A visitor sees the canvas and its
-  controls, but not how to call the API from Rust nor the C++ original's picture beside
-  it (the C++ pictures appear only as thumbnails on the home page). Needed: a code
-  snippet and the reference picture on each demo page.
