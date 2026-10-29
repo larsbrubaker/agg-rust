@@ -53,7 +53,7 @@ AGG is a software rendering engine that produces pixel images in memory from vec
 
 AGG uses a five-stage rendering pipeline with interchangeable components:
 
-```
+```text
 Vertex Source → Coordinate Conversion → Scanline Rasterizer → Scanline Container → Renderer
 ```
 

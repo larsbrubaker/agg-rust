@@ -4,7 +4,7 @@ version = "1.2.0"
 edition = "2021"
 rust-version = "1.88"
 license = "BSD-3-Clause"
-description = "Pure Rust port of Anti-Grain Geometry (AGG) 2.6 - high quality 2D vector graphics rendering"
+description = "Pure Rust 2D rendering library that began as a port of Anti-Grain Geometry (AGG) 2.6 - high quality 2D vector graphics rendering"
 repository = "https://github.com/larsbrubaker/agg-rust"
 homepage = "https://larsbrubaker.github.io/agg-rust/"
 documentation = "https://docs.rs/agg-rust"
@@ -12,8 +12,9 @@ keywords = ["graphics", "rendering", "anti-aliasing", "2d", "vector"]
 categories = ["graphics", "rendering"]
 # Ship only what a library user builds against. An allowlist, so the root `*.raw` reference
 # captures, tools/, demo/, tests/, benches/ and editor/agent config never reach crates.io.
-# No doc test or example reads a file; the font tests that `include_bytes!` demo/ fonts are
-# `#[cfg(test)]`, which a dependent never compiles.
+# The only file a doc test reads is README.md (its Rust blocks run as doctests, `src/lib.rs`),
+# which is shipped; the font tests that `include_bytes!` demo/ fonts are `#[cfg(test)]`,
+# which a dependent never compiles.
 include = ["/src/**/*.rs", "/Cargo.toml", "/LICENSE", "/README.md"]
 
 [workspace]

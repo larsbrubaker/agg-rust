@@ -2,7 +2,9 @@
 
 ## Project Phase
 
-The core AGG 2.6 port is **complete**; the C++ headers and demos still without a Rust counterpart are listed in `PORTING_PLAN.md`, the open work. The project's goal is now to **improve the library beyond the original C++ version**:
+agg-rust is a pure-Rust 2D rendering library in its own right (agg-gui and MatterCAD build on it) that began as a strict port of AGG 2.6. The project is now **beyond the port**: its goal is to **improve the library beyond the original C++ version**, with C++ behavioral matching as the baseline. A few C++ headers and demos still have no Rust counterpart; `PORTING_PLAN.md`, the open work, lists them.
+
+The work beyond the port:
 
 - Fix bugs, including bugs inherited from the C++ original
 - Improve performance
@@ -143,9 +145,9 @@ Before implementing any function:
 ## C++ Reference
 
 The original C++ source code is available in `cpp-references/agg-src/` for reference. Key directories:
-- `cpp-references/agg-src/include/` — all public header files (117 headers)
-- `cpp-references/agg-src/src/` — implementation files (26 .cpp files)
-- `cpp-references/agg-src/examples/` — demo programs (78 examples)
+- `cpp-references/agg-src/include/` — all public header files
+- `cpp-references/agg-src/src/` — implementation files
+- `cpp-references/agg-src/examples/` — demo programs
 
 **Note**: The GPC (General Polygon Clipper) in `cpp-references/agg-src/gpc/` has a non-commercial license and is **excluded** from this port. Use `scanline_boolean_algebra` for boolean operations instead.
 

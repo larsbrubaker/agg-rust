@@ -165,3 +165,11 @@ pub mod trans_double_path;
 pub mod font_cache;
 #[cfg(feature = "font")]
 pub mod font_engine;
+
+// The README's Rust code blocks run as doctests, so its Quick Start keeps
+// compiling and drawing as the API changes. `cfg(doctest)` keeps this item out
+// of normal builds and out of the rendered crate docs. The README is in
+// Cargo.toml's `include` list, so the doctests run from the published crate too.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
