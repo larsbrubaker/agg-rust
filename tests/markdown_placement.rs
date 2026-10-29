@@ -8,6 +8,9 @@
 //   - `docs/BENCHMARKS.md`, because it is generated output rather than written
 //     prose: `pixel-compare bench-compare --out` rewrites the whole file, and the
 //     README links it for crate users as the full benchmark record;
+//   - `docs/later/<idea>.md`, directly in that folder (no deeper): an idea for
+//     later, written down when Lars asks for it, which is not scheduled work and
+//     is deleted when it is built or dropped;
 //   - license and notice files (`LICENSE.md`, `NOTICE.md`,
 //     `THIRD_PARTY_NOTICES.md`, ...) anywhere;
 //   - anything under `.claude/` or `.cursor/` (agent instructions);
@@ -67,10 +70,15 @@ fn placement(path: &str) -> Placement {
         return Placement::NotMarkdown;
     }
     let under = |tree: &str| path.strip_prefix(tree).is_some_and(|rest| !rest.is_empty());
+    // One level only: `docs/later/` holds one file per idea, never a tree of docs.
+    let idea_for_later = path
+        .strip_prefix("docs/later/")
+        .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'));
     let allowed = matches!(
         path,
         "README.md" | "CLAUDE.md" | "PORTING_PLAN.md" | "docs/BENCHMARKS.md"
-    ) || is_license_or_notice(path)
+    ) || idea_for_later
+        || is_license_or_notice(path)
         || [".claude/", ".cursor/", "cpp-references/"]
             .iter()
             .any(|tree| under(tree));
@@ -273,6 +281,17 @@ fn markdown_placement_refuses_docs_anywhere_else() {
     for path in ["src/lib.rs", "docs/screenshot.png", "README", ".md"] {
         assert_eq!(placement(path), Placement::NotMarkdown, "{path}");
     }
+}
+
+#[test]
+fn markdown_placement_allows_ideas_for_later_one_level_deep() {
+    assert_eq!(placement("docs/later/idea.md"), Placement::Allowed);
+    assert_eq!(placement("docs/later/sub/idea.md"), Placement::Refused);
+    assert_eq!(placement("docs/later.md"), Placement::Refused);
+    assert_eq!(placement("docs/other.md"), Placement::Refused);
+    assert_eq!(placement("demo/docs/later/idea.md"), Placement::Refused);
+    // The generated benchmark table keeps its own allowance beside the ideas.
+    assert_eq!(placement("docs/BENCHMARKS.md"), Placement::Allowed);
 }
 
 #[test]

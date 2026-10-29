@@ -2,9 +2,8 @@
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 [![Crates.io](https://img.shields.io/crates/v/agg-rust.svg)](https://crates.io/crates/agg-rust)
-[![Tests](https://img.shields.io/badge/tests-994_passing-brightgreen.svg)](#)
-[![Modules](https://img.shields.io/badge/modules-88_ported-brightgreen.svg)](#)
-[![Demos](https://img.shields.io/badge/demos-64_interactive-orange.svg)](https://larsbrubaker.github.io/agg-rust/)
+[![CI](https://github.com/larsbrubaker/agg-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/larsbrubaker/agg-rust/actions/workflows/ci.yml)
+[![Demos](https://img.shields.io/badge/demos-interactive-orange.svg)](https://larsbrubaker.github.io/agg-rust/)
 
 ## Support the Project
 
@@ -19,9 +18,9 @@ If you find it useful, here are a few ways to help keep development going:
 - **Report issues:** [Open an issue](https://github.com/larsbrubaker/agg-rust/issues) for bugs or feature ideas.
 - **Contribute:** PRs welcome — open an issue first to discuss larger changes.
 
-A pure Rust port of [Anti-Grain Geometry (AGG) 2.6](https://github.com/ghaerr/agg-2.6) — the legendary high-quality 2D software rendering library originally written in C++ by [Maxim Shemanarev](http://www.antigrain.com). Zero external dependencies. Pixel-perfect anti-aliased output. No GPU required.
+A pure Rust 2D rendering library that began as a port of [Anti-Grain Geometry (AGG) 2.6](https://github.com/ghaerr/agg-2.6) — the legendary high-quality 2D software rendering library originally written in C++ by [Maxim Shemanarev](http://www.antigrain.com). No required dependencies (TrueType font loading is an optional feature). Pixel-perfect anti-aliased output. No GPU required.
 
-**[Try the Interactive Demo](https://larsbrubaker.github.io/agg-rust/)** — 64 demos running entirely in your browser via WebAssembly.
+**[Try the Interactive Demo](https://larsbrubaker.github.io/agg-rust/)** — dozens of the original AGG demos, running entirely in your browser via WebAssembly.
 
 Crate listing: **[`agg-rust` on crates.io](https://crates.io/crates/agg-rust)**.
 
@@ -42,7 +41,7 @@ AGG is a software rendering engine that produces pixel images in memory from vec
 - **Gradient Fills** — linear, radial, focal-point, and custom gradient functions with multi-stop color interpolation
 - **Gouraud Shading** — smooth per-vertex color interpolation across triangles and meshes
 - **Image Filtering** — 17 interpolation filters including bilinear, bicubic, sinc, Blackman, and more
-- **30+ Compositing Modes** — full SVG 1.2 compatible Porter-Duff and blend operations
+- **25 Compositing Modes** — full SVG 1.2 compatible Porter-Duff and blend operations
 - **Stroke & Dash Generation** — configurable line joins, caps, dashes, and markers
 - **Alpha Masking** — arbitrary clip regions through grayscale alpha masks
 - **Stack Blur** — fast approximate Gaussian blur with adjustable radius
@@ -70,7 +69,7 @@ Each stage is a trait in the Rust port, allowing components to be freely mixed a
 
 ## Interactive Demos
 
-All 64 demos run in-browser via WebAssembly with no server-side processing. Categories include:
+The demos run in-browser via WebAssembly with no server-side processing. Categories include:
 
 | Category | Demos | Highlights |
 |----------|-------|------------|
@@ -94,15 +93,27 @@ agg-rust = "1.2"
 ```
 
 ```rust
-use agg_rust::*;
+use agg_rust::basics::PATH_FLAGS_NONE;
+use agg_rust::color::Rgba8;
+use agg_rust::path_storage::PathStorage;
+use agg_rust::pixfmt_rgba::PixfmtRgba32;
+use agg_rust::rasterizer_scanline_aa::RasterizerScanlineAa;
+use agg_rust::renderer_base::RendererBase;
+use agg_rust::renderer_scanline::render_scanlines_aa_solid;
+use agg_rust::rendering_buffer::RenderingBuffer;
+use agg_rust::scanline_u::ScanlineU8;
 
-// Create a rendering buffer
-let mut buf = vec![0u8; width * height * 4];
-let mut rbuf = RenderingBuffer::new(&mut buf, width, height, width * 4);
+let (width, height) = (128u32, 128u32);
+
+// Create a rendering buffer over your own pixel memory (RGBA, 4 bytes a pixel)
+let mut buf = vec![0u8; (width * height * 4) as usize];
+let mut rbuf = RenderingBuffer::new();
+// Safety: `buf` holds `height` rows of `width * 4` bytes and outlives `rbuf`.
+unsafe { rbuf.attach(buf.as_mut_ptr(), width, height, (width * 4) as i32) };
 
 // Set up the pixel format and renderer
-let mut pixfmt = PixfmtRgba32::new(&mut rbuf);
-let mut ren_base = RendererBase::new(&mut pixfmt);
+let pixfmt = PixfmtRgba32::new(&mut rbuf);
+let mut ren_base = RendererBase::new(pixfmt);
 ren_base.clear(&Rgba8::new(255, 255, 255, 255));
 
 // Create a path and rasterize it
@@ -110,11 +121,11 @@ let mut path = PathStorage::new();
 path.move_to(10.0, 10.0);
 path.line_to(100.0, 50.0);
 path.line_to(50.0, 100.0);
-path.close_polygon();
+path.close_polygon(PATH_FLAGS_NONE);
 
 let mut ras = RasterizerScanlineAa::new();
 let mut sl = ScanlineU8::new();
-ras.add_path(&mut path);
+ras.add_path(&mut path, 0);
 render_scanlines_aa_solid(&mut ras, &mut sl, &mut ren_base, &Rgba8::new(200, 80, 80, 255));
 ```
 
@@ -130,7 +141,7 @@ render_scanlines_aa_solid(&mut ras, &mut sl, &mut ren_base, &Rgba8::new(200, 80,
 
 ```bash
 cargo build
-cargo test --workspace --all-features   # 994 tests
+cargo test --workspace --all-features
 cargo clippy -- -D warnings
 ```
 
@@ -147,17 +158,9 @@ Then open `http://localhost:3000` in your browser.
 
 ## Project Status & Goals
 
-AGG.rs began as a strict, byte-for-byte port of AGG 2.6: all 88 core library modules are ported, all 64 applicable demos run via WebAssembly, and 994 tests pass. The byte-identity of the rendering pipeline is locked by the reference-test suite — the **Byte-identical** column in the [benchmarks](#benchmarks) below is the proof, with every benchmarked demo matching the C++ output exactly. That port is complete.
+AGG.rs is a 2D rendering library in its own right: agg-gui and MatterCAD build on it, and the project is now **beyond the port**. New features, Rust-idiomatic APIs, performance work, and bug fixes are all welcome. Contributions with a real-world use case, tests proving correctness, and clean idiomatic design are exactly the kind the project wants. Performance is an active goal: the benchmark table shows where each demo stands against C++ today.
 
-The project is now **beyond the port**: new features, Rust-idiomatic APIs, performance work, and bug fixes are all welcome. C++ behavioral matching remains the default baseline. A deliberate divergence is allowed only to fix a demonstrable bug inherited from the C++ original, and it must be documented in the code and locked with a regression test (see the gradient-LUT off-by-one fix in `src/gradient_lut.rs` for the model). Contributions that clear that bar — a real-world use case, tests proving correctness, and clean idiomatic design — are exactly the kind the project wants. Performance is an active goal: the benchmark table shows where each demo stands against C++ today.
-
-| Metric | Value |
-|--------|-------|
-| Core modules ported | 88 |
-| Tests passing | 994 |
-| Interactive demos | 64 |
-| External dependencies | 0 |
-| GPU dependencies | 0 |
+It began as a strict, byte-for-byte port of AGG 2.6, and C++ behavioral matching remains the default baseline. Every benchmarked demo matches the C++ output byte for byte, each locked by a committed reference test — the **Byte-identical** column in the [benchmarks](#benchmarks) below. A deliberate divergence is allowed only to fix a demonstrable bug inherited from the C++ original, and it must be documented in the code and locked with a regression test (see the gradient-LUT off-by-one fix in `src/gradient_lut.rs` for the model). A few C++ headers and demos have no Rust counterpart yet; [PORTING_PLAN.md](PORTING_PLAN.md) lists them.
 
 ## Benchmarks
 

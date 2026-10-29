@@ -93,6 +93,8 @@ cargo test -- --nocapture
   and notice files, `.claude/` and `.cursor/` (agent instructions), `cpp-references/` (third-party
   reference material) and `docs/BENCHMARKS.md`, the table `pixel-compare bench-compare --out`
   writes (README, "Benchmarks"). Never add a Markdown doc.
+  An idea for later, written down when Lars asks for it, lives in `docs/later/<idea>.md`: it
+  is not scheduled work and needs no plan entry; delete it when it is built or dropped.
 - The gate `tests/markdown_placement.rs` fails on any other `.md` or `.markdown` file, untracked
   ones included.
 
