@@ -256,7 +256,22 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
         let mut stack = vec![[0u8; 4]; div];
         let stride = rbuf.stride() as isize;
 
+        // The vertical pass walks raw column pointers, so it checks once, through the checked
+        // accessor, that a `w * 4`-byte row fits in the stride; with `rx == 0` the horizontal
+        // pass (which goes through `row_mut`) never ran to check it. Panics like every other
+        // checked row access when it does not fit. The length saturates: on a 32-bit `usize`
+        // a width up to `i32::MAX` can make `w * 4` wrap to a small number that would pass the
+        // check, so an overflowing product must become `usize::MAX`, which fails it. Once the
+        // check passes, `w * 4` is the exact product and `<= |stride|`. From here on each
+        // pointer below is row `r` (`0 <= r <= hm`) plus `x * 4` bytes (`x < w`, so `x * 4`
+        // cannot overflow either), so it and the 4 bytes read or written at it lie inside that
+        // row's first `w * 4` bytes, which `RowAccessor::check_row`'s proof places inside the
+        // attached buffer for both stride signs.
+        rbuf.row_bytes_mut(0, w.saturating_mul(4));
+
         for x in 0..w {
+            // SAFETY: row 0 exists (`h > 0`) and `x * 4 < w * 4 <= |stride|`, the exact,
+            // unwrapped product (checked above).
             let base_ptr = unsafe { rbuf.row_ptr(0).add(x * 4) };
 
             let mut sum_r: u64 = 0;
@@ -272,6 +287,8 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
             let mut sum_out_b: u64 = 0;
             let mut sum_out_a: u64 = 0;
 
+            // SAFETY: `base_ptr` is pixel `x` of row 0, inside the buffer (see above); no
+            // other reference to the buffer is live while `rbuf` is borrowed mutably.
             let src_pix = unsafe { std::slice::from_raw_parts(base_ptr, 4) };
             for (i, slot) in stack.iter_mut().take(ry + 1).enumerate() {
                 *slot = [src_pix[0], src_pix[1], src_pix[2], src_pix[3]];
@@ -289,8 +306,10 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
             let mut src_ptr = base_ptr;
             for i in 1..=ry {
                 if i <= hm {
+                    // SAFETY: `src_ptr` is row `i - 1` and `i <= hm`, so row `i` exists.
                     src_ptr = unsafe { src_ptr.offset(stride) };
                 }
+                // SAFETY: `src_ptr` is pixel `x` of row `min(i, hm)`, inside the buffer.
                 let p = unsafe { std::slice::from_raw_parts(src_ptr, 4) };
                 stack[i + ry] = [p[0], p[1], p[2], p[3]];
                 let w = (ry + 1 - i) as u64;
@@ -309,16 +328,27 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
             if yp > hm {
                 yp = hm;
             }
+            // SAFETY: `yp <= hm`, so row `yp` exists.
             src_ptr = unsafe { base_ptr.offset(yp as isize * stride) };
             let mut dst_ptr = base_ptr;
 
             for _y in 0..h {
+                // SAFETY: on iteration `_y`, `dst_ptr` is pixel `x` of row `_y < h`, inside
+                // the buffer; `src_ptr` and `src_pix` are not used while `dst` lives.
                 let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, 4) };
                 dst[0] = ((sum_r * mul_sum) >> shr_sum) as u8;
                 dst[1] = ((sum_g * mul_sum) >> shr_sum) as u8;
                 dst[2] = ((sum_b * mul_sum) >> shr_sum) as u8;
                 dst[3] = ((sum_a * mul_sum) >> shr_sum) as u8;
-                dst_ptr = unsafe { dst_ptr.offset(stride) };
+                // Deliberate divergence from C++ (`agg_blur.h` steps `dst_pix_ptr += stride`
+                // after every row, the last included): after the last row that step lands past
+                // the end of the buffer (below its start for a negative stride), and `offset`
+                // to there is undefined behaviour in Rust even if never read. `wrapping_offset`
+                // computes the same address without that requirement, at no cost; only the
+                // in-bounds pointers of rows `0..h` are ever dereferenced (above). Locked in by
+                // `test_stack_blur_spreads_pixel` and
+                // `test_stack_blur_negative_stride_matches_positive` under Miri.
+                dst_ptr = dst_ptr.wrapping_offset(stride);
 
                 sum_r -= sum_out_r;
                 sum_g -= sum_out_g;
@@ -337,10 +367,13 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
                 sum_out_a -= sp[3] as u64;
 
                 if yp < hm {
+                    // SAFETY: `src_ptr` is row `yp` and `yp < hm`, so row `yp + 1` exists.
                     src_ptr = unsafe { src_ptr.offset(stride) };
                     yp += 1;
                 }
 
+                // SAFETY: `src_ptr` is pixel `x` of row `yp <= hm`, inside the buffer; `dst`
+                // is no longer live.
                 let p = unsafe { std::slice::from_raw_parts(src_ptr, 4) };
                 stack[stack_start] = [p[0], p[1], p[2], p[3]];
 
@@ -402,10 +435,10 @@ mod tests {
 
     fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
         let stride = (w * 4) as i32;
-        let buf = vec![0u8; (h * w * 4) as usize];
+        let mut buf = vec![0u8; (h * w * 4) as usize];
         let mut ra = RowAccessor::new();
         unsafe {
-            ra.attach(buf.as_ptr() as *mut u8, w, h, stride);
+            ra.attach(buf.as_mut_ptr(), w, h, stride);
         }
         (buf, ra)
     }
@@ -524,6 +557,117 @@ mod tests {
                     (p[0] as i32 - 100).abs() <= 2,
                     "pixel ({x},{y}) r={} should be ~100",
                     p[0]
+                );
+            }
+        }
+    }
+
+    /// The panic message of `f`, or `None` when it returned normally.
+    fn panic_message(f: impl FnOnce()) -> Option<String> {
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).err()?;
+        Some(if let Some(s) = payload.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "<non-string panic payload>".into()
+        })
+    }
+
+    /// With `rx == 0` the horizontal pass, which reads rows through the checked `row_mut`, is
+    /// skipped, so the vertical pass must check on its own that a `width * 4`-byte row fits
+    /// in the stride. Here the stride is half a row: unchecked, the vertical pass would run
+    /// past the attached region into the guard bytes after it.
+    #[test]
+    fn test_stack_blur_vertical_only_rejects_short_stride() {
+        let (w, h) = (4u32, 3u32);
+        let stride = (w * 4 / 2) as i32;
+        vertical_only_panics_without_writing(
+            w,
+            h,
+            stride,
+            "row of 16 bytes does not fit in stride 8",
+        );
+    }
+
+    /// The 32-bit case of the same check: on a 32-bit `usize` (wasm32), `w * 4` for
+    /// `w = 1 << 30` wraps to 0, which a plain multiply would pass off as a row that fits in
+    /// any stride. The row length must saturate instead, so the check fails. On a 64-bit host
+    /// the product does not wrap; the wrap is exercised by the 32-bit entry of the Miri job in
+    /// `.github/workflows/ci.yml` (the Miri command in CLAUDE.md, Testing).
+    #[test]
+    fn test_stack_blur_vertical_only_rejects_row_length_overflow() {
+        #[cfg(target_pointer_width = "64")]
+        const EXPECT: &str = "row of 4294967296 bytes does not fit in stride 16";
+        #[cfg(target_pointer_width = "32")]
+        const EXPECT: &str = "row of 4294967295 bytes does not fit in stride 16";
+        vertical_only_panics_without_writing(1 << 30, 1, 16, EXPECT);
+    }
+
+    /// Attaches a `w` x `h` accessor with `stride` to a guarded region of `h * stride` bytes,
+    /// runs a vertical-only blur, and asserts it panicked with `expect` and left every guard
+    /// byte alone.
+    fn vertical_only_panics_without_writing(w: u32, h: u32, stride: i32, expect: &str) {
+        const SENTINEL: u8 = 0xA5;
+        const GUARD: usize = 64;
+        let region = h as usize * stride as usize;
+        let mut mem = vec![SENTINEL; GUARD * 2 + region];
+        mem[GUARD..GUARD + region].fill(0x11);
+        // SAFETY: the region holds `h * stride` bytes and outlives the accessor.
+        let mut ra =
+            unsafe { RowAccessor::new_with_buf(mem.as_mut_ptr().add(GUARD), w, h, stride) };
+
+        let msg = panic_message(|| stack_blur_rgba32(&mut ra, 0, 1));
+
+        let (before, rest) = mem.split_at(GUARD);
+        let guards_intact = before.iter().chain(&rest[region..]).all(|&b| b == SENTINEL);
+        assert_eq!(
+            (msg.as_deref(), guards_intact),
+            (Some(expect), true),
+            "(panic message, guard bytes untouched)"
+        );
+    }
+
+    /// A negative stride (bottom-up buffer) must blur exactly like the positive-stride buffer
+    /// holding the same rows: the vertical pass walks rows by `stride`, so it must not step
+    /// past either end of the buffer in either direction. Exact-size buffers, so Miri flags any
+    /// pointer that leaves them.
+    #[test]
+    fn test_stack_blur_negative_stride_matches_positive() {
+        for (w, h, rx, ry) in [
+            (5u32, 6u32, 0u32, 2u32),
+            (5, 6, 2, 3),
+            (3, 4, 1, 7),
+            (4, 1, 0, 3),
+        ] {
+            let row_len = (w * 4) as usize;
+            let rows: Vec<Vec<u8>> = (0..h as usize)
+                .map(|y| {
+                    (0..row_len)
+                        .map(|i| ((y * 37 + i * 11) % 251) as u8)
+                        .collect()
+                })
+                .collect();
+
+            // Top-down: row y at offset y * row_len.
+            let mut top_down: Vec<u8> = rows.concat();
+            // Bottom-up: the same rows stored in reverse, attached with a negative stride.
+            let mut bottom_up: Vec<u8> = rows.iter().rev().flatten().copied().collect();
+
+            // SAFETY: each Vec holds exactly `h * row_len` bytes and outlives its accessor.
+            let mut pos =
+                unsafe { RowAccessor::new_with_buf(top_down.as_mut_ptr(), w, h, row_len as i32) };
+            let mut neg = unsafe {
+                RowAccessor::new_with_buf(bottom_up.as_mut_ptr(), w, h, -(row_len as i32))
+            };
+            stack_blur_rgba32(&mut pos, rx, ry);
+            stack_blur_rgba32(&mut neg, rx, ry);
+
+            for y in 0..h as i32 {
+                assert_eq!(
+                    row(&pos, y),
+                    row(&neg, y),
+                    "{w}x{h} rx={rx} ry={ry} row {y}"
                 );
             }
         }
