@@ -39,6 +39,21 @@ const BASE_MASK: i32 = 255;
 /// the start value that makes the downshift round (see the module docs).
 const BILINEAR_HALF: i32 = (IMAGE_SUBPIXEL_SCALE * IMAGE_SUBPIXEL_SCALE / 2) as i32;
 
+/// The four sums of an `IMAGE_FILTER_SCALE`-weighted filter at their start value, half a
+/// unit (see the module docs). A constant copied into the accumulators, not `[x; 4]` in
+/// the loop: on Apple targets LLVM turns that repeat into a `memset_pattern16` call per
+/// output pixel, which keeps the sums in memory and stores them at every tap.
+const FILTER_SUMS_START: [i32; 4] = [IMAGE_FILTER_SCALE / 2; 4];
+
+/// Adds `weight` times each of the first four channels of `p` to `fg`.
+#[inline(always)]
+fn add_weighted(fg: &mut [i32; 4], weight: i32, p: &[u8]) {
+    fg[0] += weight * p[0] as i32;
+    fg[1] += weight * p[1] as i32;
+    fg[2] += weight * p[2] as i32;
+    fg[3] += weight * p[3] as i32;
+}
+
 // ============================================================================
 // SpanImageFilterRgbaNn — nearest neighbor
 // ============================================================================
@@ -481,54 +496,41 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgba2
             let x_lr = x_hr >> IMAGE_SUBPIXEL_SHIFT;
             let y_lr = y_hr >> IMAGE_SUBPIXEL_SHIFT;
 
-            let mut fg = [IMAGE_FILTER_SCALE / 2; 4];
+            let mut fg = FILTER_SUMS_START;
             let x_frac = (x_hr & IMAGE_SUBPIXEL_MASK as i32) as usize;
             let y_frac = (y_hr & IMAGE_SUBPIXEL_MASK as i32) as usize;
             let subpix = IMAGE_SUBPIXEL_SCALE as usize;
 
-            // Top-left
-            let p = self.source.span(x_lr, y_lr, 2);
-            let weight = ((weight_array[wa_offset + x_frac + subpix] as i32
-                * weight_array[wa_offset + y_frac + subpix] as i32)
-                + IMAGE_FILTER_SCALE / 2)
-                >> IMAGE_FILTER_SHIFT;
-            fg[0] += weight * p[0] as i32;
-            fg[1] += weight * p[1] as i32;
-            fg[2] += weight * p[2] as i32;
-            fg[3] += weight * p[3] as i32;
+            let weight = |wx: usize, wy: usize| {
+                ((weight_array[wa_offset + wx] as i32 * weight_array[wa_offset + wy] as i32)
+                    + IMAGE_FILTER_SCALE / 2)
+                    >> IMAGE_FILTER_SHIFT
+            };
+            let w_tl = weight(x_frac + subpix, y_frac + subpix);
+            let w_tr = weight(x_frac, y_frac + subpix);
+            let w_bl = weight(x_frac + subpix, y_frac);
+            let w_br = weight(x_frac, y_frac);
 
-            // Top-right
-            let p = self.source.next_x();
-            let weight = ((weight_array[wa_offset + x_frac] as i32
-                * weight_array[wa_offset + y_frac + subpix] as i32)
-                + IMAGE_FILTER_SCALE / 2)
-                >> IMAGE_FILTER_SHIFT;
-            fg[0] += weight * p[0] as i32;
-            fg[1] += weight * p[1] as i32;
-            fg[2] += weight * p[2] as i32;
-            fg[3] += weight * p[3] as i32;
-
-            // Bottom-left
-            let p = self.source.next_y();
-            let weight = ((weight_array[wa_offset + x_frac + subpix] as i32
-                * weight_array[wa_offset + y_frac] as i32)
-                + IMAGE_FILTER_SCALE / 2)
-                >> IMAGE_FILTER_SHIFT;
-            fg[0] += weight * p[0] as i32;
-            fg[1] += weight * p[1] as i32;
-            fg[2] += weight * p[2] as i32;
-            fg[3] += weight * p[3] as i32;
-
-            // Bottom-right
-            let p = self.source.next_x();
-            let weight = ((weight_array[wa_offset + x_frac] as i32
-                * weight_array[wa_offset + y_frac] as i32)
-                + IMAGE_FILTER_SCALE / 2)
-                >> IMAGE_FILTER_SHIFT;
-            fg[0] += weight * p[0] as i32;
-            fg[1] += weight * p[1] as i32;
-            fg[2] += weight * p[2] as i32;
-            fg[3] += weight * p[3] as i32;
+            // Both rows of the 2x2 block at once when the source lends them (inside the
+            // image, for the in-crate accessors): no accessor state to update per pixel.
+            // `y_lr < height <= i32::MAX` when the first row is lent, so `y_lr + 1` cannot
+            // overflow.
+            let rows = self.source.pixel_row::<4>(x_lr, y_lr, 2).and_then(|top| {
+                self.source
+                    .pixel_row::<4>(x_lr, y_lr + 1, 2)
+                    .map(|bottom| (top, bottom))
+            });
+            if let Some((&[tl, tr], &[bl, br])) = rows {
+                add_weighted(&mut fg, w_tl, &tl);
+                add_weighted(&mut fg, w_tr, &tr);
+                add_weighted(&mut fg, w_bl, &bl);
+                add_weighted(&mut fg, w_br, &br);
+            } else {
+                add_weighted(&mut fg, w_tl, self.source.span(x_lr, y_lr, 2));
+                add_weighted(&mut fg, w_tr, self.source.next_x());
+                add_weighted(&mut fg, w_bl, self.source.next_y());
+                add_weighted(&mut fg, w_br, self.source.next_x());
+            }
 
             fg[0] >>= IMAGE_FILTER_SHIFT;
             fg[1] >>= IMAGE_FILTER_SHIFT;
@@ -601,10 +603,11 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaG
             .interpolator_mut()
             .begin(x as f64 + dx_dbl, y as f64 + dy_dbl, len);
 
-        let filter = self.base.filter().unwrap();
+        // Borrowed with the base's `'a`, as in the 2x2 filter, so no copy per span.
+        let filter = self.base.filter_lut().unwrap();
         let diameter = filter.diameter() as i32;
         let start = filter.start();
-        let weight_array: Vec<i16> = filter.weight_array().to_vec();
+        let weight_array: &[i16] = filter.weight_array();
 
         for pixel in span.iter_mut().take(len as usize) {
             let mut cx = 0i32;
@@ -617,45 +620,74 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaG
             let x_lr = cx >> IMAGE_SUBPIXEL_SHIFT;
             let y_lr = cy >> IMAGE_SUBPIXEL_SHIFT;
 
-            let mut fg = [IMAGE_FILTER_SCALE / 2; 4];
             let x_fract = cx & IMAGE_SUBPIXEL_MASK as i32;
+            let y_wa0 = IMAGE_SUBPIXEL_MASK as i32 - (cy & IMAGE_SUBPIXEL_MASK as i32);
+            let x_wa0 = IMAGE_SUBPIXEL_MASK as i32 - x_fract;
+            let (x0, y0) = (x_lr + start, y_lr + start);
 
-            let mut y_count = diameter as u32;
-            let mut y_wa = IMAGE_SUBPIXEL_MASK as i32 - (cy & IMAGE_SUBPIXEL_MASK as i32);
-
-            let mut fg_ptr = self
-                .source
-                .span(x_lr + start, y_lr + start, diameter as u32);
-
-            loop {
-                let mut x_count = diameter;
+            // Each kernel row at once when the source lends it (inside the image, for the
+            // in-crate accessors): no accessor state to update per tap. If a row is not
+            // lent, the sums start over and the whole kernel is read through `span`,
+            // `next_x` and `next_y`, so each pixel is summed once whichever rows were lent.
+            // A row of any length but `diameter` (an `ImageSource` breaking the `pixel_row`
+            // contract) counts as not lent: summing it would drop taps or run `x_wa` past
+            // the weight LUT.
+            let mut fg = FILTER_SUMS_START;
+            let mut lent = true;
+            let mut y_wa = y_wa0;
+            for row_y in y0..y0 + diameter {
+                let row = match self.source.pixel_row::<4>(x0, row_y, diameter as u32) {
+                    Some(row) if row.len() == diameter as usize => row,
+                    _ => {
+                        lent = false;
+                        break;
+                    }
+                };
                 let weight_y = weight_array[y_wa as usize] as i32;
-                let mut x_wa = IMAGE_SUBPIXEL_MASK as i32 - x_fract;
-
-                loop {
+                let mut x_wa = x_wa0;
+                for p in row {
                     let weight = (weight_y * weight_array[x_wa as usize] as i32
                         + IMAGE_FILTER_SCALE / 2)
                         >> IMAGE_FILTER_SHIFT;
-
-                    fg[0] += weight * fg_ptr[0] as i32;
-                    fg[1] += weight * fg_ptr[1] as i32;
-                    fg[2] += weight * fg_ptr[2] as i32;
-                    fg[3] += weight * fg_ptr[3] as i32;
-
-                    x_count -= 1;
-                    if x_count == 0 {
-                        break;
-                    }
+                    add_weighted(&mut fg, weight, p);
                     x_wa += IMAGE_SUBPIXEL_SCALE as i32;
-                    fg_ptr = self.source.next_x();
-                }
-
-                y_count -= 1;
-                if y_count == 0 {
-                    break;
                 }
                 y_wa += IMAGE_SUBPIXEL_SCALE as i32;
-                fg_ptr = self.source.next_y();
+            }
+
+            if !lent {
+                fg = FILTER_SUMS_START;
+                let mut y_count = diameter as u32;
+                let mut y_wa = y_wa0;
+
+                let mut fg_ptr = self.source.span(x0, y0, diameter as u32);
+
+                loop {
+                    let mut x_count = diameter;
+                    let weight_y = weight_array[y_wa as usize] as i32;
+                    let mut x_wa = x_wa0;
+
+                    loop {
+                        let weight = (weight_y * weight_array[x_wa as usize] as i32
+                            + IMAGE_FILTER_SCALE / 2)
+                            >> IMAGE_FILTER_SHIFT;
+                        add_weighted(&mut fg, weight, fg_ptr);
+
+                        x_count -= 1;
+                        if x_count == 0 {
+                            break;
+                        }
+                        x_wa += IMAGE_SUBPIXEL_SCALE as i32;
+                        fg_ptr = self.source.next_x();
+                    }
+
+                    y_count -= 1;
+                    if y_count == 0 {
+                        break;
+                    }
+                    y_wa += IMAGE_SUBPIXEL_SCALE as i32;
+                    fg_ptr = self.source.next_y();
+                }
             }
 
             fg[0] >>= IMAGE_FILTER_SHIFT;
@@ -960,7 +992,7 @@ impl<S: ImageSource, I: SpanInterpolatorLocalScale> SpanGenerator
 mod tests {
     use super::*;
     use crate::image_accessors::{ImageAccessorClip, ImageAccessorClone};
-    use crate::image_filters::ImageFilterBilinear;
+    use crate::image_filters::{ImageFilterBessel, ImageFilterBicubic, ImageFilterBilinear};
     use crate::rendering_buffer::RowAccessor;
 
     fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor<'_> {
@@ -1313,5 +1345,156 @@ mod tests {
         SpanGenerator::generate(&mut filter, &mut span, 0, 0, 2);
         assert_eq!(span[0].r, 10);
         assert_eq!(span[1].r, 40);
+    }
+
+    // -- Lent rows (`ImageSource::pixel_row`) against the per-pixel walk --
+
+    /// Forwards the walk of `S` but lends no rows, so the generators read every pixel
+    /// through `span`, `next_x` and `next_y`.
+    struct Unlent<S>(S);
+
+    impl<S: ImageSource> ImageSource for Unlent<S> {
+        fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8] {
+            self.0.span(x, y, len)
+        }
+        fn next_x(&mut self) -> &[u8] {
+            self.0.next_x()
+        }
+        fn next_y(&mut self) -> &[u8] {
+            self.0.next_y()
+        }
+    }
+
+    /// A 9x7 image with distinct, partly transparent pixels.
+    fn varied_image(data: &mut Vec<u8>) -> RowAccessor<'_> {
+        data.clear();
+        data.extend((0..9 * 7 * 4).map(|i: u32| (i * 37 % 251) as u8 | 0x40));
+        RowAccessor::new_with_buf(data, 9, 7, 36)
+    }
+
+    /// Rotated and scaled so the spans below cross every edge of the image: some kernels
+    /// are lent whole, some only partly and some not at all.
+    fn crossing_interpolator() -> SpanInterpolatorLinear {
+        let mut mtx = TransAffine::new_translation(-4.5, -3.5);
+        mtx.multiply(&TransAffine::new_rotation(0.5));
+        mtx.multiply(&TransAffine::new_scaling(1.4, 1.2));
+        mtx.multiply(&TransAffine::new_translation(8.0, 6.0));
+        mtx.invert();
+        SpanInterpolatorLinear::new(mtx)
+    }
+
+    /// Renders rows -4..12 of 20 pixels from x = -4 with `generator`.
+    fn render_rows<G: SpanGenerator<Color = Rgba8>>(mut generator: G) -> Vec<Rgba8> {
+        let mut out = Vec::new();
+        for y in -4..12 {
+            let mut span = vec![Rgba8::new(0, 0, 0, 0); 20];
+            generator.generate(&mut span, -4, y, 20);
+            out.extend(span);
+        }
+        out
+    }
+
+    #[test]
+    fn filters_2x2_and_general_read_lent_rows_as_the_walk() {
+        let mut data = Vec::new();
+        let ra = varied_image(&mut data);
+        let bilinear = ImageFilterLut::new_with_filter(&ImageFilterBilinear, true);
+        let bicubic = ImageFilterLut::new_with_filter(&ImageFilterBicubic, true);
+        let bessel = ImageFilterLut::new_with_filter(&ImageFilterBessel, true);
+
+        macro_rules! both {
+            ($filter:ident, $lut:expr, $accessor:expr) => {{
+                let mut lent = $accessor;
+                let mut interp = crossing_interpolator();
+                let a = render_rows($filter::new(&mut lent, &mut interp, $lut));
+                let mut unlent = Unlent($accessor);
+                let mut interp = crossing_interpolator();
+                let b = render_rows($filter::new(&mut unlent, &mut interp, $lut));
+                assert_eq!(a, b);
+            }};
+        }
+        for clip in [true, false] {
+            if clip {
+                let acc = || ImageAccessorClip::<4>::new(&ra, &[10, 20, 30, 40]);
+                both!(SpanImageFilterRgba2x2, &bilinear, acc());
+                both!(SpanImageFilterRgbaGen, &bilinear, acc());
+                both!(SpanImageFilterRgbaGen, &bicubic, acc());
+                both!(SpanImageFilterRgbaGen, &bessel, acc());
+            } else {
+                let acc = || ImageAccessorClone::<4>::new(&ra);
+                both!(SpanImageFilterRgba2x2, &bilinear, acc());
+                both!(SpanImageFilterRgbaGen, &bilinear, acc());
+                both!(SpanImageFilterRgbaGen, &bicubic, acc());
+                both!(SpanImageFilterRgbaGen, &bessel, acc());
+            }
+        }
+    }
+
+    /// Forwards the walk of `S` but lends, for a request of `len` pixels, the row `S` would
+    /// lend for `len + delta` pixels: a third-party `ImageSource` breaking the `pixel_row`
+    /// contract. `lent` counts the wrong-length rows it handed out.
+    struct Misfit<S> {
+        inner: S,
+        delta: i32,
+        lent: std::cell::Cell<usize>,
+    }
+
+    impl<S: ImageSource> ImageSource for Misfit<S> {
+        fn span(&mut self, x: i32, y: i32, len: u32) -> &[u8] {
+            self.inner.span(x, y, len)
+        }
+        fn next_x(&mut self) -> &[u8] {
+            self.inner.next_x()
+        }
+        fn next_y(&mut self) -> &[u8] {
+            self.inner.next_y()
+        }
+        fn pixel_row<const N: usize>(&self, x: i32, y: i32, len: u32) -> Option<&[[u8; N]]> {
+            let row = self
+                .inner
+                .pixel_row::<N>(x, y, len.checked_add_signed(self.delta)?)?;
+            self.lent.set(self.lent.get() + 1);
+            Some(row)
+        }
+    }
+
+    /// A lent row whose length is not the requested one is treated as not lent: the
+    /// generators read that kernel through the walk, so the output is exactly the walk's.
+    /// Trusting the length would drop taps (shorter) or run the weight index past the LUT
+    /// (longer).
+    #[test]
+    fn filters_treat_wrong_length_rows_as_not_lent() {
+        let mut data = Vec::new();
+        let ra = varied_image(&mut data);
+        let bilinear = ImageFilterLut::new_with_filter(&ImageFilterBilinear, true);
+        let bicubic = ImageFilterLut::new_with_filter(&ImageFilterBicubic, true);
+        let bessel = ImageFilterLut::new_with_filter(&ImageFilterBessel, true);
+        let acc = || ImageAccessorClip::<4>::new(&ra, &[10, 20, 30, 40]);
+
+        macro_rules! check {
+            ($filter:ident, $lut:expr) => {{
+                let mut unlent = Unlent(acc());
+                let mut interp = crossing_interpolator();
+                let walk = render_rows($filter::new(&mut unlent, &mut interp, $lut));
+                for delta in [-1, 1] {
+                    let mut misfit = Misfit {
+                        inner: acc(),
+                        delta,
+                        lent: std::cell::Cell::new(0),
+                    };
+                    let mut interp = crossing_interpolator();
+                    let out = render_rows($filter::new(&mut misfit, &mut interp, $lut));
+                    assert!(
+                        misfit.lent.get() > 0,
+                        "delta {delta}: no wrong row was lent"
+                    );
+                    assert_eq!(out, walk, "delta {delta}");
+                }
+            }};
+        }
+        check!(SpanImageFilterRgba2x2, &bilinear);
+        check!(SpanImageFilterRgbaGen, &bilinear);
+        check!(SpanImageFilterRgbaGen, &bicubic);
+        check!(SpanImageFilterRgbaGen, &bessel);
     }
 }

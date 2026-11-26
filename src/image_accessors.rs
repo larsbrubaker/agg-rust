@@ -25,6 +25,31 @@ pub trait ImageSource {
 
     /// Advance to the next row (y+1), resetting x to the span start.
     fn next_y(&mut self) -> &[u8];
+
+    /// The `len` pixels `(x, y)` to `(x + len - 1, y)` as `N`-byte pixels, borrowed from the
+    /// image, when the source can lend them as one run; `None` when it cannot. Each is the
+    /// pixel `span(x, y, len)` and the `next_x` calls after it would return, so a `Some`
+    /// answers a whole row of a filter kernel at once. A `Some` must hold exactly `len`
+    /// pixels; the filters treat a row of any other length as not lent. It reads no state and
+    /// changes none: after it, `span`, `next_x` and `next_y` go on as if it had not been
+    /// called.
+    ///
+    /// `SpanImageFilterRgba2x2` and `SpanImageFilterRgbaGen` ask it for each row of a kernel
+    /// first and read the kernel through `span`, `next_x` and `next_y` on a `None`, so it is
+    /// only a fast path: no state to store per pixel, and no slow path in the loop. The
+    /// default answers `None`.
+    /// `ImageAccessorClip` and `ImageAccessorClone` answer for pixels inside the image when
+    /// `N` is their pixel width and a row of the image fits in its stride (their fast path's
+    /// conditions); outside the image their pixel is the background or a clamped edge pixel,
+    /// which is not a run of the image, so they answer `None` there.
+    #[inline]
+    fn pixel_row<const N: usize>(&self, x: i32, y: i32, len: u32) -> Option<&[[u8; N]]>
+    where
+        Self: Sized,
+    {
+        let _ = (x, y, len);
+        None
+    }
 }
 
 impl<const PIX_WIDTH: usize> ImageSource for ImageAccessorClip<'_, PIX_WIDTH> {
@@ -39,6 +64,10 @@ impl<const PIX_WIDTH: usize> ImageSource for ImageAccessorClip<'_, PIX_WIDTH> {
     #[inline]
     fn next_y(&mut self) -> &[u8] {
         self.next_y()
+    }
+    #[inline]
+    fn pixel_row<const N: usize>(&self, x: i32, y: i32, len: u32) -> Option<&[[u8; N]]> {
+        self.fast.pixels(x, y, len)
     }
 }
 
@@ -66,6 +95,10 @@ impl<const PIX_WIDTH: usize> ImageSource for ImageAccessorClone<'_, PIX_WIDTH> {
     #[inline]
     fn next_y(&mut self) -> &[u8] {
         self.next_y()
+    }
+    #[inline]
+    fn pixel_row<const N: usize>(&self, x: i32, y: i32, len: u32) -> Option<&[[u8; N]]> {
+        self.fast.pixels(x, y, len)
     }
 }
 
@@ -403,8 +436,7 @@ mod fast_row {
     /// `pixel` empty on a miss, rather than as `Option<&[u8]>` or a `Step` carrying the
     /// slice: each branch here sets the flag to a constant, which folds away once inlined,
     /// where an `Option` built from the row would make the accessors' `match` test the
-    /// pixel pointer for null, which the compiler cannot prove it is not. The `Option` form
-    /// measured about 7% slower on `image_perspective`.
+    /// pixel pointer for null, which the compiler cannot prove it is not.
     const MISS: &[u8] = &[];
 
     /// The fast path `ImageAccessorClip` and `ImageAccessorClone` share (C++ `m_pix_ptr`):
@@ -418,25 +450,53 @@ mod fast_row {
     /// returns is one of a row's first `width * PIX_WIDTH` bytes by construction. `enter`
     /// tests the row with `row_fits` first, so `row_bytes`'s own test folds into it and no
     /// panic path is left in the accessors' hot code.
+    ///
+    /// It also lends runs of pixels without entering them (`pixels`, behind
+    /// `ImageSource::pixel_row`), which the filters ask for once per kernel row of every
+    /// output pixel. For that `new` computes once what the image does not change while it is
+    /// borrowed (the rows that may be lent, the offset of row 0, the signed stride), so a
+    /// run is a compare of `y`, a multiply-add for its offset and one checked `get`.
     pub(super) struct FastRow<'a, const PIX_WIDTH: usize> {
         rbuf: &'a RowAccessor<'a>,
+        /// The image's attached bytes (`RowAccessor::buf`), for `pixels`.
+        bytes: &'a [u8],
         /// The pixels of the current row after the current one; empty when inactive.
         pixels: slice::Iter<'a, [u8; PIX_WIDTH]>,
+        /// Offset in `bytes` of row 0 (`RowAccessor::row0_offset`).
+        row0: isize,
+        /// The signed stride.
+        stride: isize,
+        /// The rows `pixels` may lend: the height when a `width * PIX_WIDTH`-byte row fits
+        /// in the stride, else 0, so `y < fast_rows` tests the row index and the row length
+        /// in one compare.
+        fast_rows: u32,
+        /// The span's first x, where `next_row` enters the next row.
+        x0: i32,
         /// Whether the fast path is on a row. With `pixels` empty it tells a row that ended
         /// (`next_x`'s `RowEnded`) from no row at all (`Inactive`).
         active: bool,
-        /// The span's first x, where `next_row` enters the next row.
-        x0: i32,
     }
 
     impl<'a, const PIX_WIDTH: usize> FastRow<'a, PIX_WIDTH> {
-        /// Inactive.
+        /// Inactive, with the row facts `pixels` needs computed once.
         pub(super) fn new(rbuf: &'a RowAccessor<'a>) -> Self {
+            // A zero-width pixel has no bytes to read (and `as_chunks::<0>` panics), so no
+            // run is lent; the walk returns the same empty slices.
+            let row_fits = PIX_WIDTH != 0
+                && (rbuf.width() as usize)
+                    .checked_mul(PIX_WIDTH)
+                    .is_some_and(|len| len <= rbuf.stride_abs() as usize);
             Self {
                 rbuf,
+                bytes: rbuf.buf(),
                 pixels: [].iter(),
-                active: false,
+                // Both are below `isize::MAX`: the offset is inside the attached bytes and
+                // the stride is an `i32`.
+                row0: rbuf.row0_offset() as isize,
+                stride: rbuf.stride() as isize,
+                fast_rows: if row_fits { rbuf.height() } else { 0 },
                 x0: 0,
+                active: false,
             }
         }
 
@@ -496,6 +556,39 @@ mod fast_row {
                 }
                 None => (Step::Inactive, MISS),
             }
+        }
+
+        /// The pixels `x..x + len` of row `y` as `N`-byte pixels (`ImageSource::pixel_row`),
+        /// when `N` is the pixel width and the run lies in a row the fast path may enter
+        /// (`enter_span`'s test, with `fast_rows` for the row and its fit in the stride);
+        /// otherwise `None`. Reads and changes no state. Width and height are at most
+        /// `i32::MAX` (`attach`), so a negative `x` or `y` cast to `u32` fails the `<` tests.
+        #[inline]
+        pub(super) fn pixels<const N: usize>(
+            &self,
+            x: i32,
+            y: i32,
+            len: u32,
+        ) -> Option<&'a [[u8; N]]> {
+            let w = self.rbuf.width();
+            // `N != 0` keeps `as_chunks::<0>` (which panics) out; `fast_rows` is 0 for a
+            // zero-width pixel anyway.
+            if N != PIX_WIDTH
+                || N == 0
+                || (y as u32) >= self.fast_rows
+                || (x as u32) >= w
+                || len > w - x as u32
+            {
+                return None;
+            }
+            // `0 <= y < height`, so the row starts inside the attached bytes, a whole stride
+            // before their end (see `RowAccessor::row_offset`); `x + len <= width` and a row
+            // of `width * N` bytes fits in the stride, so the run ends inside the row.
+            // Nothing overflows, and the `get` (which keeps the slice checked) always
+            // succeeds.
+            let start = (self.row0 + y as isize * self.stride) as usize + x as usize * N;
+            let bytes = self.bytes.get(start..start + len as usize * N)?;
+            Some(bytes.as_chunks::<N>().0)
         }
 
         /// Leaves the fast path.
@@ -1192,5 +1285,111 @@ mod tests {
         acc.span(0, 0, 1);
         let pix = acc.next_y();
         assert_eq!(pix[0], 30);
+    }
+
+    // -- pixel_row: the fast path's lent runs --
+
+    /// The bytes of `height` rows of `stride` (negative: row 0 last in memory), every one
+    /// distinct mod 256 within a few rows.
+    fn patterned(height: u32, stride: i32) -> Vec<u8> {
+        let len = height as usize * stride.unsigned_abs() as usize;
+        (0..len).map(|i| (i * 7 + 3) as u8).collect()
+    }
+
+    /// The pixels `span(x, y, len)` and `len - 1` `next_x` calls return.
+    fn walk<S: ImageSource>(acc: &mut S, x: i32, y: i32, len: u32) -> Vec<Vec<u8>> {
+        let mut out = vec![acc.span(x, y, len).to_vec()];
+        for _ in 1..len {
+            out.push(acc.next_x().to_vec());
+        }
+        out
+    }
+
+    /// Checks `pixel_row` on every run around the image: `Some` exactly for runs inside
+    /// the image when a row fits in the stride, holding the image's own pixels, which are
+    /// what `span` and `next_x` return there.
+    fn check_pixel_row(width: u32, height: u32, stride: i32) {
+        let mut data = patterned(height, stride);
+        let ra = RowAccessor::new_with_buf(&mut data, width, height, stride);
+        let fits = width as usize * 4 <= stride.unsigned_abs() as usize;
+        let mut clip = ImageAccessorClip::<4>::new(&ra, &[1, 2, 3, 4]);
+        let mut clone = ImageAccessorClone::<4>::new(&ra);
+        for y in -2..height as i32 + 2 {
+            for x in -2..width as i32 + 2 {
+                for len in 0..width + 3 {
+                    let inside = fits
+                        && (0..height as i32).contains(&y)
+                        && (0..width as i32).contains(&x)
+                        && x as u32 + len <= width;
+                    let lent = [
+                        clip.pixel_row::<4>(x, y, len),
+                        clone.pixel_row::<4>(x, y, len),
+                    ];
+                    for row in lent {
+                        assert_eq!(row.is_some(), inside, "({x}, {y}) len {len}");
+                        let Some(row) = row else { continue };
+                        assert_eq!(row.len(), len as usize);
+                        let image = &ra.row_slice(y as u32)[x as usize * 4..];
+                        assert_eq!(row.as_flattened(), &image[..len as usize * 4]);
+                    }
+                    if inside && len > 0 {
+                        let row = clip.pixel_row::<4>(x, y, len).unwrap();
+                        let pixels: Vec<Vec<u8>> = row.iter().map(|p| p.to_vec()).collect();
+                        assert_eq!(walk(&mut clip, x, y, len), pixels);
+                        assert_eq!(walk(&mut clone, x, y, len), pixels);
+                    }
+                }
+            }
+        }
+        // Another pixel width is not a run of these pixels.
+        assert!(clip.pixel_row::<3>(0, 0, 1).is_none());
+        assert!(clone.pixel_row::<8>(0, 0, 1).is_none());
+    }
+
+    #[test]
+    fn pixel_row_lends_the_image_pixels_inside_and_nothing_else() {
+        check_pixel_row(5, 4, 20);
+        check_pixel_row(5, 4, 23);
+        check_pixel_row(5, 4, -24);
+        // A row does not fit in the stride: nothing is lent (the walk would panic).
+        check_pixel_row(5, 4, 16);
+        check_pixel_row(0, 3, 8);
+        check_pixel_row(4, 0, 16);
+    }
+
+    #[test]
+    fn pixel_row_leaves_the_walk_unchanged() {
+        let mut data = patterned(5, 24);
+        let ra = RowAccessor::new_with_buf(&mut data, 6, 5, 24);
+        let pixel = |x: usize, y: u32| ra.row_slice(y)[x * 4..x * 4 + 4].to_vec();
+        let mut clip = ImageAccessorClip::<4>::new(&ra, &[0; 4]);
+        let mut clone = ImageAccessorClone::<4>::new(&ra);
+
+        assert_eq!(clip.span(1, 1, 3), pixel(1, 1));
+        assert_eq!(clone.span(1, 1, 3), pixel(1, 1));
+        assert!(clip.pixel_row::<4>(0, 3, 4).is_some());
+        assert!(clone.pixel_row::<4>(0, 3, 4).is_some());
+        assert_eq!(clip.next_x(), pixel(2, 1));
+        assert_eq!(clone.next_x(), pixel(2, 1));
+        assert!(clip.pixel_row::<4>(4, 0, 2).is_some());
+        assert!(clone.pixel_row::<4>(4, 0, 2).is_some());
+        assert_eq!(clip.next_y(), pixel(1, 2));
+        assert_eq!(clone.next_y(), pixel(1, 2));
+        assert_eq!(clip.next_x(), pixel(2, 2));
+        assert_eq!(clone.next_x(), pixel(2, 2));
+    }
+
+    #[test]
+    fn pixel_row_lends_nothing_by_default() {
+        let mut data = patterned(4, 16);
+        let ra = RowAccessor::new_with_buf(&mut data, 4, 4, 16);
+        assert!(ImageAccessorNoClip::<4>::new(&ra)
+            .pixel_row::<4>(0, 0, 2)
+            .is_none());
+        assert!(
+            ImageAccessorWrap::<4, WrapModeRepeat, WrapModeRepeat>::new(&ra)
+                .pixel_row::<4>(0, 0, 2)
+                .is_none()
+        );
     }
 }

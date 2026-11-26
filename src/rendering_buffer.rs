@@ -16,7 +16,7 @@
 //! access afterwards is an ordinary checked slice of those bytes. C++ AGG attaches a raw
 //! pointer and trusts its size.
 
-/// Row data returned by `row()` — a slice range and pointer into a row.
+/// Row data returned by `row()` — the row's x range and its bytes.
 #[derive(Debug, Clone, Copy)]
 pub struct RowData<'a> {
     pub x1: i32,
@@ -247,6 +247,14 @@ impl<'a> RowAccessor<'a> {
     #[inline]
     pub(crate) fn row_fits(&self, y: i32, len: usize) -> bool {
         y >= 0 && (y as u32) < self.height && len <= self.stride_abs() as usize
+    }
+
+    /// Offset in [`buf`](Self::buf) of row 0 (the last row in memory for a negative
+    /// stride), so row `y` starts at `row0_offset() + y * stride()`. For a caller that
+    /// finds rows itself (the image accessors' lent runs, `ImageSource::pixel_row`).
+    #[inline]
+    pub(crate) fn row0_offset(&self) -> usize {
+        self.row0
     }
 
     /// Row `y`, all `stride_abs()` bytes of it.
