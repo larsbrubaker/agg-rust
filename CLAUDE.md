@@ -2,20 +2,28 @@
 
 ## Project Phase
 
-agg-rust is a pure-Rust 2D rendering library in its own right (agg-gui and MatterCAD build on it) that began as a strict port of AGG 2.6. The project is now **beyond the port**: its goal is to **improve the library beyond the original C++ version**, with C++ behavioral matching as the baseline. A few C++ headers and demos still have no Rust counterpart; `PORTING_PLAN.md`, the open work, lists them.
+agg-rust is a pure-Rust 2D rendering library (agg-gui and MatterCAD build on it). It began as a strict port of AGG 2.6, the C++ library by Maxim Shemanarev.
 
-The work beyond the port:
+**agg-rust is now the authoritative source of this library.** C++ AGG is no longer in development, and this project no longer tries to stay compliant with it or identical to it. What the library does is defined by this repository's code and tests, not by the C++ original.
+
+**The goal** is to be the best possible library of its kind: the best software renderer, and the most efficient implementation of the tasks it sets out to do.
+
+What follows from that:
+
+- **The C++ source is reference material, not a specification.** `cpp-references/agg-src/` is the best record of what an algorithm was meant to do, and the starting point when porting one of the headers `PORTING_PLAN.md` still lists. Matching its output is never a goal in itself: where the C++ behavior is wrong, unsafe, slow or awkward, the Rust library does the better thing.
+- **Behavior changes on purpose, never by accident.** A change in rendered output or in what an API does is a decision: it has a reason, a comment where the reason is not obvious from the code, and a test that pins the new behavior. Unexplained drift is still a bug: users of the library rely on its output being stable.
+- **Comparisons with C++ output are regression guards.** The committed `pixel-compare` reference tests and the "Byte-identical" column of the benchmark table record where the two still agree, and catch accidental changes. They are not a requirement: a deliberate change may end the agreement for a demo, and the same change then updates or retires that comparison and says why.
+- **Safe Rust stays safe.** No safe public function may reach undefined behavior, whatever its arguments. Where C++ AGG leaves a precondition unchecked, the Rust API checks it and panics (`RowAccessor::row_bytes` in `src/rendering_buffer.rs` is the model). The tests that guard the unsafe code run under Miri in CI (see Testing).
+- **Efficiency is measured.** A change on a hot path is timed before and after (`pixel-compare bench`, README "Benchmarks"), and a slowdown needs a reason.
+
+The work:
 
 - Fix bugs, including bugs inherited from the C++ original
 - Improve performance
-- Extend capabilities with new APIs that don't exist in C++ AGG when they provide real-world value
+- Extend capabilities with new APIs when they provide real-world value
+- Port the remaining C++ headers and demos that earn their place (`PORTING_PLAN.md` lists them)
 
-C++ behavioral matching remains the default baseline. Any divergence from C++ behavior must be a **deliberate, justified fix of a demonstrable C++ bug** — never accidental drift. Every deliberate divergence must be:
-
-- **Documented in code comments** explaining what the C++ bug was and why we diverge from it
-- **Locked in with a regression test** that proves the corrected behavior and guards against reverting to the C++ bug
-
-The model example is the gradient LUT off-by-one fix (see `seg_len` in `src/gradient_lut.rs`): upstream `agg_gradient_lut.h` sizes segments as `end - start + 1`, but the correct sizing is `end - start - 1` so gradient segments reach their end color. That divergence is documented at the call site and covered by a regression test.
+Where the Rust behavior differs from the C++ source, say so in a comment at the code, because many readers arrive knowing AGG, and pin the behavior with a test. The model example is the gradient LUT fix (see `seg_len` in `src/gradient_lut.rs`): upstream `agg_gradient_lut.h` sizes segments as `end - start + 1`, but the correct sizing is `end - start - 1` so gradient segments reach their end color. The difference is documented at the call site and covered by a regression test.
 
 **Guidelines for new extensions:**
 1. Clear, demonstrated real-world use case (not speculative)
@@ -25,9 +33,9 @@ The model example is the gradient LUT off-by-one fix (see `seg_len` in `src/grad
 
 ## Philosophy
 
-**Quality through iterations** - Start with correct implementations, then improve. Code that doesn't matter can be quick and dirty. But code that matters *really* matters—treat it with respect and improve it meticulously. In a porting project, every function matters.
+**Quality through iterations** - Start with correct implementations, then improve. Code that doesn't matter can be quick and dirty. But code that matters *really* matters—treat it with respect and improve it meticulously. Every function in a rendering library matters.
 
-**Circumstances alter cases** - Use judgment. There are no rigid rules—context determines the right approach. However, this project has strong defaults because porting demands precision.
+**Circumstances alter cases** - Use judgment. There are no rigid rules—context determines the right approach. However, this project has strong defaults because rendering code demands precision.
 
 **No stubs, no shortcuts** - Every function must be complete and production-ready. No `todo!()`, no `unimplemented!()`, no `panic!("not implemented")`, no partial implementations. If dependencies aren't ready, stop and implement them first.
 
@@ -56,9 +64,11 @@ This approach works because:
 - Write tests for regressions and complex logic
 - Avoid redundant tests that verify the same behavior
 - All tests must pass before merging
-- Tests must verify **exact behavioral match** with the C++ implementation
+- Tests verify the library's intended behavior: they are what defines it. A deliberate behavior change updates the tests that pin the old behavior in the same change
 - When test failures occur, use the fix-test-failures agent (`.claude/agents/fix-test-failures.md`) — it treats all failures as real bugs and resolves them through instrumentation and root cause analysis, never by weakening tests
-- For pixel-perfect rendering validation, compare rendered pixel buffers byte-for-byte with C++ output
+- The committed comparisons of rendered buffers against C++ output (`pixel-compare` reference tests) are regression guards, not a requirement (see Project Phase)
+- The tests that guard unsafe code (the library's unit tests, `tests/pixfmt_row_bounds_tests.rs` and `tests/image_accessor_bounds_tests.rs`) run under Miri in CI, on a 64-bit and a 32-bit target, to catch undefined behavior an ordinary run cannot see. Miri needs nightly; the nightly's date is pinned in `.github/workflows/ci.yml` (`MIRI_TOOLCHAIN` in the `miri` job), and must be used as written
+- Never pass `+toolchain` or `--toolchain` naming a toolchain that `rustup toolchain list` does not show: rustup installs it silently. Installing a toolchain is the owner's call
 
 **Running tests:**
 ```bash
@@ -74,13 +84,18 @@ cargo test test_name -- --exact
 
 # Run with output
 cargo test -- --nocapture
+
+# Run the unsafe-code guards under Miri, as CI does, on the nightly CI pins
+MIRI_TOOLCHAIN=$(awk '/MIRI_TOOLCHAIN:/ {print $2; exit}' .github/workflows/ci.yml)
+cargo +"$MIRI_TOOLCHAIN" miri test -p agg-rust --lib --test pixfmt_row_bounds_tests --test image_accessor_bounds_tests
+cargo +"$MIRI_TOOLCHAIN" miri test -p agg-rust --lib --test pixfmt_row_bounds_tests --test image_accessor_bounds_tests --target i686-unknown-linux-gnu
 ```
 
 ## Code Quality
 
 **Names** - Choose carefully. Good names make code self-documenting. Rust names should follow Rust conventions (`snake_case` for functions/variables, `PascalCase` for types, `SCREAMING_SNAKE_CASE` for constants).
 
-**Comments** - Explain *why*, not *what*. The code shows what it does; comments should reveal intent, tradeoffs, and non-obvious reasoning. When porting from C++, comments explaining *why* the Rust approach differs from C++ are especially valuable.
+**Comments** - Explain *why*, not *what*. The code shows what it does; comments should reveal intent, tradeoffs, and non-obvious reasoning. Where the Rust code differs from the C++ source, a comment saying *why* is especially valuable.
 
 **Refactoring** - Improve code when it serves a purpose, not for aesthetics. Refactor to fix bugs, add features, or improve clarity when you're already working in that area.
 
@@ -102,17 +117,7 @@ cargo test -- --nocapture
 
 ## C++ to Rust Porting Rules
 
-This project is a strict port of the AGG 2.6 C++ library to Rust. These rules ensure fidelity:
-
-### Exact Behavioral Matching
-- Rust implementation must match C++ behavior exactly
-- Same algorithms, same mathematical precision
-- Same edge case handling, same error conditions
-- Same performance characteristics (or better)
-- Pixel-perfect rendering output (byte-for-byte match with C++ rendered buffers)
-- No "close enough" implementations
-
-**Sanctioned exception:** known C++ AGG bugs may be deliberately fixed, diverging from the original behavior — but only following the documentation + regression-test requirements defined in the Project Phase section (code comment explaining the C++ bug, plus a regression test locking in the corrected behavior). Undocumented or accidental divergence from C++ behavior remains forbidden.
+These rules apply when porting one of the C++ headers or demos that `PORTING_PLAN.md` still lists. Start from the C++ source to understand the algorithm and its edge cases, then write the best Rust version of it: safe, idiomatic and fast. The result is judged on its own correctness and tests, not on matching C++ output.
 
 ### Template-to-Trait Mapping
 
@@ -140,11 +145,11 @@ Before implementing any function:
 - Stub functions or placeholder implementations
 - Implementing without dependencies ready
 - Marking functions complete prematurely
-- "Close enough" or "good enough for now" implementations
+- "Good enough for now" implementations
 
 ## C++ Reference
 
-The original C++ source code is available in `cpp-references/agg-src/` for reference. Key directories:
+The original C++ source code is kept in `cpp-references/agg-src/` as reference material, not as a specification (see Project Phase). Key directories:
 - `cpp-references/agg-src/include/` — all public header files
 - `cpp-references/agg-src/src/` — implementation files
 - `cpp-references/agg-src/examples/` — demo programs

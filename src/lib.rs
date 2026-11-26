@@ -17,6 +17,16 @@
 //! - Compositing modes (SVG 1.2 compatible)
 //! - Built-in vector and raster fonts
 //!
+//! ## Relationship to C++ AGG
+//!
+//! agg-rust is the authoritative, maintained version of this library: C++ AGG is
+//! no longer in development, and agg-rust does not try to stay identical to it.
+//! Its goal is to be the best and most efficient software renderer it can be, so
+//! where the C++ behavior is wrong, unsafe or slow, agg-rust does the better thing
+//! and documents the difference. No safe function reaches undefined behavior,
+//! whatever its arguments: where C++ AGG leaves a precondition unchecked, agg-rust
+//! checks it and an out-of-range argument panics.
+//!
 //! ## Architecture
 //!
 //! AGG uses a five-stage rendering pipeline:

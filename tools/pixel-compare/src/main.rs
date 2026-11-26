@@ -327,6 +327,10 @@ struct BenchCase {
 ///   - `compositing2`, `flash_rasterizer`, `flash_rasterizer2` — via the
 ///     reference checks in `src/render/mod.rs`
 ///
+/// That is a fact the benchmark prose relies on, not a rule: see
+/// `all_bench_cases_are_byte_verified` for what to change if a deliberate change
+/// ends a demo's match with C++.
+///
 /// Adding a demo later is a one-line change here.
 const BENCH_CASES: &[BenchCase] = &[
     BenchCase {
@@ -1209,6 +1213,14 @@ mod tests {
 
     /// Every benchmarked demo is pinned byte-for-byte against the C++ reference;
     /// a regressed flag would silently reintroduce the "unverified" hedging.
+    ///
+    /// This pins a current fact that the prose `bench-compare` writes states
+    /// ("every demo in the table below is byte-identical"), as a guard against an
+    /// accidental change. It is not a requirement to match C++: agg-rust does not
+    /// require that (CLAUDE.md, "Project Phase"). A deliberate change that ends the
+    /// match for a demo sets that demo's `byte_verified` to false and, in the same
+    /// change, updates this test and the generated prose so the table and the
+    /// text stay true.
     #[test]
     fn all_bench_cases_are_byte_verified() {
         for c in BENCH_CASES {

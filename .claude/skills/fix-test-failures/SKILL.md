@@ -9,9 +9,9 @@ This skill provides a systematic approach to diagnosing and fixing test failures
 
 ## NO CHEATING - Critical Tests
 
-**These tests validate exact behavioral matching with the C++ AGG implementation. There are no workarounds.**
+**These tests define the library's intended behavior. There are no workarounds.**
 
-Every test exists because it validates behavior that must match C++ exactly. Bypassing tests means shipping incorrect implementations.
+Every test exists because it pins behavior the library is meant to have. Bypassing tests means shipping incorrect implementations.
 
 **Forbidden actions (no exceptions):**
 - Weakening assertions to make tests pass
@@ -114,14 +114,14 @@ Based on instrumentation output, determine:
 - Is the code under test wrong (common)?
 - Is there a numerical precision issue?
 - Is there a type conversion problem?
-- Does the Rust implementation diverge from C++ behavior?
+- Does the Rust code differ from the C++ source in a way nobody intended? (The C++ source is a useful lead, not the definition of correct.)
 
 ### Step 6: Fix the Bug
 
 Fix the actual bug in the production code.
 
 Common fixes for this project:
-- **Blending errors**: Verify against C++ pixel blending formulas
+- **Blending errors**: Check the blending formula step by step (the C++ source is a useful cross-check)
 - **Coverage issues**: Check rasterizer cell accumulation
 - **Precision issues**: Check floating point order of operations
 - **Type mismatches**: Ensure proper conversions between color types
@@ -148,7 +148,7 @@ Keep iterating until the root cause is clear.
 
 ## C++ Comparison Technique
 
-When stuck, compare execution step-by-step with C++:
+When stuck, comparing execution step-by-step with the C++ source can locate the bug:
 
 1. Find the corresponding code in `cpp-references/agg-src/`
 2. Add corresponding print statements in both Rust and C++ code
