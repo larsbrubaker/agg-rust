@@ -437,39 +437,6 @@ pub type VertexF = VertexBase<f32>;
 pub type VertexD = VertexBase<f64>;
 
 // ============================================================================
-// Row info (for rendering buffer row access)
-// ============================================================================
-
-/// Information about a row in a rendering buffer.
-/// Port of C++ `row_info<T>` — used with raw pointers for pixel buffer access.
-#[derive(Debug, Clone, Copy)]
-pub struct RowInfo<T> {
-    pub x1: i32,
-    pub x2: i32,
-    pub ptr: *mut T,
-}
-
-impl<T> RowInfo<T> {
-    pub fn new(x1: i32, x2: i32, ptr: *mut T) -> Self {
-        Self { x1, x2, ptr }
-    }
-}
-
-/// Const version of row info.
-#[derive(Debug, Clone, Copy)]
-pub struct ConstRowInfo<T> {
-    pub x1: i32,
-    pub x2: i32,
-    pub ptr: *const T,
-}
-
-impl<T> ConstRowInfo<T> {
-    pub fn new(x1: i32, x2: i32, ptr: *const T) -> Self {
-        Self { x1, x2, ptr }
-    }
-}
-
-// ============================================================================
 // Approximate equality comparison
 // ============================================================================
 
