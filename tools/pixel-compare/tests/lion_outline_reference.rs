@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Regression test: the native Rust `lion_outline` demo must render byte-for-byte
 // identical to the C++ AGG reference at 512x512 with default parameters.
 //

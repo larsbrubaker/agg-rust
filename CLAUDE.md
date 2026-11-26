@@ -13,7 +13,7 @@ What follows from that:
 - **The C++ source is reference material, not a specification.** `cpp-references/agg-src/` is the best record of what an algorithm was meant to do, and the starting point when porting one of the headers `PORTING_PLAN.md` still lists. Matching its output is never a goal in itself: where the C++ behavior is wrong, unsafe, slow or awkward, the Rust library does the better thing.
 - **Behavior changes on purpose, never by accident.** A change in rendered output or in what an API does is a decision: it has a reason, a comment where the reason is not obvious from the code, and a test that pins the new behavior. Unexplained drift is still a bug: users of the library rely on its output being stable.
 - **Comparisons with C++ output are regression guards.** The committed `pixel-compare` reference tests and the "Byte-identical" column of the benchmark table record where the two still agree, and catch accidental changes. They are not a requirement: a deliberate change may end the agreement for a demo, and the same change then updates or retires that comparison and says why.
-- **The library is safe Rust: no `unsafe` code.** New code never uses `unsafe`: no `unsafe` blocks, no `unsafe fn`, no `unsafe impl` or `unsafe trait`, and no API that makes its callers or implementors write `unsafe`. No safe function may reach undefined behavior, whatever its arguments: where C++ AGG leaves a precondition unchecked, the Rust API checks it and panics (`RowAccessor::row_bytes` in `src/rendering_buffer.rs` is the model). A design that seems to need `unsafe` is the wrong design: find the safe one, and if it is slower, make the safe one fast. The crate denies `unsafe_code` (`src/lib.rs`). The uses that remain from the port each carry an `#[expect(unsafe_code, reason = "...")]`, run under Miri in CI (see Testing), and are open work to remove (`PORTING_PLAN.md`, "Removing the remaining `unsafe`"); when the last one is gone the crate forbids `unsafe_code` outright. Adding a new `#[expect(unsafe_code)]` is not allowed.
+- **The library is safe Rust: no `unsafe` code.** There is none in the library, its tests, the demo or the tools; the workspace manifest (`[workspace.lints.rust]` in the root `Cargo.toml`) forbids `unsafe_code` for every crate and target, and each crate root repeats it with `#![forbid(unsafe_code)]`, so the compiler rejects any attempt to add it: no `unsafe` blocks, no `unsafe fn`, no `unsafe impl` or `unsafe trait`, and no API that makes its callers or implementors write `unsafe`. No safe function can reach undefined behavior; out-of-range arguments panic (`RowAccessor::row_bytes` in `src/rendering_buffer.rs` is the model). A design that seems to need `unsafe` is the wrong design: find the safe one, and if it is slower, make the safe one fast.
 - **Efficiency is measured.** A change on a hot path is timed before and after (`pixel-compare bench`, README "Benchmarks"), and a slowdown needs a reason.
 
 The work:
@@ -67,7 +67,6 @@ This approach works because:
 - Tests verify the library's intended behavior: they are what defines it. A deliberate behavior change updates the tests that pin the old behavior in the same change
 - When test failures occur, use the fix-test-failures agent (`.claude/agents/fix-test-failures.md`) — it treats all failures as real bugs and resolves them through instrumentation and root cause analysis, never by weakening tests
 - The committed comparisons of rendered buffers against C++ output (`pixel-compare` reference tests) are regression guards, not a requirement (see Project Phase)
-- The tests that guard unsafe code (the library's unit tests, `tests/pixfmt_row_bounds_tests.rs` and `tests/image_accessor_bounds_tests.rs`) run under Miri in CI, on a 64-bit and a 32-bit target, to catch undefined behavior an ordinary run cannot see. Miri needs nightly; the nightly's date is pinned in `.github/workflows/ci.yml` (`MIRI_TOOLCHAIN` in the `miri` job), and must be used as written
 - Never pass `+toolchain` or `--toolchain` naming a toolchain that `rustup toolchain list` does not show: rustup installs it silently. Installing a toolchain is the owner's call
 
 **Running tests:**
@@ -84,11 +83,6 @@ cargo test test_name -- --exact
 
 # Run with output
 cargo test -- --nocapture
-
-# Run the unsafe-code guards under Miri, as CI does, on the nightly CI pins
-MIRI_TOOLCHAIN=$(awk '/MIRI_TOOLCHAIN:/ {print $2; exit}' .github/workflows/ci.yml)
-cargo +"$MIRI_TOOLCHAIN" miri test -p agg-rust --lib --test pixfmt_row_bounds_tests --test image_accessor_bounds_tests
-cargo +"$MIRI_TOOLCHAIN" miri test -p agg-rust --lib --test pixfmt_row_bounds_tests --test image_accessor_bounds_tests --target i686-unknown-linux-gnu
 ```
 
 ## Code Quality

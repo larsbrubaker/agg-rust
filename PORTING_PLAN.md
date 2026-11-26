@@ -41,22 +41,18 @@ work live in the code it concerns. The C++ headers named here are in
   scales, such as bilinear at scale 2.5; possibly more at large downscales), so at the right
   edge of the image they read past the row they asked for. The accessors tolerate it:
   `ImageAccessorClone` clamps, `ImageAccessorClip` returns the background,
-  `ImageAccessorWrap` wraps, and `ImageAccessorNoClip` panics when the stride has no
-  padding and otherwise reads the padding bytes as a pixel. Needed: each generator asking
-  `span` for the number of pixels it actually reads, with a test that no span steps past its
-  `len`.
-- **Removing the remaining `unsafe`.** The crate denies `unsafe_code`, and two places
-  kept from the port still use it, each under an `#[expect(unsafe_code)]`. When both
-  are safe, `src/lib.rs` changes the `deny` to `#![forbid(unsafe_code)]`.
-  1. *The pixel buffer.* `RowAccessor` and `RowPtrCache` (`src/rendering_buffer.rs`) keep
-     a raw pointer with no lifetime, so `attach`, `new_with_buf` and `row_ptr` are
-     `unsafe fn` and every user of the library writes `unsafe` to attach a buffer. Needed:
-     a buffer that borrows `&mut [u8]` (or owns its pixels) with a lifetime, checks
-     `height * |stride| <= len` when built, and gives the pixel formats their rows as
-     slices. This changes the public API that the demos, tools, tests, agg-gui and
-     MatterCAD use.
-  2. *The vertical pass of `stack_blur_rgba32`* (`src/blur.rs`) walks columns with raw
-     pointers. Needed: a safe version that is as fast.
+  `ImageAccessorWrap` wraps, and `ImageAccessorNoClip` returns the stride's padding bytes
+  as a pixel and panics past the end of the stride (at once when the stride has no
+  padding). Needed: each generator asking `span` for the number of pixels it actually
+  reads, with a test that no span steps past its `len`.
+- **A read-only pixel buffer view.** `RowAccessor` borrows `&mut [u8]` even when the
+  buffer is only read: the source image of the image accessors (`ImageAccessorClip`,
+  `ImageAccessorNoClip`, `ImageAccessorClone`, `ImageAccessorWrap`) and of the bilinear-clip
+  span generators, the alpha masks (`AlphaMaskU8`, `AmaskNoClipU8`), the `src` of
+  `RendererBase::blend_from_color` / `blend_from_lut`, and the `from` side of `blend_from`
+  (a pixel format, built from `&mut RowAccessor`). So a caller needs mutable access to an
+  image just to read it. Needed: a view that borrows `&[u8]`, checked as `RowAccessor` is,
+  and that the reading side accepts.
 
 ## Demo site
 

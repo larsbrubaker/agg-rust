@@ -10,3 +10,6 @@ crate-type = ["cdylib", "rlib"]
 agg-rust = { path = "../..", features = ["font"] }
 js-sys = "0.3.85"
 wasm-bindgen = "0.2"
+
+[lints]
+workspace = true

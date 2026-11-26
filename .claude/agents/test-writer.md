@@ -58,7 +58,7 @@ For rendering tests, compare actual pixel buffer output:
 #[test]
 fn test_render_triangle() {
     let mut buf = vec![0u8; WIDTH * HEIGHT * 4];
-    let mut rbuf = RenderingBuffer::new(&mut buf, WIDTH, HEIGHT, WIDTH * 4);
+    let mut rbuf = RenderingBuffer::new_with_buf(&mut buf, WIDTH as u32, HEIGHT as u32, (WIDTH * 4) as i32);
     // ... render triangle ...
 
     // Compare specific pixel values with the expected output

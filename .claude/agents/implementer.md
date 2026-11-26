@@ -13,7 +13,7 @@ Rules:
 - Make the minimal correct change that satisfies the step. Stay within the file boundaries specified in the task.
 - After making the change, run the tests relevant to what you touched and verify they pass.
 - If the step is a bug fix, follow test-first bug fixing: write a failing test that reproduces the bug BEFORE fixing it, then make the minimal fix, then verify the test passes. Never deliver a bug fix that isn't covered by a test.
-- Write safe Rust: never add `unsafe` of any kind, including a new `#[expect(unsafe_code)]` (CLAUDE.md, Project Phase). If the step seems to need it, stop and flag it.
+- Write safe Rust: the project has no `unsafe` and every crate root carries `#![forbid(unsafe_code)]`; never write `unsafe` of any kind or weaken the `forbid` (CLAUDE.md, Project Phase). If the step seems to need it, find the safe design (and, if it is slower, make it fast) or stop and flag it.
 - Tests must exercise the actual production code — never duplicate production logic inside a test. If an existing test fails, treat it as a real bug and root-cause it; never weaken or delete a test to make it pass.
 - If the step requires an architectural decision that was not specified (a new dependency, a change to a public interface, a cross-module restructuring), do NOT make the decision yourself — stop and flag it in your report so the orchestrator can decide.
 

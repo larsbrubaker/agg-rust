@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Byte-for-byte regression test for the `simple_line` demo.
 //
 // The reference buffer in `tests/refs/simple_line_cpp_512x512.raw` was produced

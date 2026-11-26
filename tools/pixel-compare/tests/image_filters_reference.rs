@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Byte-for-byte regression test for the `image_filters` demo.
 //
 // The reference buffer in `tests/refs/image_filters_cpp_430x340.raw` was produced

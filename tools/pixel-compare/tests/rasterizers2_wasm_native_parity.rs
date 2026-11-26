@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Byte-for-byte parity test between the native and WASM `rasterizers2` renderers.
 //
 // The native renderer (`pixel_compare::render::render_demo`) is proven

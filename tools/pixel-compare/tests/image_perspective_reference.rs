@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Byte-for-byte regression test for the `image_perspective` demo.
 //
 // The reference buffer in `tests/refs/image_perspective_cpp_600x600.raw` was

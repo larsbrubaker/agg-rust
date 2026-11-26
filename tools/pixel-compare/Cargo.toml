@@ -11,3 +11,6 @@ path = "src/main.rs"
 [dependencies]
 agg-rust = { path = "../.." }
 agg-wasm = { path = "../../demo/wasm" }
+
+[lints]
+workspace = true

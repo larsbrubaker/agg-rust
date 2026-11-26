@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Regression test: the native Rust `conv_dash_marker` demo must render
 // byte-for-byte identical to the committed C++ reference raw.
 //

@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // Byte-for-byte regression test for the `rasterizers2` demo.
 //
 // The reference buffer in `tests/refs/rasterizers2_cpp_500x450.raw` was

@@ -1,11 +1,9 @@
 # Formatting, lints and tests for every push to main and every pull request.
 #
 # agg-rust has no path dependencies, so a plain checkout is enough. Every job
-# but `miri` runs on the toolchain pinned in rust-toolchain.toml, so CI lints
-# with the same clippy and rustfmt as local checks and a newer stable's lints
-# never fail CI unannounced. Miri needs nightly, so the `miri` job runs on the
-# nightly pinned by date in its MIRI_TOOLCHAIN, for the same reason: a newer
-# nightly never fails CI unannounced.
+# runs on the toolchain pinned in rust-toolchain.toml, so CI lints with the
+# same clippy and rustfmt as local checks and a newer stable's lints never fail
+# CI unannounced.
 name: CI
 
 on:
@@ -41,6 +39,12 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # The steps above build natively, where agg-wasm's #[wasm_bindgen] glue is
+      # compiled out; checking for wasm32 (pinned in rust-toolchain.toml) is what
+      # compiles the library and that glue for the target the demo ships on.
+      - name: Check wasm32 build
+        run: cargo check -p agg-rust -p agg-wasm --target wasm32-unknown-unknown
+
   test:
     runs-on: ubuntu-26.04
     steps:
@@ -62,39 +66,3 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
-
-  # Miri interprets the tests and reports undefined behavior an ordinary run
-  # cannot see: an out-of-bounds pointer offset that is never dereferenced, a
-  # slice built from a null pointer. It runs the library's unit tests, which
-  # include blur's guards for the unsafe code in src/blur.rs, plus
-  # tests/pixfmt_row_bounds_tests.rs and tests/image_accessor_bounds_tests.rs
-  # (both read through src/rendering_buffer.rs). It runs on
-  # a 64-bit and a 32-bit target because the row-length arithmetic differs
-  # with pointer width and wasm32 ships; Miri interprets the foreign target itself, so no target or
-  # multilib install is needed. The other integration tests are left out
-  # because under Miri they take tens of minutes.
-  miri:
-    runs-on: ubuntu-26.04
-    env:
-      MIRI_TOOLCHAIN: nightly-2026-11-24
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-unknown-linux-gnu, i686-unknown-linux-gnu]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install pinned nightly with Miri
-        run: rustup toolchain install "$MIRI_TOOLCHAIN" --profile minimal --component miri --component rust-src
-
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-miri-${{ matrix.target }}-${{ env.MIRI_TOOLCHAIN }}-${{ hashFiles('**/Cargo.toml', 'Cargo.lock') }}
-
-      - name: Miri
-        run: cargo +"$MIRI_TOOLCHAIN" miri test -p agg-rust --lib --test pixfmt_row_bounds_tests --test image_accessor_bounds_tests --target ${{ matrix.target }}

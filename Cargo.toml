@@ -20,6 +20,15 @@ include = ["/src/**/*.rs", "/Cargo.toml", "/LICENSE", "/README.md"]
 [workspace]
 members = [".", "demo/wasm", "tools/pixel-compare"]
 
+# The project has no `unsafe` code (CLAUDE.md, Project Phase). Forbidding it here covers
+# every target of every member that opts in with `[lints] workspace = true` (all three do),
+# including test, bench and example crates that carry no attribute of their own.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[lints]
+workspace = true
+
 [features]
 default = []
 font = ["ttf-parser"]
