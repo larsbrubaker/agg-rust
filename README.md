@@ -86,7 +86,7 @@ The demos run in-browser via WebAssembly with no server-side processing. Categor
 
 ```toml
 [dependencies]
-agg-rust = "1.2"
+agg-rust = "2.0"
 ```
 
 ```rust
