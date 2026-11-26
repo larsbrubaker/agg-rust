@@ -216,10 +216,10 @@ mod tests {
 
     fn make_rgba_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
         let stride = (w * BPP as u32) as i32;
-        let buf = vec![255u8; (h * w * BPP as u32) as usize]; // white background (all 0xFF)
+        let mut buf = vec![255u8; (h * w * BPP as u32) as usize]; // white background (all 0xFF)
         let mut ra = RowAccessor::new();
         unsafe {
-            ra.attach(buf.as_ptr() as *mut u8, w, h, stride);
+            ra.attach(buf.as_mut_ptr(), w, h, stride);
         }
         (buf, ra)
     }

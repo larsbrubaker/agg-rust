@@ -54,9 +54,14 @@ impl RowAccessor {
     /// accessed through any other pointer or reference while the accessor (or a pixel format
     /// or view built on it) is in use. With a negative stride `buf` is the lowest address of
     /// the buffer, which holds the last row.
+    ///
+    /// # Panics
+    /// When `width` or `height` exceeds `i32::MAX`: AGG addresses rows and columns as `i32`,
+    /// so a larger buffer would have rows no `i32` can name.
     pub unsafe fn new_with_buf(buf: *mut u8, width: u32, height: u32, stride: i32) -> Self {
         let mut ra = Self::new();
-        ra.attach(buf, width, height, stride);
+        // SAFETY: the caller upholds `attach`'s contract, which is this fn's.
+        unsafe { ra.attach(buf, width, height, stride) };
         ra
     }
 
@@ -66,7 +71,12 @@ impl RowAccessor {
     /// Same requirements as `new_with_buf`: `buf` non-null and valid for reads and writes of
     /// `height * stride.abs()` bytes while attached, and not accessed through any other
     /// pointer or reference while the accessor is used.
+    ///
+    /// # Panics
+    /// When `width` or `height` exceeds `i32::MAX` (see `new_with_buf`), before anything is
+    /// stored, so the accessor keeps its previous attachment.
     pub unsafe fn attach(&mut self, buf: *mut u8, width: u32, height: u32, stride: i32) {
+        check_dimensions(width, height);
         self.buf = buf;
         self.start = buf;
         self.width = width;
@@ -75,7 +85,9 @@ impl RowAccessor {
         // With no rows there is no last row to start from, and `height - 1 == -1` would
         // offset `start` below `buf` (UB for `offset`); `start` stays `buf`, never read.
         if stride < 0 && height > 0 {
-            self.start = buf.offset(-((height as i64 - 1) * stride as i64) as isize);
+            // SAFETY: `(height - 1) * |stride|` is below `height * |stride|`, the size the
+            // caller promises `buf` is valid for, so `start` stays inside that buffer.
+            self.start = unsafe { buf.offset(-((height as i64 - 1) * stride as i64) as isize) };
         }
     }
 
@@ -100,13 +112,16 @@ impl RowAccessor {
         self.stride.unsigned_abs()
     }
 
-    /// Get a raw mutable pointer to a row.
+    /// Get a raw mutable pointer to a row. The pointer is valid for `stride_abs()` bytes, under
+    /// `attach`'s contract.
     ///
     /// # Safety
-    /// `y` must be in `[0, height)`.
+    /// `y` must be in `[0, height)`, so an unattached accessor (height 0) has no valid row.
     #[inline]
     pub unsafe fn row_ptr(&self, y: i32) -> *mut u8 {
-        self.start.offset((y as i64 * self.stride as i64) as isize)
+        // SAFETY: the caller keeps `y` in `[0, height)`, and `check_row`'s proof shows that
+        // row's start lies inside the attached buffer for both stride signs.
+        unsafe { self.start.offset((y as i64 * self.stride as i64) as isize) }
     }
 
     /// The first `len` bytes of row `y`: the checked row access every pixel format and
@@ -170,6 +185,9 @@ impl RowAccessor {
             y,
             self.height
         );
+        // SAFETY: `y < height <= i32::MAX` (`attach` rejects larger heights), so `y as i32` is
+        // the same row, inside the buffer; `attach`'s contract makes the whole `stride_abs()`
+        // bytes of it valid, and the shared borrow rules out writes through this accessor.
         unsafe {
             let ptr = self.row_ptr(y as i32);
             std::slice::from_raw_parts(ptr, self.stride_abs() as usize)
@@ -184,6 +202,8 @@ impl RowAccessor {
             y,
             self.height
         );
+        // SAFETY: as in `row_slice`; the exclusive borrow rules out other access through this
+        // accessor, and `attach`'s contract rules out access through anything else.
         unsafe {
             let ptr = self.row_ptr(y as i32);
             std::slice::from_raw_parts_mut(ptr, self.stride_abs() as usize)
@@ -204,6 +224,12 @@ impl RowAccessor {
         let h = self.height.min(src.height());
         let l = self.stride_abs().min(src.stride_abs()) as usize;
         for y in 0..h {
+            // SAFETY: `y < h` is below both heights. Ours is at most `i32::MAX` (`attach`), so
+            // `y as i32` names row `y`, valid for `stride_abs() >= l` bytes of writes; the
+            // `RenderingBufferAccess` contract makes `src`'s row `y` valid for `src.stride_abs()
+            // >= l` bytes of reads and its height fit in `i32`. The two do not overlap: our
+            // buffer may not be reached through any other pointer while we hold `&mut self`
+            // (`attach`'s contract), and `src`'s rows are such another pointer.
             unsafe {
                 let dst = self.row_ptr(y as i32);
                 let src_ptr = src.row_ptr_const(y as i32);
@@ -233,6 +259,24 @@ fn row_out_of_bounds(y: i32, len: usize, height: u32, stride: i32) -> ! {
         panic!("row {y} out of bounds (height={height})");
     }
     panic!("row of {len} bytes does not fit in stride {stride}");
+}
+
+/// Panics unless `width` and `height` fit in `i32`, the type AGG addresses rows and columns
+/// with: a row `>= 2^31` would turn negative when passed to `row_ptr`.
+#[inline]
+fn check_dimensions(width: u32, height: u32) {
+    if width > i32::MAX as u32 || height > i32::MAX as u32 {
+        dimensions_too_big(width, height);
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn dimensions_too_big(width: u32, height: u32) -> ! {
+    if height > i32::MAX as u32 {
+        panic!("rendering buffer height {height} exceeds i32::MAX");
+    }
+    panic!("rendering buffer width {width} exceeds i32::MAX");
 }
 
 impl Default for RowAccessor {
@@ -271,19 +315,38 @@ impl RowPtrCache {
     /// Create and attach to a buffer.
     ///
     /// # Safety
-    /// `buf` must point to a valid buffer of at least `height * stride.abs()` bytes.
-    /// The buffer must remain valid for the lifetime of this cache.
+    /// `buf` must be non-null and valid for reads and writes of `height * stride.abs()`
+    /// bytes for as long as the cache stays attached to it, and that memory must not be
+    /// accessed through any other pointer or reference while the cache is in use. With a
+    /// negative stride `buf` is the lowest address of the buffer, which holds the last row.
+    ///
+    /// # Panics
+    /// When `width` or `height` exceeds `i32::MAX`: AGG addresses rows and columns as `i32`,
+    /// so a larger buffer would have rows no `i32` can name.
     pub unsafe fn new_with_buf(buf: *mut u8, width: u32, height: u32, stride: i32) -> Self {
         let mut rpc = Self::new();
-        rpc.attach(buf, width, height, stride);
+        // SAFETY: the caller upholds `attach`'s contract, which is this fn's.
+        unsafe { rpc.attach(buf, width, height, stride) };
         rpc
     }
 
     /// Attach to a buffer, building the row pointer cache.
     ///
+    /// `rows` only ever grows, so after attaching to a shorter buffer its entries past
+    /// `height` are stale pointers into an earlier buffer. No safe fn can read them: every
+    /// read goes through `row_ptr`, whose callers here (`row_slice`, `row_slice_mut`,
+    /// `copy_from`, the `RenderingBufferAccess` impl) all keep `y < height`.
+    ///
     /// # Safety
-    /// Same requirements as `new_with_buf`.
+    /// Same requirements as `new_with_buf`: `buf` non-null and valid for reads and writes of
+    /// `height * stride.abs()` bytes while attached, and not accessed through any other
+    /// pointer or reference while the cache is used.
+    ///
+    /// # Panics
+    /// When `width` or `height` exceeds `i32::MAX` (see `new_with_buf`), before anything is
+    /// stored or allocated, so the cache keeps its previous attachment.
     pub unsafe fn attach(&mut self, buf: *mut u8, width: u32, height: u32, stride: i32) {
+        check_dimensions(width, height);
         self.buf = buf;
         self.width = width;
         self.height = height;
@@ -293,14 +356,20 @@ impl RowPtrCache {
             self.rows.resize(height as usize, std::ptr::null_mut());
         }
 
-        let mut row_ptr = buf;
-        if stride < 0 {
-            row_ptr = buf.offset(-((height as i64 - 1) * stride as i64) as isize);
-        }
-
-        for y in 0..height as usize {
-            self.rows[y] = row_ptr;
-            row_ptr = row_ptr.offset(stride as isize);
+        // Each row is derived from `buf` by its index instead of stepping a pointer by
+        // `stride`: a step after the last row would land outside the buffer (below `buf` for
+        // a negative stride), and computing that pointer with `offset` is UB even unread.
+        // `test_row_ptr_cache_negative_stride` pins the row order and, run under Miri, guards
+        // against any pointer leaving the buffer.
+        let stride_abs = stride.unsigned_abs() as usize;
+        let height = height as usize;
+        for y in 0..height {
+            // Bottom-up buffers keep row 0 last in memory.
+            let mem_row = if stride < 0 { height - 1 - y } else { y };
+            // SAFETY: `mem_row <= height - 1`, so `mem_row * |stride|` is at most
+            // `(height - 1) * |stride|`, inside the `height * |stride|` bytes the caller
+            // promises `buf` is valid for; no pointer outside that buffer is ever formed.
+            self.rows[y] = unsafe { buf.add(mem_row * stride_abs) };
         }
     }
 
@@ -325,13 +394,17 @@ impl RowPtrCache {
         self.stride.unsigned_abs()
     }
 
-    /// Get a raw mutable pointer to a row (O(1) via cached pointers).
+    /// Get a raw mutable pointer to a row (O(1) via cached pointers). The pointer is valid
+    /// for `stride_abs()` bytes, under `attach`'s contract.
     ///
     /// # Safety
-    /// `y` must be in `[0, height)`.
+    /// `y` must be in `[0, height)`. Entries of the cache past `height` may be stale pointers
+    /// from an earlier attach (see `attach`), so this bound is what keeps them unread.
     #[inline]
     pub unsafe fn row_ptr(&self, y: i32) -> *mut u8 {
-        *self.rows.get_unchecked(y as usize)
+        // SAFETY: `0 <= y < height <= rows.len()`, and `attach` filled `rows[..height]` with
+        // pointers into the current buffer.
+        unsafe { *self.rows.get_unchecked(y as usize) }
     }
 
     /// Get a safe immutable slice for row `y`.
@@ -342,6 +415,9 @@ impl RowPtrCache {
             y,
             self.height
         );
+        // SAFETY: `y < height <= i32::MAX` (`attach` rejects larger heights), so `y as i32` is
+        // the same row, inside the buffer; `attach`'s contract makes the whole `stride_abs()`
+        // bytes of it valid, and the shared borrow rules out writes through this cache.
         unsafe {
             let ptr = self.row_ptr(y as i32);
             std::slice::from_raw_parts(ptr, self.stride_abs() as usize)
@@ -356,6 +432,8 @@ impl RowPtrCache {
             y,
             self.height
         );
+        // SAFETY: as in `row_slice`; the exclusive borrow rules out other access through this
+        // cache, and `attach`'s contract rules out access through anything else.
         unsafe {
             let ptr = self.row_ptr(y as i32);
             std::slice::from_raw_parts_mut(ptr, self.stride_abs() as usize)
@@ -376,6 +454,12 @@ impl RowPtrCache {
         let h = self.height.min(src.height());
         let l = self.stride_abs().min(src.stride_abs()) as usize;
         for y in 0..h {
+            // SAFETY: `y < h` is below both heights. Ours is at most `i32::MAX` (`attach`), so
+            // `y as i32` names row `y`, valid for `stride_abs() >= l` bytes of writes; the
+            // `RenderingBufferAccess` contract makes `src`'s row `y` valid for `src.stride_abs()
+            // >= l` bytes of reads and its height fit in `i32`. The two do not overlap: our
+            // buffer may not be reached through any other pointer while we hold `&mut self`
+            // (`attach`'s contract), and `src`'s rows are such another pointer.
             unsafe {
                 let dst = self.row_ptr(y as i32);
                 let src_ptr = src.row_ptr_const(y as i32);
@@ -407,16 +491,30 @@ impl Default for RowPtrCache {
 // ============================================================================
 
 /// Common interface for rendering buffer access (used by `copy_from`).
-pub trait RenderingBufferAccess {
+///
+/// # Safety
+/// `copy_from` trusts an implementor's answers and copies with `copy_nonoverlapping`, so an
+/// implementation must guarantee:
+/// - `height()` is at most `i32::MAX` (rows are passed to `row_ptr_const` as `i32`);
+/// - for every `y` in `[0, height())`, `row_ptr_const(y)` returns a pointer valid for reads of
+///   `stride_abs()` bytes for as long as the `&self` borrow lasts, and those bytes are not
+///   written through any other pointer during that borrow;
+/// - `height()` and `stride_abs()` return the same values for as long as that borrow lasts,
+///   so the bounds a caller read stay the bounds of the rows it then reads.
+pub unsafe trait RenderingBufferAccess {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn stride_abs(&self) -> u32;
     /// # Safety
-    /// `y` must be in `[0, height)`.
+    /// `y` must be in `[0, height())`.
     unsafe fn row_ptr_const(&self, y: i32) -> *const u8;
 }
 
-impl RenderingBufferAccess for RowAccessor {
+// SAFETY: `attach` rejects heights above `i32::MAX`; for `y` in `[0, height)` `row_ptr` points
+// at a row valid for `stride_abs()` bytes, and `attach`'s contract keeps other pointers from
+// writing the buffer while the accessor is in use. Height and stride change only in `attach`,
+// which takes `&mut self`, so they cannot change while `&self` is borrowed.
+unsafe impl RenderingBufferAccess for RowAccessor {
     fn width(&self) -> u32 {
         self.width
     }
@@ -427,11 +525,15 @@ impl RenderingBufferAccess for RowAccessor {
         self.stride_abs()
     }
     unsafe fn row_ptr_const(&self, y: i32) -> *const u8 {
-        self.row_ptr(y) as *const u8
+        // SAFETY: the caller keeps `y` in `[0, height())`, which is `row_ptr`'s requirement.
+        unsafe { self.row_ptr(y) as *const u8 }
     }
 }
 
-impl RenderingBufferAccess for RowPtrCache {
+// SAFETY: as for `RowAccessor`: `attach` bounds the height, `rows[..height]` point at rows
+// valid for `stride_abs()` bytes, `attach`'s contract rules out other writers, and height and
+// stride change only in `attach` (`&mut self`), never while `&self` is borrowed.
+unsafe impl RenderingBufferAccess for RowPtrCache {
     fn width(&self) -> u32 {
         self.width
     }
@@ -442,7 +544,8 @@ impl RenderingBufferAccess for RowPtrCache {
         self.stride_abs()
     }
     unsafe fn row_ptr_const(&self, y: i32) -> *const u8 {
-        self.row_ptr(y) as *const u8
+        // SAFETY: the caller keeps `y` in `[0, height())`, which is `row_ptr`'s requirement.
+        unsafe { self.row_ptr(y) as *const u8 }
     }
 }
 
@@ -538,6 +641,8 @@ mod tests {
         assert_eq!(rpc.row_slice(0)[5], 0);
     }
 
+    /// Pins the row order of `RowPtrCache::attach`'s index-derived walk: row 0 is the last
+    /// row in memory, row `height - 1` the first.
     #[test]
     fn test_row_ptr_cache_negative_stride() {
         let mut data = vec![0u8; 30];
@@ -622,6 +727,38 @@ mod tests {
         let rpc = RowPtrCache::new();
         assert_eq!(rpc.width(), 0);
         assert_eq!(rpc.height(), 0);
+    }
+
+    /// One past the largest row or column `i32` coordinates can address.
+    const TOO_BIG: u32 = i32::MAX as u32 + 1;
+
+    /// A 0-byte buffer: with stride 0 any height or width honours `attach`'s contract.
+    fn dangling() -> *mut u8 {
+        std::ptr::NonNull::<u8>::dangling().as_ptr()
+    }
+
+    #[test]
+    #[should_panic(expected = "rendering buffer height 2147483648 exceeds i32::MAX")]
+    fn test_row_accessor_rejects_height_past_i32() {
+        let _ = unsafe { RowAccessor::new_with_buf(dangling(), 1, TOO_BIG, 0) };
+    }
+
+    #[test]
+    #[should_panic(expected = "rendering buffer width 2147483648 exceeds i32::MAX")]
+    fn test_row_accessor_rejects_width_past_i32() {
+        let _ = unsafe { RowAccessor::new_with_buf(dangling(), TOO_BIG, 1, 0) };
+    }
+
+    #[test]
+    #[should_panic(expected = "rendering buffer height 2147483648 exceeds i32::MAX")]
+    fn test_row_ptr_cache_rejects_height_past_i32() {
+        let _ = unsafe { RowPtrCache::new_with_buf(dangling(), 1, TOO_BIG, 0) };
+    }
+
+    #[test]
+    #[should_panic(expected = "rendering buffer width 2147483648 exceeds i32::MAX")]
+    fn test_row_ptr_cache_rejects_width_past_i32() {
+        let _ = unsafe { RowPtrCache::new_with_buf(dangling(), TOO_BIG, 1, 0) };
     }
 
     #[test]

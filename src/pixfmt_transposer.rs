@@ -112,10 +112,10 @@ mod tests {
 
     fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
         let stride = (w * 4) as i32;
-        let buf = vec![0u8; (h * w * 4) as usize];
+        let mut buf = vec![0u8; (h * w * 4) as usize];
         let mut ra = RowAccessor::new();
         unsafe {
-            ra.attach(buf.as_ptr() as *mut u8, w, h, stride);
+            ra.attach(buf.as_mut_ptr(), w, h, stride);
         }
         (buf, ra)
     }
