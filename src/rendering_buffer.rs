@@ -190,9 +190,19 @@ impl RowAccessor {
     /// `i32::MAX` could still pass.
     #[inline]
     fn check_row(&self, y: i32, len: usize) {
-        if y < 0 || y as u32 >= self.height || len > self.stride_abs() as usize {
+        if !self.row_fits(y, len) {
             row_out_of_bounds(y, len, self.height, self.stride);
         }
+    }
+
+    /// Whether row `y`'s first `len` bytes lie inside the attached buffer, so
+    /// [`row_bytes`](Self::row_bytes) returns them without panicking; see
+    /// [`check_row`](Self::check_row) for why the test suffices. For a caller with a fallback
+    /// (the image accessors' fast path): testing this and then calling `row_bytes` compiles to
+    /// the one test, as `row_bytes`'s own repeats it.
+    #[inline]
+    pub(crate) fn row_fits(&self, y: i32, len: usize) -> bool {
+        y >= 0 && (y as u32) < self.height && len <= self.stride_abs() as usize
     }
 
     /// Get a safe immutable slice for row `y`.

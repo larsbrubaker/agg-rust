@@ -380,15 +380,12 @@ impl WrapMode for WrapModeReflectAutoPow2 {
 }
 
 // ============================================================================
-// FastRow — the bounded cached-pointer fast path of Clip and Clone
+// FastRow — the bounded fast path of Clip and Clone
 // ============================================================================
 
-#[expect(
-    unsafe_code,
-    reason = "caches a raw pointer to the current row for the fast path; remains from the port and is to be removed once a safe version is as fast (the checked-slice version measured about 28% slower on `image_perspective`; PORTING_PLAN.md, Removing the remaining `unsafe`)"
-)]
 mod fast_row {
     use crate::rendering_buffer::RowAccessor;
+    use std::slice;
 
     /// What [`FastRow::next_x`] found.
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -404,63 +401,41 @@ mod fast_row {
 
     /// The methods return the pixel beside a flag, `(hit, pixel)` or `(Step, pixel)` with
     /// `pixel` empty on a miss, rather than as `Option<&[u8]>` or a `Step` carrying the
-    /// slice. Those encode the miss as a null pointer, so the accessors' `match` tests the
-    /// pixel pointer, which the compiler cannot prove non-null; each branch here sets the
-    /// flag to a constant, which folds away once inlined. The `Option` form measured about
-    /// 7% slower on `image_perspective`.
+    /// slice: each branch here sets the flag to a constant, which folds away once inlined,
+    /// where an `Option` built from the row would make the accessors' `match` test the
+    /// pixel pointer for null, which the compiler cannot prove it is not. The `Option` form
+    /// measured about 7% slower on `image_perspective`.
     const MISS: &[u8] = &[];
 
-    /// The fast path `ImageAccessorClip` and `ImageAccessorClone` share: a cached pointer to
-    /// the current pixel (mirrors C++ `m_pix_ptr`), so `next_x` advances by a pointer add
-    /// instead of reslicing the row for every pixel, bounded by the end of the row (Rust
-    /// only; C++ has no bound), so stepping past it ends the fast path instead of reading
-    /// past the row. The accessors differ only in their slow paths.
+    /// The fast path `ImageAccessorClip` and `ImageAccessorClone` share (C++ `m_pix_ptr`):
+    /// a slice iterator over the pixels of the current row after the current one, borrowed
+    /// from the image for `'a`. `next_x` is the iterator's `next`, a compare and a pointer
+    /// add, instead of reslicing the row for every pixel, and it ends at the end of the row
+    /// (Rust only; C++ has no bound), so stepping past the row ends the fast path instead of
+    /// reading past it. The accessors differ only in their slow paths.
     ///
-    /// Invariant, established and kept by this type alone (its fields are private to this
-    /// module, and every method leaves it true): either `pix_ptr` and `last_ptr` are both
-    /// null (the fast path is inactive), or both point into one row `y` with
-    /// `0 <= y < fast_rows`, at pixel boundaries of that row's first `width * PIX_WIDTH`
-    /// bytes, `last_ptr` at the row's last pixel and `pix_ptr <= last_ptr`; and while active,
-    /// `0 <= x0 < width`. `fast_rows` is the height when a `width * PIX_WIDTH`-byte row
-    /// fits in the stride, else 0, so by `RowAccessor::check_row`'s proof those bytes of any
-    /// row `y < fast_rows` lie inside the buffer `rbuf` borrows for `'a`, which nothing
-    /// writes while that shared borrow lasts (`attach`'s contract).
+    /// The rows come from the checked `RowAccessor::row_bytes`, so every pixel the fast path
+    /// returns is one of a row's first `width * PIX_WIDTH` bytes by construction. `enter`
+    /// tests the row with `row_fits` first, so `row_bytes`'s own test folds into it and no
+    /// panic path is left in the accessors' hot code.
     pub(super) struct FastRow<'a, const PIX_WIDTH: usize> {
         rbuf: &'a RowAccessor,
-        pix_ptr: *const u8,
-        last_ptr: *const u8,
-        /// The rows the fast path may enter (see the invariant), so `y < fast_rows` checks
-        /// the row index and the row length in one compare. Computed once, since `rbuf` is
-        /// borrowed unchanged for `'a`: `image_perspective` calls `span` and `next_y` once
-        /// per pixel, and taking the row through the checked `row_bytes` there instead
-        /// measured about 25% slower on it.
-        fast_rows: u32,
-        /// Byte offset of a row's last pixel, `(width - 1) * PIX_WIDTH` (0 when unused).
-        last_off: usize,
-        /// The span's first x, where `next_row` re-enters (kept here, not in the accessors,
-        /// so the invariant covers it; they read it through `x0`).
+        /// The pixels of the current row after the current one; empty when inactive.
+        pixels: slice::Iter<'a, [u8; PIX_WIDTH]>,
+        /// Whether the fast path is on a row. With `pixels` empty it tells a row that ended
+        /// (`next_x`'s `RowEnded`) from no row at all (`Inactive`).
+        active: bool,
+        /// The span's first x, where `next_row` enters the next row.
         x0: i32,
     }
 
     impl<'a, const PIX_WIDTH: usize> FastRow<'a, PIX_WIDTH> {
-        /// Inactive, with the row facts of `rbuf` computed once.
+        /// Inactive.
         pub(super) fn new(rbuf: &'a RowAccessor) -> Self {
-            let width = rbuf.width() as usize;
-            let row_fits = width
-                .checked_mul(PIX_WIDTH)
-                .is_some_and(|len| len <= rbuf.stride_abs() as usize);
             Self {
                 rbuf,
-                pix_ptr: std::ptr::null(),
-                last_ptr: std::ptr::null(),
-                fast_rows: if row_fits { rbuf.height() } else { 0 },
-                // `row_fits` bounds `(width - 1) * PIX_WIDTH` by the stride, so it cannot
-                // overflow.
-                last_off: if row_fits {
-                    width.saturating_sub(1) * PIX_WIDTH
-                } else {
-                    0
-                },
+                pixels: [].iter(),
+                active: false,
                 x0: 0,
             }
         }
@@ -482,15 +457,15 @@ mod fast_row {
         /// span `x..x + len` lies in a row it may enter; otherwise leaves the fast path and
         /// returns `(false, MISS)`. C++'s test, `y in [0, height)` and
         /// `x >= 0 && x + len <= width`, without its overflow, plus `x < width` so a zero
-        /// `len` cannot start one pixel past the row, and `fast_rows` in place of the height.
-        /// Width and height are at most `i32::MAX` (`attach`), so a negative `x` or `y` cast
-        /// to `u32` fails the `<` test.
+        /// `len` cannot start one pixel past the row, and the row fitting in the stride.
+        /// Width is at most `i32::MAX` (`attach`), so a negative `x` cast to `u32` fails the
+        /// `<` test.
         #[inline]
         pub(super) fn enter_span(&mut self, x: i32, y: i32, len: u32) -> (bool, &'a [u8]) {
             self.x0 = x;
             let w = self.rbuf.width();
-            if (y as u32) < self.fast_rows && (x as u32) < w && len <= w - x as u32 {
-                (true, self.enter(y))
+            if (x as u32) < w && len <= w - x as u32 {
+                self.enter(y)
             } else {
                 self.leave();
                 (false, MISS)
@@ -499,15 +474,13 @@ mod fast_row {
 
         /// While active, enters row `y` at the span's first pixel and returns `(true, pixel)`
         /// when `y` is a row it may enter; otherwise leaves the fast path and returns
-        /// `(false, MISS)`. Inactive,
-        /// it stays inactive: after a span that was not on the fast path, or one that walked
-        /// off its row, the next row is the slow path's too.
+        /// `(false, MISS)`. Inactive, it stays inactive: after a span that was not on the
+        /// fast path, or one that walked off its row, the next row is the slow path's too.
         #[inline]
         pub(super) fn next_row(&mut self, y: i32) -> (bool, &'a [u8]) {
-            if !self.pix_ptr.is_null() && (y as u32) < self.fast_rows {
-                (true, self.enter(y))
+            if self.active {
+                self.enter(y)
             } else {
-                self.leave();
                 (false, MISS)
             }
         }
@@ -515,55 +488,48 @@ mod fast_row {
         /// Steps to the next pixel of the row; see [`Step`].
         #[inline]
         pub(super) fn next_x(&mut self) -> (Step, &'a [u8]) {
-            if self.pix_ptr < self.last_ptr {
-                // SAFETY: inactive, both pointers would be null and `<` false, so the fast
-                // path is active, and by the invariant both sit on pixel boundaries of one row's
-                // checked bytes. `pix_ptr < last_ptr` puts the next pixel at or before the row's
-                // last pixel, so it and its `PIX_WIDTH` bytes lie inside that row, and
-                // `pix_ptr <= last_ptr` still holds. The slice is of initialized bytes nothing
-                // writes for `'a`.
-                unsafe {
-                    self.pix_ptr = self.pix_ptr.add(PIX_WIDTH);
-                    (
-                        Step::Pixel,
-                        std::slice::from_raw_parts(self.pix_ptr, PIX_WIDTH),
-                    )
+            match self.pixels.next() {
+                Some(pixel) => (Step::Pixel, pixel),
+                None if self.active => {
+                    self.active = false;
+                    (Step::RowEnded, MISS)
                 }
-            } else if !self.pix_ptr.is_null() {
-                self.leave();
-                (Step::RowEnded, MISS)
-            } else {
-                (Step::Inactive, MISS)
+                None => (Step::Inactive, MISS),
             }
         }
 
-        /// Leaves the fast path (both pointers null, which keeps the invariant).
+        /// Leaves the fast path.
         #[inline]
         fn leave(&mut self) {
-            self.pix_ptr = std::ptr::null();
-            self.last_ptr = std::ptr::null();
+            self.pixels = [].iter();
+            self.active = false;
         }
 
-        /// Points both pointers into row `y` (at pixel `x0` and at the row's last pixel) and
-        /// returns the pixel at `x0`. Private: its callers check `y < fast_rows` first, and
-        /// `0 <= x0 < width` (`enter_span` just checked it; `next_row` has it from the
-        /// invariant while active), which is all it needs to keep the invariant.
+        /// Enters row `y` at pixel `x0` and returns `(true, pixel)` with that pixel, or
+        /// leaves the fast path and returns `(false, MISS)` when `y` is not a row, a
+        /// `width * PIX_WIDTH`-byte row does not fit in the stride (the slow path's checked
+        /// row access then panics, as the accessors document), or `x0` is not a pixel of
+        /// the row.
         #[inline]
-        fn enter(&mut self, y: i32) -> &'a [u8] {
-            // SAFETY: `0 <= y < fast_rows <= height` (the callers' check), `row_ptr`'s
-            // requirement; by the invariant's `fast_rows` clause the row's first
-            // `width * PIX_WIDTH` bytes are inside the buffer. `0 <= x0 < width`, so
-            // `x0 * PIX_WIDTH` and `last_off == (width - 1) * PIX_WIDTH` are pixel offsets
-            // below `width * PIX_WIDTH` (which fits in the stride, so neither overflows): both
-            // pixels and their `PIX_WIDTH` bytes lie in those bytes, with the first at or
-            // before the last. The slice is of
-            // initialized bytes nothing writes for `'a`.
-            unsafe {
-                let row = self.rbuf.row_ptr(y) as *const u8;
-                self.pix_ptr = row.add(self.x0 as usize * PIX_WIDTH);
-                self.last_ptr = row.add(self.last_off);
-                std::slice::from_raw_parts(self.pix_ptr, PIX_WIDTH)
+        fn enter(&mut self, y: i32) -> (bool, &'a [u8]) {
+            // `as_chunks::<0>` panics. A zero-width pixel has no bytes to read, so the slow
+            // path returns the same empty slices.
+            if PIX_WIDTH != 0 {
+                let x = self.x0 as u32 as usize;
+                // Saturating, so a product past `usize::MAX` fails the stride test instead
+                // of wrapping to a short row.
+                let len = (self.rbuf.width() as usize).saturating_mul(PIX_WIDTH);
+                if self.rbuf.row_fits(y, len) {
+                    let pixels = self.rbuf.row_bytes(y, len).as_chunks::<PIX_WIDTH>().0;
+                    if x < pixels.len() {
+                        self.pixels = pixels[x + 1..].iter();
+                        self.active = true;
+                        return (true, &pixels[x]);
+                    }
+                }
             }
+            self.leave();
+            (false, MISS)
         }
     }
 }
@@ -596,10 +562,10 @@ use fast_row::{FastRow, Step};
 /// `next_x` until the filter weight runs out, which can be one pixel more than the `len`
 /// they pass to `span`, so at the right edge of the image an exact-stride image made the
 /// checked row slice here panic and a padded one returned the padding as a pixel. Here the
-/// fast path is bounded by the end of the row (`last_ptr`): stepping past it falls back to
+/// fast path is bounded by the end of the row (`FastRow`): stepping past it falls back to
 /// the slow path, which returns the background, the pixel's meaning there. `span` adds
 /// `x < width` to C++'s test and computes it without overflow, and the fast path is only
-/// taken when a row fits in the stride (`fast_rows`). Every pixel the C++ fast path returns
+/// taken when a row fits in the stride. Every pixel the C++ fast path returns
 /// in range is returned unchanged. Locked in by `tests/image_accessor_bounds_tests.rs`.
 pub struct ImageAccessorClip<'a, const PIX_WIDTH: usize> {
     // Background pixel, laid out as the image's pixels are. Sized by the pixel
@@ -791,10 +757,10 @@ impl<'a, const PIX_WIDTH: usize> ImageAccessorNoClip<'a, PIX_WIDTH> {
 /// without limit, so stepping past `len` reads past the row (past the buffer on the last
 /// row); `span(width, y, 0)` passes the check yet points past the row; `x + len` overflows
 /// for a huge `len`; and nothing checks the row against the stride. Here those are safe fns,
-/// so the fast path is bounded by the end of the row (`last_ptr`): stepping past it falls
+/// so the fast path is bounded by the end of the row (`FastRow`): stepping past it falls
 /// back to the clamping slow path, which returns the same edge pixel C++'s slow path would.
 /// `span` adds `x < width` to C++'s test and computes it without overflow, and the fast path
-/// is only taken when a row fits in the stride (`fast_rows`); otherwise the slow path's
+/// is only taken when a row fits in the stride; otherwise the slow path's
 /// checked row access panics. Every pixel the C++ fast path returns in range is returned
 /// unchanged. Locked in by `tests/image_accessor_bounds_tests.rs`.
 pub struct ImageAccessorClone<'a, const PIX_WIDTH: usize> {
@@ -1135,11 +1101,11 @@ mod tests {
 
     #[test]
     fn test_clone_fast_path_border_walk() {
-        // Exercise the cached-pointer fast path (span/next_x/next_y) at the
-        // exact right/bottom border and off the edge, asserting each fetch
-        // matches the clamping `pixel()` path. The other clone tests only use
-        // len=1 and never advance along the fast path, so this guards the
-        // unsafe raw-pointer arithmetic that replaced the per-call row slice.
+        // Exercise the fast path (span/next_x/next_y) at the exact
+        // right/bottom border and off the edge, asserting each fetch matches
+        // the clamping `pixel()` path. The other clone tests only use len=1
+        // and never advance along the fast path, so this guards its row
+        // iterator's entry and end.
         let mut data = Vec::new();
         let rbuf = make_rgba_buffer(4, 4, &mut data);
         for y in 0..4u32 {
@@ -1170,7 +1136,7 @@ mod tests {
         let p = acc.span(2, 3, 2);
         assert_eq!(&p[..4], &clamp_pixel(2, 3), "span at right/bottom border");
 
-        // Fast-path next_x pointer advance to the last valid column (3, 3).
+        // Fast-path next_x advance to the last valid column (3, 3).
         let p = acc.next_x();
         assert_eq!(&p[..4], &clamp_pixel(3, 3), "next_x fast-path advance");
 
@@ -1185,7 +1151,7 @@ mod tests {
         assert_eq!(&p[..4], &clamp_pixel(3, 4), "next_x after clamp fallback");
 
         // Separate fully in-bounds walk exercising several consecutive
-        // fast-path next_x pointer advances across a row.
+        // fast-path next_x advances across a row.
         let mut acc2 = ImageAccessorClone::<4>::new(&rbuf);
         let p = acc2.span(0, 1, 4);
         assert_eq!(&p[..4], &clamp_pixel(0, 1));

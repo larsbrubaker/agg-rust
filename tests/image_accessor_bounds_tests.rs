@@ -259,7 +259,7 @@ impl Kind {
     }
 }
 
-/// The accessors that bound a fast path (the cached-pointer scheme), checked call by call.
+/// The accessors that bound a fast path (a row iterator), checked call by call.
 const BOUNDED: [Kind; 2] = [Kind::Clone, Kind::Clip];
 
 /// A span on the last row, then far more `next_x` steps than `len`: once past the row's last

@@ -67,8 +67,8 @@ jobs:
   # cannot see: an out-of-bounds pointer offset that is never dereferenced, a
   # slice built from a null pointer. It runs the library's unit tests, which
   # include blur's guards for the unsafe code in src/blur.rs, plus
-  # tests/pixfmt_row_bounds_tests.rs (src/rendering_buffer.rs) and
-  # tests/image_accessor_bounds_tests.rs (src/image_accessors.rs). It runs on
+  # tests/pixfmt_row_bounds_tests.rs and tests/image_accessor_bounds_tests.rs
+  # (both read through src/rendering_buffer.rs). It runs on
   # a 64-bit and a 32-bit target because the row-length arithmetic differs
   # with pointer width and wasm32 ships; Miri interprets the foreign target itself, so no target or
   # multilib install is needed. The other integration tests are left out

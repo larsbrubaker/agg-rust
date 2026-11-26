@@ -45,8 +45,8 @@ work live in the code it concerns. The C++ headers named here are in
   padding and otherwise reads the padding bytes as a pixel. Needed: each generator asking
   `span` for the number of pixels it actually reads, with a test that no span steps past its
   `len`.
-- **Removing the remaining `unsafe`.** The crate denies `unsafe_code`, and three places
-  kept from the port still use it, each under an `#[expect(unsafe_code)]`. When all three
+- **Removing the remaining `unsafe`.** The crate denies `unsafe_code`, and two places
+  kept from the port still use it, each under an `#[expect(unsafe_code)]`. When both
   are safe, `src/lib.rs` changes the `deny` to `#![forbid(unsafe_code)]`.
   1. *The pixel buffer.* `RowAccessor` and `RowPtrCache` (`src/rendering_buffer.rs`) keep
      a raw pointer with no lifetime, so `attach`, `new_with_buf` and `row_ptr` are
@@ -57,10 +57,6 @@ work live in the code it concerns. The C++ headers named here are in
      MatterCAD use.
   2. *The vertical pass of `stack_blur_rgba32`* (`src/blur.rs`) walks columns with raw
      pointers. Needed: a safe version that is as fast.
-  3. *`FastRow`* (`src/image_accessors.rs`), the cached-pointer fast path of
-     `ImageAccessorClip` and `ImageAccessorClone`. Needed: a safe version that is as fast;
-     the checked-slice attempt measured about 28% slower on `image_perspective`, so it
-     needs a better design, such as holding the row as a slice.
 
 ## Demo site
 
