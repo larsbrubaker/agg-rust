@@ -49,8 +49,11 @@ impl RowAccessor {
     /// Create and attach to a buffer.
     ///
     /// # Safety
-    /// `buf` must point to a valid buffer of at least `height * stride.abs()` bytes.
-    /// The buffer must remain valid for the lifetime of this accessor.
+    /// `buf` must be non-null and valid for reads and writes of `height * stride.abs()`
+    /// bytes for as long as the accessor stays attached to it, and that memory must not be
+    /// accessed through any other pointer or reference while the accessor (or a pixel format
+    /// or view built on it) is in use. With a negative stride `buf` is the lowest address of
+    /// the buffer, which holds the last row.
     pub unsafe fn new_with_buf(buf: *mut u8, width: u32, height: u32, stride: i32) -> Self {
         let mut ra = Self::new();
         ra.attach(buf, width, height, stride);
@@ -60,14 +63,18 @@ impl RowAccessor {
     /// Attach to a buffer.
     ///
     /// # Safety
-    /// Same requirements as `new_with_buf`.
+    /// Same requirements as `new_with_buf`: `buf` non-null and valid for reads and writes of
+    /// `height * stride.abs()` bytes while attached, and not accessed through any other
+    /// pointer or reference while the accessor is used.
     pub unsafe fn attach(&mut self, buf: *mut u8, width: u32, height: u32, stride: i32) {
         self.buf = buf;
         self.start = buf;
         self.width = width;
         self.height = height;
         self.stride = stride;
-        if stride < 0 {
+        // With no rows there is no last row to start from, and `height - 1 == -1` would
+        // offset `start` below `buf` (UB for `offset`); `start` stays `buf`, never read.
+        if stride < 0 && height > 0 {
             self.start = buf.offset(-((height as i64 - 1) * stride as i64) as isize);
         }
     }
@@ -100,6 +107,57 @@ impl RowAccessor {
     #[inline]
     pub unsafe fn row_ptr(&self, y: i32) -> *mut u8 {
         self.start.offset((y as i64 * self.stride as i64) as isize)
+    }
+
+    /// The first `len` bytes of row `y`: the checked row access every pixel format and
+    /// `ChannelView` reads through, so their `unsafe` lives here alone.
+    ///
+    /// # Panics
+    /// Unless `0 <= y < height` and `len <= stride_abs()`. An unattached accessor has
+    /// height 0, so every `y` panics.
+    ///
+    /// Deliberate divergence from C++: AGG's `pixfmt` methods do no bounds checking and rely
+    /// on `renderer_base` clipping, so an out-of-range `y` (or a stride shorter than
+    /// `width * bytes-per-pixel`) is undefined behaviour there. In Rust the `PixelFormat`
+    /// methods are safe fns, so an out-of-range row panics, the same way an out-of-range `x`
+    /// already panics through slice indexing. Locked in by `tests/pixfmt_row_bounds_tests.rs`.
+    #[inline]
+    pub(crate) fn row_bytes(&self, y: i32, len: usize) -> &[u8] {
+        self.check_row(y, len);
+        // SAFETY: `check_row` proved the row lies inside the attached buffer. The shared
+        // borrow of `self` rules out writes through this accessor while the slice lives;
+        // access through any other pointer or accessor to the same memory is ruled out by
+        // `attach`'s contract, not by the borrow.
+        unsafe { std::slice::from_raw_parts(self.row_ptr(y), len) }
+    }
+
+    /// The first `len` bytes of row `y`, writable. Same checks and divergence as
+    /// [`row_bytes`](Self::row_bytes).
+    #[inline]
+    pub(crate) fn row_bytes_mut(&mut self, y: i32, len: usize) -> &mut [u8] {
+        self.check_row(y, len);
+        // SAFETY: `check_row` proved the row lies inside the attached buffer. The exclusive
+        // borrow of `self` rules out any other access through this accessor while the slice
+        // lives; access through any other pointer or accessor to the same memory is ruled out
+        // by `attach`'s contract, not by the borrow.
+        unsafe { std::slice::from_raw_parts_mut(self.row_ptr(y), len) }
+    }
+
+    /// Panics unless row `y`'s first `len` bytes lie inside the attached buffer.
+    ///
+    /// Why that suffices: `attach` promises `buf` is non-null and valid for
+    /// `height * |stride|` bytes. With `stride >= 0`, `start == buf` and row `y` begins at
+    /// `buf + y * stride`; `y <= height - 1` and `len <= stride` put its last byte below
+    /// `buf + height * stride`. With `stride < 0`, `start == buf + (height - 1) * |stride|` and
+    /// row `y` begins at `buf + (height - 1 - y) * |stride|`; `0 <= height - 1 - y <= height - 1`
+    /// and `len <= |stride|` keep it inside `[buf, buf + height * |stride|)` too. `y < 0` is
+    /// rejected on its own: `y as u32` would wrap it to a huge row that a `height` above
+    /// `i32::MAX` could still pass.
+    #[inline]
+    fn check_row(&self, y: i32, len: usize) {
+        if y < 0 || y as u32 >= self.height || len > self.stride_abs() as usize {
+            row_out_of_bounds(y, len, self.height, self.stride);
+        }
     }
 
     /// Get a safe immutable slice for row `y`.
@@ -164,6 +222,17 @@ impl RowAccessor {
             }
         }
     }
+}
+
+/// The panic behind `RowAccessor::check_row`, kept out of line so the formatting code is not
+/// inlined into every pixel access.
+#[cold]
+#[inline(never)]
+fn row_out_of_bounds(y: i32, len: usize, height: u32, stride: i32) -> ! {
+    if y < 0 || y as u32 >= height {
+        panic!("row {y} out of bounds (height={height})");
+    }
+    panic!("row of {len} bytes does not fit in stride {stride}");
 }
 
 impl Default for RowAccessor {

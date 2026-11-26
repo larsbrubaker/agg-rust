@@ -71,28 +71,24 @@ impl<'a> ChannelView<'a> {
         self.channels
     }
 
-    /// Row `y`'s bytes. Callers keep `y` inside the buffer; the slice spans whole pixels.
+    /// Row `y`'s bytes, `width * step` of them, so an `x` past the width panics on indexing.
+    /// Panics when `y` is outside the buffer or the row does not fit in the stride (a `step`
+    /// wider than the buffer's pixels), through `RowAccessor::row_bytes`.
     fn row(&self, y: u32) -> &[u8] {
-        assert!(y < self.rbuf.height(), "row {y} outside the buffer");
-        // SAFETY: `y` is inside the attached buffer, whose rows are `width * step` bytes long
-        // (the caller's buffer holds `step`-byte pixels), and the view borrows the accessor.
-        unsafe {
-            std::slice::from_raw_parts(
-                self.rbuf.row_ptr(y as i32),
-                self.rbuf.width() as usize * self.step,
-            )
-        }
+        let len = self.rbuf.width() as usize * self.step;
+        self.rbuf.row_bytes(Self::row_index(y), len)
     }
 
     fn row_mut(&mut self, y: u32) -> &mut [u8] {
-        assert!(y < self.rbuf.height(), "row {y} outside the buffer");
-        // SAFETY: as in `row`; the view holds the accessor mutably, so no other slice aliases.
-        unsafe {
-            std::slice::from_raw_parts_mut(
-                self.rbuf.row_ptr(y as i32),
-                self.rbuf.width() as usize * self.step,
-            )
-        }
+        let len = self.rbuf.width() as usize * self.step;
+        self.rbuf.row_bytes_mut(Self::row_index(y), len)
+    }
+
+    /// `y` as the accessor's `i32` row; a `y` past `i32::MAX` is outside any buffer the
+    /// accessor can address, so it maps to -1, which `row_bytes` rejects.
+    #[inline]
+    fn row_index(y: u32) -> i32 {
+        i32::try_from(y).unwrap_or(-1)
     }
 
     /// Channel `c` of the pixel at `x`, `y`.

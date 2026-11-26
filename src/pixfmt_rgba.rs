@@ -156,8 +156,8 @@ const BPP: usize = 4; // bytes per pixel
 // ============================================================================
 
 /// Shared non-blend plumbing for the RGBA32 pixel formats. Owns the row
-/// accessor and centralizes the unsafe row-slice construction; the wrapping
-/// formats differ only in their blend arithmetic (lerp vs prelerp).
+/// accessor and its bounds-checked row slices (`RowAccessor::row_bytes`); the
+/// wrapping formats differ only in their blend arithmetic (lerp vs prelerp).
 struct RgbaRaw<'a> {
     rbuf: &'a mut RowAccessor,
 }
@@ -177,18 +177,12 @@ impl<'a> RgbaRaw<'a> {
 
     #[inline]
     fn row(&self, y: i32) -> &[u8] {
-        unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, (self.rbuf.width() as usize) * BPP)
-        }
+        self.rbuf.row_bytes(y, self.rbuf.width() as usize * BPP)
     }
 
     #[inline]
     fn row_mut(&mut self, y: i32) -> &mut [u8] {
-        unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, (self.rbuf.width() as usize) * BPP)
-        }
+        self.rbuf.row_bytes_mut(y, self.rbuf.width() as usize * BPP)
     }
 
     /// Clear the entire buffer to a solid color.

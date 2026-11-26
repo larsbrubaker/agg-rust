@@ -140,21 +140,12 @@ impl<'a, B: RgbBlender> PixfmtAlphaBlendRgb<'a, B> {
 
     #[inline]
     fn row(&self, y: i32) -> &[u8] {
-        // SAFETY: `row_ptr(y)` points at a row of `width * BPP` bytes owned by
-        // the attached buffer, which outlives `self.rbuf`.
-        unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
-        }
+        self.rbuf.row_bytes(y, self.rbuf.width() as usize * BPP)
     }
 
     #[inline]
     fn row_mut(&mut self, y: i32) -> &mut [u8] {
-        // SAFETY: as in `row`; `&mut self` makes the slice unique.
-        unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        }
+        self.rbuf.row_bytes_mut(y, self.rbuf.width() as usize * BPP)
     }
 
     /// Clear the entire buffer to a solid color.
@@ -193,12 +184,8 @@ impl<'a, B: RgbBlender> PixfmtAlphaBlendRgb<'a, B> {
     /// Splits the borrow so the blender can be used while a row is mutated.
     #[inline]
     fn parts(&mut self, y: i32) -> (&B, &mut [u8]) {
-        // SAFETY: as in `row_mut`; the blender is a separate field.
-        let row = unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        };
-        (&self.blender, row)
+        let len = self.rbuf.width() as usize * BPP;
+        (&self.blender, self.rbuf.row_bytes_mut(y, len))
     }
 }
 

@@ -922,19 +922,13 @@ impl<'a> PixfmtRgba32CompOp<'a> {
     /// Row of pixels at `y` as a byte slice (shared, read-only view).
     #[inline]
     fn row(&self, y: i32) -> &[u8] {
-        unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts(ptr, self.rbuf.width() as usize * BPP)
-        }
+        self.rbuf.row_bytes(y, self.rbuf.width() as usize * BPP)
     }
 
     /// Row of pixels at `y` as a mutable byte slice.
     #[inline]
     fn row_mut(&mut self, y: i32) -> &mut [u8] {
-        unsafe {
-            let ptr = self.rbuf.row_ptr(y);
-            std::slice::from_raw_parts_mut(ptr, self.rbuf.width() as usize * BPP)
-        }
+        self.rbuf.row_bytes_mut(y, self.rbuf.width() as usize * BPP)
     }
 
     /// Clear the entire buffer to a solid color.

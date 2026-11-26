@@ -76,19 +76,13 @@ const STACK_BLUR8_SHR: [u32; 255] = [
 #[cfg(test)]
 #[inline]
 fn row(rbuf: &RowAccessor, y: i32) -> &[u8] {
-    unsafe {
-        let ptr = rbuf.row_ptr(y);
-        std::slice::from_raw_parts(ptr, rbuf.width() as usize * 4)
-    }
+    rbuf.row_bytes(y, rbuf.width() as usize * 4)
 }
 
 /// Row of RGBA32 pixels at `y` as a mutable byte slice.
 #[inline]
 fn row_mut(rbuf: &mut RowAccessor, y: i32) -> &mut [u8] {
-    unsafe {
-        let ptr = rbuf.row_ptr(y);
-        std::slice::from_raw_parts_mut(ptr, rbuf.width() as usize * 4)
-    }
+    rbuf.row_bytes_mut(y, rbuf.width() as usize * 4)
 }
 
 // ============================================================================
