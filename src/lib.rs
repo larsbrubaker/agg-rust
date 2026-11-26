@@ -25,7 +25,9 @@
 //! where the C++ behavior is wrong, unsafe or slow, agg-rust does the better thing
 //! and documents the difference. No safe function reaches undefined behavior,
 //! whatever its arguments: where C++ AGG leaves a precondition unchecked, agg-rust
-//! checks it and an out-of-range argument panics.
+//! checks it and an out-of-range argument panics. The library is written in safe
+//! Rust and denies `unsafe_code`; the few `unsafe` uses that remain from the port
+//! are tested under Miri and are being removed.
 //!
 //! ## Architecture
 //!
@@ -36,6 +38,12 @@
 //! 3. **Scanline Rasterizer** — converts vectors to anti-aliased scanlines
 //! 4. **Scanline Container** — stores coverage data between stages
 //! 5. **Renderer** — blends pixels into the output buffer
+
+// The library is safe Rust: no new `unsafe` code (CLAUDE.md, Project Phase). The uses that
+// remain from the port each carry an `#[expect(unsafe_code, reason = "...")]` and are open
+// work to remove (PORTING_PLAN.md); once they are gone this becomes `forbid`. Unit tests are
+// exempt only because they attach buffers through the `unsafe fn RowAccessor::new_with_buf`.
+#![cfg_attr(not(test), deny(unsafe_code))]
 
 // Phase 1: Foundation Types & Math
 pub mod array;

@@ -31,6 +31,7 @@ Organize feedback by priority:
 ### Critical (must fix)
 - Unintended or unexplained change in rendered output or API behavior (no reason given, no test pinning it)
 - A safe public function that can reach undefined behavior for some arguments
+- Any new `unsafe` of any kind — an `unsafe` block, `unsafe fn`, `unsafe impl`, `unsafe trait`, an API that makes callers or implementors write `unsafe`, or a new `#[expect(unsafe_code)]`. Rejected with no exceptions (CLAUDE.md, Project Phase): ask for the safe design, and if it is slower, for a faster safe one
 - Incorrect pixel blending or coverage calculation
 - Integer overflow or precision loss
 - Missing edge case handling (check what the C++ source handles as a lead)
@@ -41,7 +42,6 @@ Organize feedback by priority:
 - Performance issues (unnecessary allocations, cloning, etc.)
 - Non-idiomatic Rust (could use iterators, pattern matching, etc.)
 - Missing or incomplete tests
-- Unsafe code that could be safe
 - Convention violations
 
 ### Suggestion (nice to have)
@@ -62,6 +62,7 @@ Organize feedback by priority:
 - [ ] Any change in rendered output is deliberate and pinned by a test; a `pixel-compare` reference test it affects is updated or retired with the reason stated
 
 ### Code Quality
+- [ ] No new `unsafe` (block, fn, impl, trait, or `#[expect(unsafe_code)]`); the crate denies `unsafe_code`
 - [ ] Logic correctness - does it do what it is meant to do?
 - [ ] Error handling - an out-of-range argument panics rather than reaching undefined behavior; no panics for valid input
 - [ ] No `todo!()`, `unimplemented!()`, or placeholder code
@@ -80,7 +81,6 @@ Organize feedback by priority:
 - [ ] Efficient data structures
 - [ ] Appropriate use of references vs. values
 - [ ] No redundant computations
-- [ ] Unsafe blocks are justified and minimal
 
 ### Testing
 - [ ] Comprehensive tests exist for the function
@@ -95,7 +95,7 @@ Check alignment with project guidelines:
 
 - **No stubs**: Is everything fully implemented?
 - **Deliberate behavior**: Is every behavior change intended, explained, and tested?
-- **Safety**: Can any safe function reach undefined behavior?
+- **Safety**: Is the change safe Rust, with no new `unsafe`? Can any safe function reach undefined behavior?
 - **Efficiency**: Was a hot-path change measured (`pixel-compare bench`)?
 - **Dependencies**: Are all called functions already implemented and tested?
 - **Names**: Are names self-documenting and follow Rust conventions?

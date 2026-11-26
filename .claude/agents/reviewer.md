@@ -11,6 +11,7 @@ Review the change for:
 
 - Correctness against intent — does the change actually do what the step intended? Any logic errors?
 - Security issues — injection, unsafe input handling, secrets, unsafe deserialization, path traversal, etc.
+- Safety — any new `unsafe` (block, fn, impl, trait, or `#[expect(unsafe_code)]`) is a blocking finding (CLAUDE.md, Project Phase).
 - Edge cases — boundary conditions, empty/None/zero inputs, concurrency, overflow.
 - Error handling — are failures handled and surfaced appropriately, or silently swallowed?
 - Test coverage — a bug fix must include a reproducing test (test-first rule); new logic of any complexity needs tests. Tests must call the real production code, not copies of it, and no existing test may have been weakened or deleted to get to green.

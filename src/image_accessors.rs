@@ -383,6 +383,10 @@ impl WrapMode for WrapModeReflectAutoPow2 {
 // FastRow — the bounded cached-pointer fast path of Clip and Clone
 // ============================================================================
 
+#[expect(
+    unsafe_code,
+    reason = "caches a raw pointer to the current row for the fast path; remains from the port and is to be removed once a safe version is as fast (the checked-slice version measured about 28% slower on `image_perspective`; PORTING_PLAN.md, Removing the remaining `unsafe`)"
+)]
 mod fast_row {
     use crate::rendering_buffer::RowAccessor;
 

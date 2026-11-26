@@ -58,6 +58,10 @@ impl RowAccessor {
     /// # Panics
     /// When `width` or `height` exceeds `i32::MAX`: AGG addresses rows and columns as `i32`,
     /// so a larger buffer would have rows no `i32` can name.
+    #[expect(
+        unsafe_code,
+        reason = "an `unsafe fn` because the accessor keeps a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub unsafe fn new_with_buf(buf: *mut u8, width: u32, height: u32, stride: i32) -> Self {
         let mut ra = Self::new();
         // SAFETY: the caller upholds `attach`'s contract, which is this fn's.
@@ -75,6 +79,10 @@ impl RowAccessor {
     /// # Panics
     /// When `width` or `height` exceeds `i32::MAX` (see `new_with_buf`), before anything is
     /// stored, so the accessor keeps its previous attachment.
+    #[expect(
+        unsafe_code,
+        reason = "an `unsafe fn` because the accessor keeps a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub unsafe fn attach(&mut self, buf: *mut u8, width: u32, height: u32, stride: i32) {
         check_dimensions(width, height);
         self.buf = buf;
@@ -117,6 +125,10 @@ impl RowAccessor {
     ///
     /// # Safety
     /// `y` must be in `[0, height)`, so an unattached accessor (height 0) has no valid row.
+    #[expect(
+        unsafe_code,
+        reason = "an `unsafe fn` because the accessor keeps a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     #[inline]
     pub unsafe fn row_ptr(&self, y: i32) -> *mut u8 {
         // SAFETY: the caller keeps `y` in `[0, height)`, and `check_row`'s proof shows that
@@ -136,6 +148,10 @@ impl RowAccessor {
     /// `width * bytes-per-pixel`) is undefined behaviour there. In Rust the `PixelFormat`
     /// methods are safe fns, so an out-of-range row panics, the same way an out-of-range `x`
     /// already panics through slice indexing. Locked in by `tests/pixfmt_row_bounds_tests.rs`.
+    #[expect(
+        unsafe_code,
+        reason = "reads and writes the caller-owned buffer through a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     #[inline]
     pub(crate) fn row_bytes(&self, y: i32, len: usize) -> &[u8] {
         self.check_row(y, len);
@@ -148,6 +164,10 @@ impl RowAccessor {
 
     /// The first `len` bytes of row `y`, writable. Same checks and divergence as
     /// [`row_bytes`](Self::row_bytes).
+    #[expect(
+        unsafe_code,
+        reason = "reads and writes the caller-owned buffer through a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     #[inline]
     pub(crate) fn row_bytes_mut(&mut self, y: i32, len: usize) -> &mut [u8] {
         self.check_row(y, len);
@@ -178,6 +198,10 @@ impl RowAccessor {
     /// Get a safe immutable slice for row `y`.
     ///
     /// Returns the full row of `stride_abs()` bytes.
+    #[expect(
+        unsafe_code,
+        reason = "reads and writes the caller-owned buffer through a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub fn row_slice(&self, y: u32) -> &[u8] {
         assert!(
             y < self.height,
@@ -195,6 +219,10 @@ impl RowAccessor {
     }
 
     /// Get a safe mutable slice for row `y`.
+    #[expect(
+        unsafe_code,
+        reason = "reads and writes the caller-owned buffer through a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub fn row_slice_mut(&mut self, y: u32) -> &mut [u8] {
         assert!(
             y < self.height,
@@ -220,21 +248,22 @@ impl RowAccessor {
     }
 
     /// Copy pixel data from another buffer (min of both dimensions).
+    ///
+    /// Copies rows `0..min(self.height(), src.height())`, and of each row its first
+    /// `min(self.stride_abs(), src.stride_abs())` bytes; row `y` of `src` goes to row `y` of
+    /// `self`, whatever the sign of either stride.
+    ///
+    /// # Panics
+    /// When `src` breaks the [`RenderingBufferAccess`] contract (a `row_slice` that panics for
+    /// a row below its `height()`, or returns fewer than its `stride_abs()` bytes). Every
+    /// access is checked, so a wrong implementation ends in a panic, never in undefined
+    /// behaviour.
     pub fn copy_from<T: RenderingBufferAccess>(&mut self, src: &T) {
         let h = self.height.min(src.height());
         let l = self.stride_abs().min(src.stride_abs()) as usize;
         for y in 0..h {
-            // SAFETY: `y < h` is below both heights. Ours is at most `i32::MAX` (`attach`), so
-            // `y as i32` names row `y`, valid for `stride_abs() >= l` bytes of writes; the
-            // `RenderingBufferAccess` contract makes `src`'s row `y` valid for `src.stride_abs()
-            // >= l` bytes of reads and its height fit in `i32`. The two do not overlap: our
-            // buffer may not be reached through any other pointer while we hold `&mut self`
-            // (`attach`'s contract), and `src`'s rows are such another pointer.
-            unsafe {
-                let dst = self.row_ptr(y as i32);
-                let src_ptr = src.row_ptr_const(y as i32);
-                std::ptr::copy_nonoverlapping(src_ptr, dst, l);
-            }
+            let src_row = &src.row_slice(y)[..l];
+            self.row_slice_mut(y)[..l].copy_from_slice(src_row);
         }
     }
 
@@ -323,6 +352,10 @@ impl RowPtrCache {
     /// # Panics
     /// When `width` or `height` exceeds `i32::MAX`: AGG addresses rows and columns as `i32`,
     /// so a larger buffer would have rows no `i32` can name.
+    #[expect(
+        unsafe_code,
+        reason = "an `unsafe fn` because the accessor keeps a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub unsafe fn new_with_buf(buf: *mut u8, width: u32, height: u32, stride: i32) -> Self {
         let mut rpc = Self::new();
         // SAFETY: the caller upholds `attach`'s contract, which is this fn's.
@@ -334,8 +367,8 @@ impl RowPtrCache {
     ///
     /// `rows` only ever grows, so after attaching to a shorter buffer its entries past
     /// `height` are stale pointers into an earlier buffer. No safe fn can read them: every
-    /// read goes through `row_ptr`, whose callers here (`row_slice`, `row_slice_mut`,
-    /// `copy_from`, the `RenderingBufferAccess` impl) all keep `y < height`.
+    /// read goes through `row_ptr`, whose callers here (`row_slice`, `row_slice_mut`) both
+    /// keep `y < height`.
     ///
     /// # Safety
     /// Same requirements as `new_with_buf`: `buf` non-null and valid for reads and writes of
@@ -345,6 +378,10 @@ impl RowPtrCache {
     /// # Panics
     /// When `width` or `height` exceeds `i32::MAX` (see `new_with_buf`), before anything is
     /// stored or allocated, so the cache keeps its previous attachment.
+    #[expect(
+        unsafe_code,
+        reason = "an `unsafe fn` because the accessor keeps a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub unsafe fn attach(&mut self, buf: *mut u8, width: u32, height: u32, stride: i32) {
         check_dimensions(width, height);
         self.buf = buf;
@@ -400,6 +437,10 @@ impl RowPtrCache {
     /// # Safety
     /// `y` must be in `[0, height)`. Entries of the cache past `height` may be stale pointers
     /// from an earlier attach (see `attach`), so this bound is what keeps them unread.
+    #[expect(
+        unsafe_code,
+        reason = "an `unsafe fn` because the accessor keeps a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     #[inline]
     pub unsafe fn row_ptr(&self, y: i32) -> *mut u8 {
         // SAFETY: `0 <= y < height <= rows.len()`, and `attach` filled `rows[..height]` with
@@ -408,6 +449,10 @@ impl RowPtrCache {
     }
 
     /// Get a safe immutable slice for row `y`.
+    #[expect(
+        unsafe_code,
+        reason = "reads and writes the caller-owned buffer through a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub fn row_slice(&self, y: u32) -> &[u8] {
         assert!(
             y < self.height,
@@ -425,6 +470,10 @@ impl RowPtrCache {
     }
 
     /// Get a safe mutable slice for row `y`.
+    #[expect(
+        unsafe_code,
+        reason = "reads and writes the caller-owned buffer through a raw pointer with no lifetime, as the API kept from the port exposes it; to be removed (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     pub fn row_slice_mut(&mut self, y: u32) -> &mut [u8] {
         assert!(
             y < self.height,
@@ -449,22 +498,23 @@ impl RowPtrCache {
         }
     }
 
-    /// Copy pixel data from another buffer.
+    /// Copy pixel data from another buffer (min of both dimensions).
+    ///
+    /// Copies rows `0..min(self.height(), src.height())`, and of each row its first
+    /// `min(self.stride_abs(), src.stride_abs())` bytes; row `y` of `src` goes to row `y` of
+    /// `self`, whatever the sign of either stride.
+    ///
+    /// # Panics
+    /// When `src` breaks the [`RenderingBufferAccess`] contract (a `row_slice` that panics for
+    /// a row below its `height()`, or returns fewer than its `stride_abs()` bytes). Every
+    /// access is checked, so a wrong implementation ends in a panic, never in undefined
+    /// behaviour.
     pub fn copy_from<T: RenderingBufferAccess>(&mut self, src: &T) {
         let h = self.height.min(src.height());
         let l = self.stride_abs().min(src.stride_abs()) as usize;
         for y in 0..h {
-            // SAFETY: `y < h` is below both heights. Ours is at most `i32::MAX` (`attach`), so
-            // `y as i32` names row `y`, valid for `stride_abs() >= l` bytes of writes; the
-            // `RenderingBufferAccess` contract makes `src`'s row `y` valid for `src.stride_abs()
-            // >= l` bytes of reads and its height fit in `i32`. The two do not overlap: our
-            // buffer may not be reached through any other pointer while we hold `&mut self`
-            // (`attach`'s contract), and `src`'s rows are such another pointer.
-            unsafe {
-                let dst = self.row_ptr(y as i32);
-                let src_ptr = src.row_ptr_const(y as i32);
-                std::ptr::copy_nonoverlapping(src_ptr, dst, l);
-            }
+            let src_row = &src.row_slice(y)[..l];
+            self.row_slice_mut(y)[..l].copy_from_slice(src_row);
         }
     }
 
@@ -490,31 +540,25 @@ impl Default for RowPtrCache {
 // Common trait for both buffer types
 // ============================================================================
 
-/// Common interface for rendering buffer access (used by `copy_from`).
+/// Common interface for rendering buffer access: the source side of `copy_from`.
 ///
-/// # Safety
-/// `copy_from` trusts an implementor's answers and copies with `copy_nonoverlapping`, so an
-/// implementation must guarantee:
-/// - `height()` is at most `i32::MAX` (rows are passed to `row_ptr_const` as `i32`);
-/// - for every `y` in `[0, height())`, `row_ptr_const(y)` returns a pointer valid for reads of
-///   `stride_abs()` bytes for as long as the `&self` borrow lasts, and those bytes are not
-///   written through any other pointer during that borrow;
-/// - `height()` and `stride_abs()` return the same values for as long as that borrow lasts,
-///   so the bounds a caller read stay the bounds of the rows it then reads.
-pub unsafe trait RenderingBufferAccess {
+/// A plain contract, checked rather than trusted: for every `y` in `[0, height())`,
+/// `row_slice(y)` returns row `y`'s bytes, `stride_abs()` of them, in the order they appear
+/// in the row (left to right); for any other `y` it panics. `width()` is the row's width in
+/// pixels. `copy_from` checks every slice it is given, so an implementation that breaks this
+/// contract makes it panic, never read or write out of bounds.
+pub trait RenderingBufferAccess {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn stride_abs(&self) -> u32;
-    /// # Safety
-    /// `y` must be in `[0, height())`.
-    unsafe fn row_ptr_const(&self, y: i32) -> *const u8;
+    /// The `stride_abs()` bytes of row `y`.
+    ///
+    /// # Panics
+    /// Unless `y < height()`.
+    fn row_slice(&self, y: u32) -> &[u8];
 }
 
-// SAFETY: `attach` rejects heights above `i32::MAX`; for `y` in `[0, height)` `row_ptr` points
-// at a row valid for `stride_abs()` bytes, and `attach`'s contract keeps other pointers from
-// writing the buffer while the accessor is in use. Height and stride change only in `attach`,
-// which takes `&mut self`, so they cannot change while `&self` is borrowed.
-unsafe impl RenderingBufferAccess for RowAccessor {
+impl RenderingBufferAccess for RowAccessor {
     fn width(&self) -> u32 {
         self.width
     }
@@ -524,16 +568,12 @@ unsafe impl RenderingBufferAccess for RowAccessor {
     fn stride_abs(&self) -> u32 {
         self.stride_abs()
     }
-    unsafe fn row_ptr_const(&self, y: i32) -> *const u8 {
-        // SAFETY: the caller keeps `y` in `[0, height())`, which is `row_ptr`'s requirement.
-        unsafe { self.row_ptr(y) as *const u8 }
+    fn row_slice(&self, y: u32) -> &[u8] {
+        self.row_slice(y)
     }
 }
 
-// SAFETY: as for `RowAccessor`: `attach` bounds the height, `rows[..height]` point at rows
-// valid for `stride_abs()` bytes, `attach`'s contract rules out other writers, and height and
-// stride change only in `attach` (`&mut self`), never while `&self` is borrowed.
-unsafe impl RenderingBufferAccess for RowPtrCache {
+impl RenderingBufferAccess for RowPtrCache {
     fn width(&self) -> u32 {
         self.width
     }
@@ -543,9 +583,8 @@ unsafe impl RenderingBufferAccess for RowPtrCache {
     fn stride_abs(&self) -> u32 {
         self.stride_abs()
     }
-    unsafe fn row_ptr_const(&self, y: i32) -> *const u8 {
-        // SAFETY: the caller keeps `y` in `[0, height())`, which is `row_ptr`'s requirement.
-        unsafe { self.row_ptr(y) as *const u8 }
+    fn row_slice(&self, y: u32) -> &[u8] {
+        self.row_slice(y)
     }
 }
 
@@ -713,6 +752,83 @@ mod tests {
         assert_eq!(dst_data[10..15], [42, 42, 42, 42, 42]);
         assert_eq!(dst_data[15..20], [0, 0, 0, 0, 0]);
         assert_eq!(dst_data[20..30], [0; 10]); // row 2 untouched
+    }
+
+    /// A `RenderingBufferAccess` written entirely in safe code, as a user of the library would:
+    /// rows held in a `Vec<Vec<u8>>`. `claimed_height` and `claimed_stride` let a test make it
+    /// lie about its size.
+    struct VecRows {
+        rows: Vec<Vec<u8>>,
+        claimed_height: u32,
+        claimed_stride: u32,
+    }
+
+    impl VecRows {
+        fn honest(rows: Vec<Vec<u8>>) -> Self {
+            let claimed_height = rows.len() as u32;
+            let claimed_stride = rows[0].len() as u32;
+            Self {
+                rows,
+                claimed_height,
+                claimed_stride,
+            }
+        }
+    }
+
+    impl RenderingBufferAccess for VecRows {
+        fn width(&self) -> u32 {
+            self.claimed_stride
+        }
+        fn height(&self) -> u32 {
+            self.claimed_height
+        }
+        fn stride_abs(&self) -> u32 {
+            self.claimed_stride
+        }
+        fn row_slice(&self, y: u32) -> &[u8] {
+            &self.rows[y as usize]
+        }
+    }
+
+    #[test]
+    fn test_copy_from_safe_outside_implementor() {
+        let src = VecRows::honest(vec![
+            vec![1, 2, 3, 4],
+            vec![5, 6, 7, 8],
+            vec![9, 10, 11, 12],
+        ]);
+
+        // Destination 3 bytes wide and 2 rows high: rows 0..2, 3 bytes each are copied.
+        let mut dst_data = vec![0u8; 6];
+        let mut dst = unsafe { RowAccessor::new_with_buf(dst_data.as_mut_ptr(), 3, 2, 3) };
+        dst.copy_from(&src);
+        assert_eq!(dst_data, [1, 2, 3, 5, 6, 7]);
+
+        // Bottom-up cache: row `y` still goes to row `y`, which sits last in memory.
+        let mut cache_data = vec![0u8; 12];
+        let mut cache = unsafe { RowPtrCache::new_with_buf(cache_data.as_mut_ptr(), 4, 3, -4) };
+        cache.copy_from(&src);
+        assert_eq!(cache_data, [9, 10, 11, 12, 5, 6, 7, 8, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_copy_from_panics_on_implementor_claiming_extra_rows() {
+        let mut src = VecRows::honest(vec![vec![7; 4], vec![7; 4]]);
+        src.claimed_height = 3;
+        let mut dst_data = vec![0u8; 12];
+        let mut dst = unsafe { RowAccessor::new_with_buf(dst_data.as_mut_ptr(), 4, 3, 4) };
+        dst.copy_from(&src);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range for slice of length 4")]
+    fn test_copy_from_panics_on_implementor_claiming_longer_rows() {
+        let mut src = VecRows::honest(vec![vec![7; 4], vec![7; 4]]);
+        src.claimed_stride = 8;
+        let mut dst_data = vec![0u8; 16];
+        let mut dst = unsafe { RowPtrCache::new_with_buf(dst_data.as_mut_ptr(), 8, 2, 8) };
+        dst.copy_from(&src);
     }
 
     #[test]

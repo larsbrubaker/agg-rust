@@ -244,6 +244,10 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
     }
 
     // Vertical pass
+    #[expect(
+        unsafe_code,
+        reason = "walks each column with raw pointers stepped by the stride; remains from the port and is to be replaced by a safe version as fast (PORTING_PLAN.md, Removing the remaining `unsafe`)"
+    )]
     if ry > 0 {
         if ry > 254 {
             ry = 254;
