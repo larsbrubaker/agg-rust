@@ -34,6 +34,17 @@ work live in the code it concerns. The C++ headers named here are in
   `conv_shorten_path` (only the `shorten_path` function exists), `path_length`,
   `path_storage_integer` and `rendering_buffer_dynarow` have no Rust counterpart.
   Needed: each header, with its tests.
+- **The resample generators read past the span they request.** `SpanImageResampleRgbaAffine`,
+  `SpanImageResampleRgba`, `SpanImageResampleRgbAffine` and `SpanImageResampleRgb` pass
+  `len_x_lr` to `ImageSource::span`, then step `next_x` until the filter weight runs out,
+  which with `rx_inv` rounded down can be more pixels than that (one more at moderate
+  scales, such as bilinear at scale 2.5; possibly more at large downscales), so at the right
+  edge of the image they read past the row they asked for. The accessors tolerate it:
+  `ImageAccessorClone` clamps, `ImageAccessorClip` returns the background,
+  `ImageAccessorWrap` wraps, and `ImageAccessorNoClip` panics when the stride has no
+  padding and otherwise reads the padding bytes as a pixel. Needed: each generator asking
+  `span` for the number of pixels it actually reads, with a test that no span steps past its
+  `len`.
 
 ## Demo site
 

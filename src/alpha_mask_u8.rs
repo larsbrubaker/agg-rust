@@ -317,10 +317,14 @@ impl<const STEP: usize, const OFFSET: usize, MF: MaskFunction> AlphaMask
 }
 
 // ============================================================================
-// AmaskNoClipU8 — unchecked alpha mask
+// AmaskNoClipU8 — alpha mask without clipping
 // ============================================================================
 
-/// Alpha mask without bounds checking — faster but caller must ensure in-range.
+/// Alpha mask without clipping to the mask's bounds — faster, but the caller must keep
+/// coordinates in range: rows and pixels are still read through checked row access and
+/// checked slicing, so an out-of-range coordinate panics rather than being treated as
+/// outside the mask (as `AlphaMaskU8` does). An `x` past the width that still lands in a
+/// row's stride padding reads that padding.
 ///
 /// Port of C++ `amask_no_clip_u8<Step, Offset, MaskF>`.
 pub struct AmaskNoClipU8<'a, const STEP: usize, const OFFSET: usize, MF: MaskFunction> {
