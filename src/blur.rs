@@ -574,8 +574,8 @@ mod tests {
     /// With `rx == 0` the horizontal pass, which reads rows through the checked `row_mut`, is
     /// skipped, so the vertical pass must check on its own that a `width * 4`-byte row fits
     /// in the stride. Here the stride is half a row, so a row reaches past the attached
-    /// region: the check must reject it before any row is touched, and the guard bytes around
-    /// the region confirm nothing outside it was written.
+    /// region: the check must reject it before any row is touched, so the region still holds
+    /// its fill afterwards.
     #[test]
     fn test_stack_blur_vertical_only_rejects_short_stride() {
         let (w, h) = (4u32, 3u32);
@@ -601,25 +601,23 @@ mod tests {
         vertical_only_panics_without_writing(1 << 30, 1, 16, EXPECT);
     }
 
-    /// Attaches a `w` x `h` accessor with `stride` to a guarded region of `h * stride` bytes,
-    /// runs a vertical-only blur, and asserts it panicked with `expect` and left every guard
-    /// byte alone.
+    /// Attaches a `w` x `h` accessor with `stride` to a region of exactly `h * stride` bytes,
+    /// all `FILL`, runs a vertical-only blur, and asserts it panicked with `expect` (the
+    /// row-length check's own message) and left every byte of the region holding `FILL`: the
+    /// check rejected the row before anything was written. The accessor borrows only that
+    /// region, so it is all the blur could have written.
     fn vertical_only_panics_without_writing(w: u32, h: u32, stride: i32, expect: &str) {
-        const SENTINEL: u8 = 0xA5;
-        const GUARD: usize = 64;
-        let region = h as usize * stride as usize;
-        let mut mem = vec![SENTINEL; GUARD * 2 + region];
-        mem[GUARD..GUARD + region].fill(0x11);
-        let mut ra = RowAccessor::new_with_buf(&mut mem[GUARD..GUARD + region], w, h, stride);
+        const FILL: u8 = 0x11;
+        let mut mem = vec![FILL; h as usize * stride as usize];
+        let mut ra = RowAccessor::new_with_buf(&mut mem, w, h, stride);
 
         let msg = panic_message(|| stack_blur_rgba32(&mut ra, 0, 1));
 
-        let (before, rest) = mem.split_at(GUARD);
-        let guards_intact = before.iter().chain(&rest[region..]).all(|&b| b == SENTINEL);
+        let untouched = mem.iter().all(|&b| b == FILL);
         assert_eq!(
-            (msg.as_deref(), guards_intact),
+            (msg.as_deref(), untouched),
             (Some(expect), true),
-            "(panic message, guard bytes untouched)"
+            "(panic message, region untouched)"
         );
     }
 
@@ -660,6 +658,64 @@ mod tests {
                     row(&neg, y),
                     "{w}x{h} rx={rx} ry={ry} row {y}"
                 );
+            }
+        }
+    }
+
+    /// The vertical pass sweeps columns in strips of `VERTICAL_STRIP`, reusing the per-column
+    /// sums and stacks from strip to strip; the horizontal pass walks one row at a time. Both
+    /// are the same 1-D stack blur along their axis (same tables, same edge clamping, same
+    /// order of steps, including the in-place write of the last pixel before it is read), so
+    /// a vertical-only blur must equal the transpose of a horizontal-only blur of the
+    /// transposed image. The width, 130, spans two full strips and a short third one, so a
+    /// strip that started from the previous strip's state, or read the wrong columns, would
+    /// break the equality. Both stride signs are used for the vertical-pass buffer.
+    #[test]
+    fn test_stack_blur_vertical_strips_match_transposed_horizontal() {
+        const W: usize = 130;
+        for (h, r) in [(5usize, 2u32), (5, 9), (4, 254), (1, 3)] {
+            // Non-uniform pixels, so every column and channel differs.
+            let px =
+                |x: usize, y: usize, c: usize| ((x * 29 + y * 71 + c * 53 + x * y) % 256) as u8;
+            let row_len = W * 4;
+
+            // The transposed image: width `h`, height `W`, pixel (y, x) = original (x, y).
+            let mut t: Vec<u8> = (0..W)
+                .flat_map(|x| (0..h).flat_map(move |y| (0..4).map(move |c| px(x, y, c))))
+                .collect();
+            let mut ta = RowAccessor::new_with_buf(&mut t, h as u32, W as u32, (h * 4) as i32);
+            stack_blur_rgba32(&mut ta, r, 0);
+            let expected: Vec<Vec<u8>> = (0..h)
+                .map(|y| {
+                    (0..W)
+                        .flat_map(|x| get_pixel(&ta, y, x))
+                        .collect::<Vec<u8>>()
+                })
+                .collect();
+
+            for negative in [false, true] {
+                let rows: Vec<Vec<u8>> = (0..h)
+                    .map(|y| (0..row_len).map(|i| px(i / 4, y, i % 4)).collect())
+                    .collect();
+                let mut mem: Vec<u8> = if negative {
+                    rows.iter().rev().flatten().copied().collect()
+                } else {
+                    rows.concat()
+                };
+                let stride = if negative {
+                    -(row_len as i32)
+                } else {
+                    row_len as i32
+                };
+                let mut ra = RowAccessor::new_with_buf(&mut mem, W as u32, h as u32, stride);
+                stack_blur_rgba32(&mut ra, 0, r);
+                for (y, want) in expected.iter().enumerate() {
+                    assert_eq!(
+                        row(&ra, y as i32),
+                        &want[..],
+                        "{W}x{h} ry={r} negative stride={negative} row {y}"
+                    );
+                }
             }
         }
     }
