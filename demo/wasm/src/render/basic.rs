@@ -1483,12 +1483,9 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let vy2 = params.get(5).copied().unwrap_or(310.0);
     let pixel_size = params.get(6).copied().unwrap_or(32.0).max(4.0);
 
-    let mut buf = Vec::new();
-    let mut ra = RowAccessor::new();
-    setup_renderer(&mut buf, &mut ra, width, height);
-    // Don't use PixfmtRgba32 for the main buffer yet — we'll write pixels directly first
+    // Don't attach a pixel format to the main buffer yet — we'll write pixels directly first
     // then use rasterizer for grid and outline
-    buf.resize((width * height * 4) as usize, 255);
+    let mut buf = vec![255u8; (width * height * 4) as usize];
 
     let ps = pixel_size;
     let nx = (width as f64 / ps).ceil() as u32 + 1;
@@ -1507,7 +1504,7 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut small_buf = vec![255u8; (nx * ny * 4) as usize];
     {
         let mut small_ra = RowAccessor::new();
-        unsafe { small_ra.attach(small_buf.as_mut_ptr(), nx, ny, small_stride) };
+        small_ra.attach(&mut small_buf, nx, ny, small_stride);
         let small_pf = PixfmtRgba32::new(&mut small_ra);
         let mut small_rb = RendererBase::new(small_pf);
         small_rb.clear(&Rgba8::new(255, 255, 255, 255));
@@ -1558,7 +1555,7 @@ pub fn aa_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     // Now use rasterizer for grid and outline overlay
     let stride = (width * 4) as i32;
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    let mut ra = RowAccessor::new_with_buf(&mut buf, width, height, stride);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     let mut ras = RasterizerScanlineAa::new();

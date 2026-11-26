@@ -75,13 +75,13 @@ const STACK_BLUR8_SHR: [u32; 255] = [
 /// Row of RGBA32 pixels at `y` as a byte slice (shared, read-only view).
 #[cfg(test)]
 #[inline]
-fn row(rbuf: &RowAccessor, y: i32) -> &[u8] {
+fn row<'r>(rbuf: &'r RowAccessor, y: i32) -> &'r [u8] {
     rbuf.row_bytes(y, rbuf.width() as usize * 4)
 }
 
 /// Row of RGBA32 pixels at `y` as a mutable byte slice.
 #[inline]
-fn row_mut(rbuf: &mut RowAccessor, y: i32) -> &mut [u8] {
+fn row_mut<'r>(rbuf: &'r mut RowAccessor, y: i32) -> &'r mut [u8] {
     rbuf.row_bytes_mut(y, rbuf.width() as usize * 4)
 }
 
@@ -96,14 +96,13 @@ fn row_mut(rbuf: &mut RowAccessor, y: i32) -> &mut [u8] {
 /// radii. Radius is clamped to 254.
 ///
 /// Component order: R=0, G=1, B=2, A=3.
-pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
+pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, ry: u32) {
     let w = rbuf.width() as usize;
     let h = rbuf.height() as usize;
     if w == 0 || h == 0 {
         return;
     }
     let wm = w - 1;
-    let hm = h - 1;
 
     // Horizontal pass
     if rx > 0 {
@@ -244,168 +243,160 @@ pub fn stack_blur_rgba32(rbuf: &mut RowAccessor, mut rx: u32, mut ry: u32) {
     }
 
     // Vertical pass
-    #[expect(
-        unsafe_code,
-        reason = "walks each column with raw pointers stepped by the stride; remains from the port and is to be replaced by a safe version as fast (PORTING_PLAN.md, Removing the remaining `unsafe`)"
-    )]
     if ry > 0 {
-        if ry > 254 {
-            ry = 254;
+        stack_blur_rgba32_vertical(rbuf, ry.min(254) as usize);
+    }
+}
+
+/// Columns the vertical pass sweeps together. Each column's running sums and stack live in
+/// arrays indexed by column, so the pass keeps `VERTICAL_STRIP * ((2 * ry + 1) * 4 + 96)`
+/// bytes of state (about 12 KB at radius 10, 136 KB at radius 254) and visits each row as
+/// `VERTICAL_STRIP * 4` contiguous bytes. Timing on 1024x1024 barely moved between 16 and
+/// 256 columns.
+const VERTICAL_STRIP: usize = 64;
+
+/// The vertical pass of [`stack_blur_rgba32`], radius `ry` in `1..=254`, on a buffer with at
+/// least one row and one column.
+///
+/// C++ walks each column top to bottom with a pixel pointer stepped by the stride. Columns
+/// are independent (each reads and writes only its own pixels), so this runs the same
+/// per-column steps with the columns of a strip interleaved: for each row it advances every
+/// column of the strip by one step, reading and writing whole row slices. Within a column
+/// the order of reads and writes is C++'s, the output row before the row entering the
+/// stack, which matters only on the last row, where both are row `h - 1`; the arithmetic is
+/// the same integer arithmetic, so the output is identical. Every access is a checked row
+/// slice, checked once per row and strip instead of per pixel, and the rows are touched in
+/// memory order rather than one pixel per row.
+fn stack_blur_rgba32_vertical(rbuf: &mut RowAccessor, ry: usize) {
+    let w = rbuf.width() as usize;
+    let h = rbuf.height() as usize;
+    let hm = h - 1;
+    let div = ry * 2 + 1;
+    let mul_sum = STACK_BLUR8_MUL[ry] as u64;
+    let shr_sum = STACK_BLUR8_SHR[ry];
+
+    // Checks up front, before allocating, that a `w * 4`-byte row fits in the stride (with
+    // `rx == 0` the horizontal pass never ran to check it), and panics like every other
+    // checked row access when it does not. The length saturates: on a 32-bit `usize` a width
+    // up to `i32::MAX` can make `w * 4` wrap to a small number that would pass the check, so
+    // an overflowing product must become `usize::MAX`, which fails it.
+    let row_len = w.saturating_mul(4);
+    rbuf.row_bytes(0, row_len);
+
+    let strip = w.min(VERTICAL_STRIP);
+    // Per column: `[sum, sum_in, sum_out]`, each over R, G, B, A.
+    let mut sums = vec![[[0u64; 4]; 3]; strip];
+    // The column stacks, row-major: slot `i` of column `x` (in the strip) is
+    // `stack[i * strip + x]`.
+    let mut stack = vec![[0u8; 4]; div * strip];
+
+    let mut x0 = 0;
+    while x0 < w {
+        let n = (w - x0).min(strip);
+        let sums = &mut sums[..n];
+        for s in sums.iter_mut() {
+            *s = [[0; 4]; 3];
         }
-        let ry = ry as usize;
-        let div = ry * 2 + 1;
-        let mul_sum = STACK_BLUR8_MUL[ry] as u64;
-        let shr_sum = STACK_BLUR8_SHR[ry];
 
-        let mut stack = vec![[0u8; 4]; div];
-        let stride = rbuf.stride() as isize;
-
-        // The vertical pass walks raw column pointers, so it checks once, through the checked
-        // accessor, that a `w * 4`-byte row fits in the stride; with `rx == 0` the horizontal
-        // pass (which goes through `row_mut`) never ran to check it. Panics like every other
-        // checked row access when it does not fit. The length saturates: on a 32-bit `usize`
-        // a width up to `i32::MAX` can make `w * 4` wrap to a small number that would pass the
-        // check, so an overflowing product must become `usize::MAX`, which fails it. Once the
-        // check passes, `w * 4` is the exact product and `<= |stride|`. From here on each
-        // pointer below is row `r` (`0 <= r <= hm`) plus `x * 4` bytes (`x < w`, so `x * 4`
-        // cannot overflow either), so it and the 4 bytes read or written at it lie inside that
-        // row's first `w * 4` bytes, which `RowAccessor::check_row`'s proof places inside the
-        // attached buffer for both stride signs.
-        rbuf.row_bytes_mut(0, w.saturating_mul(4));
-
-        for x in 0..w {
-            // SAFETY: row 0 exists (`h > 0`) and `x * 4 < w * 4 <= |stride|`, the exact,
-            // unwrapped product (checked above).
-            let base_ptr = unsafe { rbuf.row_ptr(0).add(x * 4) };
-
-            let mut sum_r: u64 = 0;
-            let mut sum_g: u64 = 0;
-            let mut sum_b: u64 = 0;
-            let mut sum_a: u64 = 0;
-            let mut sum_in_r: u64 = 0;
-            let mut sum_in_g: u64 = 0;
-            let mut sum_in_b: u64 = 0;
-            let mut sum_in_a: u64 = 0;
-            let mut sum_out_r: u64 = 0;
-            let mut sum_out_g: u64 = 0;
-            let mut sum_out_b: u64 = 0;
-            let mut sum_out_a: u64 = 0;
-
-            // SAFETY: `base_ptr` is pixel `x` of row 0, inside the buffer (see above); no
-            // other reference to the buffer is live while `rbuf` is borrowed mutably.
-            let src_pix = unsafe { std::slice::from_raw_parts(base_ptr, 4) };
-            for (i, slot) in stack.iter_mut().take(ry + 1).enumerate() {
-                *slot = [src_pix[0], src_pix[1], src_pix[2], src_pix[3]];
-                let w = (i + 1) as u64;
-                sum_r += src_pix[0] as u64 * w;
-                sum_g += src_pix[1] as u64 * w;
-                sum_b += src_pix[2] as u64 * w;
-                sum_a += src_pix[3] as u64 * w;
-                sum_out_r += src_pix[0] as u64;
-                sum_out_g += src_pix[1] as u64;
-                sum_out_b += src_pix[2] as u64;
-                sum_out_a += src_pix[3] as u64;
-            }
-
-            let mut src_ptr = base_ptr;
-            for i in 1..=ry {
-                if i <= hm {
-                    // SAFETY: `src_ptr` is row `i - 1` and `i <= hm`, so row `i` exists.
-                    src_ptr = unsafe { src_ptr.offset(stride) };
+        // Stack slots 0..=ry: the first row, repeated (edge extension).
+        for i in 0..=ry {
+            let row = &rbuf.row_bytes(0, row_len).as_chunks::<4>().0[x0..x0 + n];
+            let weight = (i + 1) as u64;
+            let slots = &mut stack[i * strip..][..n];
+            for ((slot, s), p) in slots.iter_mut().zip(sums.iter_mut()).zip(row) {
+                *slot = *p;
+                for c in 0..4 {
+                    s[0][c] += p[c] as u64 * weight;
+                    s[2][c] += p[c] as u64;
                 }
-                // SAFETY: `src_ptr` is pixel `x` of row `min(i, hm)`, inside the buffer.
-                let p = unsafe { std::slice::from_raw_parts(src_ptr, 4) };
-                stack[i + ry] = [p[0], p[1], p[2], p[3]];
-                let w = (ry + 1 - i) as u64;
-                sum_r += p[0] as u64 * w;
-                sum_g += p[1] as u64 * w;
-                sum_b += p[2] as u64 * w;
-                sum_a += p[3] as u64 * w;
-                sum_in_r += p[0] as u64;
-                sum_in_g += p[1] as u64;
-                sum_in_b += p[2] as u64;
-                sum_in_a += p[3] as u64;
-            }
-
-            let mut stack_ptr = ry;
-            let mut yp = ry;
-            if yp > hm {
-                yp = hm;
-            }
-            // SAFETY: `yp <= hm`, so row `yp` exists.
-            src_ptr = unsafe { base_ptr.offset(yp as isize * stride) };
-            let mut dst_ptr = base_ptr;
-
-            for _y in 0..h {
-                // SAFETY: on iteration `_y`, `dst_ptr` is pixel `x` of row `_y < h`, inside
-                // the buffer; `src_ptr` and `src_pix` are not used while `dst` lives.
-                let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, 4) };
-                dst[0] = ((sum_r * mul_sum) >> shr_sum) as u8;
-                dst[1] = ((sum_g * mul_sum) >> shr_sum) as u8;
-                dst[2] = ((sum_b * mul_sum) >> shr_sum) as u8;
-                dst[3] = ((sum_a * mul_sum) >> shr_sum) as u8;
-                // Deliberate divergence from C++ (`agg_blur.h` steps `dst_pix_ptr += stride`
-                // after every row, the last included): after the last row that step lands past
-                // the end of the buffer (below its start for a negative stride), and `offset`
-                // to there is undefined behaviour in Rust even if never read. `wrapping_offset`
-                // computes the same address without that requirement, at no cost; only the
-                // in-bounds pointers of rows `0..h` are ever dereferenced (above). Locked in by
-                // `test_stack_blur_spreads_pixel` and
-                // `test_stack_blur_negative_stride_matches_positive` under Miri.
-                dst_ptr = dst_ptr.wrapping_offset(stride);
-
-                sum_r -= sum_out_r;
-                sum_g -= sum_out_g;
-                sum_b -= sum_out_b;
-                sum_a -= sum_out_a;
-
-                let mut stack_start = stack_ptr + div - ry;
-                if stack_start >= div {
-                    stack_start -= div;
-                }
-
-                let sp = &stack[stack_start];
-                sum_out_r -= sp[0] as u64;
-                sum_out_g -= sp[1] as u64;
-                sum_out_b -= sp[2] as u64;
-                sum_out_a -= sp[3] as u64;
-
-                if yp < hm {
-                    // SAFETY: `src_ptr` is row `yp` and `yp < hm`, so row `yp + 1` exists.
-                    src_ptr = unsafe { src_ptr.offset(stride) };
-                    yp += 1;
-                }
-
-                // SAFETY: `src_ptr` is pixel `x` of row `yp <= hm`, inside the buffer; `dst`
-                // is no longer live.
-                let p = unsafe { std::slice::from_raw_parts(src_ptr, 4) };
-                stack[stack_start] = [p[0], p[1], p[2], p[3]];
-
-                sum_in_r += p[0] as u64;
-                sum_in_g += p[1] as u64;
-                sum_in_b += p[2] as u64;
-                sum_in_a += p[3] as u64;
-                sum_r += sum_in_r;
-                sum_g += sum_in_g;
-                sum_b += sum_in_b;
-                sum_a += sum_in_a;
-
-                stack_ptr += 1;
-                if stack_ptr >= div {
-                    stack_ptr = 0;
-                }
-
-                let sp = &stack[stack_ptr];
-                sum_out_r += sp[0] as u64;
-                sum_out_g += sp[1] as u64;
-                sum_out_b += sp[2] as u64;
-                sum_out_a += sp[3] as u64;
-                sum_in_r -= sp[0] as u64;
-                sum_in_g -= sp[1] as u64;
-                sum_in_b -= sp[2] as u64;
-                sum_in_a -= sp[3] as u64;
             }
         }
+
+        // Stack slots ry+1..=2*ry: rows 1..=ry, clamped to the last row.
+        for i in 1..=ry {
+            let row = &rbuf.row_bytes(i.min(hm) as i32, row_len).as_chunks::<4>().0[x0..x0 + n];
+            let weight = (ry + 1 - i) as u64;
+            let slots = &mut stack[(i + ry) * strip..][..n];
+            for ((slot, s), p) in slots.iter_mut().zip(sums.iter_mut()).zip(row) {
+                *slot = *p;
+                for c in 0..4 {
+                    s[0][c] += p[c] as u64 * weight;
+                    s[1][c] += p[c] as u64;
+                }
+            }
+        }
+
+        let mut stack_ptr = ry;
+        let mut yp = ry.min(hm);
+        for y in 0..h {
+            let mut stack_start = stack_ptr + div - ry;
+            if stack_start >= div {
+                stack_start -= div;
+            }
+
+            // Write output row `y`, then take the leaving pixels out of the sums.
+            {
+                let dst =
+                    &mut rbuf.row_bytes_mut(y as i32, row_len).as_chunks_mut::<4>().0[x0..x0 + n];
+                let leaving = &stack[stack_start * strip..][..n];
+                for ((d, s), o) in dst.iter_mut().zip(sums.iter_mut()).zip(leaving) {
+                    for c in 0..4 {
+                        d[c] = ((s[0][c] * mul_sum) >> shr_sum) as u8;
+                    }
+                    for c in 0..4 {
+                        s[0][c] -= s[2][c];
+                        s[2][c] -= o[c] as u64;
+                    }
+                }
+            }
+
+            if yp < hm {
+                yp += 1;
+            }
+            let mut next_ptr = stack_ptr + 1;
+            if next_ptr >= div {
+                next_ptr = 0;
+            }
+
+            // Push row `yp`'s pixels into slot `stack_start`, then move the pixels of slot
+            // `next_ptr` from the incoming to the outgoing sums. The two slots differ:
+            // `stack_start - next_ptr == ry (mod div)` and `0 < ry < div`.
+            let (entering, next) = two_stack_rows(&mut stack, strip, n, stack_start, next_ptr);
+            let src = &rbuf.row_bytes(yp as i32, row_len).as_chunks::<4>().0[x0..x0 + n];
+            for (((slot, s), p), q) in entering.iter_mut().zip(sums.iter_mut()).zip(src).zip(next) {
+                *slot = *p;
+                for c in 0..4 {
+                    s[1][c] += p[c] as u64;
+                    s[0][c] += s[1][c];
+                    s[2][c] += q[c] as u64;
+                    s[1][c] -= q[c] as u64;
+                }
+            }
+
+            stack_ptr = next_ptr;
+        }
+
+        x0 += n;
+    }
+}
+
+/// Slot `a` of the strip's stacks, writable, and slot `b`, readable, `n` columns each; `a`
+/// and `b` must differ.
+#[inline]
+fn two_stack_rows(
+    stack: &mut [[u8; 4]],
+    strip: usize,
+    n: usize,
+    a: usize,
+    b: usize,
+) -> (&mut [[u8; 4]], &[[u8; 4]]) {
+    debug_assert_ne!(a, b);
+    if a < b {
+        let (lo, hi) = stack.split_at_mut(b * strip);
+        (&mut lo[a * strip..][..n], &hi[..n])
+    } else {
+        let (lo, hi) = stack.split_at_mut(a * strip);
+        (&mut hi[..n], &lo[b * strip..][..n])
     }
 }
 
@@ -437,14 +428,10 @@ mod tests {
     use super::*;
     use crate::rendering_buffer::RowAccessor;
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * 4) as i32;
-        let mut buf = vec![0u8; (h * w * 4) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w * 4) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     fn set_pixel(ra: &mut RowAccessor, x: usize, y: usize, r: u8, g: u8, b: u8, a: u8) {
@@ -464,7 +451,8 @@ mod tests {
 
     #[test]
     fn test_stack_blur_zero_radius() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         set_pixel(&mut ra, 5, 5, 255, 0, 0, 255);
 
         let before = get_pixel(&ra, 5, 5);
@@ -475,7 +463,8 @@ mod tests {
 
     #[test]
     fn test_stack_blur_spreads_pixel() {
-        let (_buf, mut ra) = make_buffer(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 20);
         // Set center pixel to white
         set_pixel(&mut ra, 10, 10, 255, 255, 255, 255);
 
@@ -492,7 +481,8 @@ mod tests {
 
     #[test]
     fn test_stack_blur_uniform_stays_uniform() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         // Fill with uniform gray
         for y in 0..10 {
             for x in 0..10 {
@@ -517,7 +507,8 @@ mod tests {
 
     #[test]
     fn test_recursive_blur_zero_radius() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         set_pixel(&mut ra, 5, 5, 255, 0, 0, 255);
 
         let before = get_pixel(&ra, 5, 5);
@@ -528,7 +519,8 @@ mod tests {
 
     #[test]
     fn test_recursive_blur_spreads_pixel() {
-        let (_buf, mut ra) = make_buffer(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 20);
         set_pixel(&mut ra, 10, 10, 255, 255, 255, 255);
 
         recursive_blur_rgba32(&mut ra, 3.0);
@@ -545,7 +537,8 @@ mod tests {
 
     #[test]
     fn test_recursive_blur_uniform_stays_uniform() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         for y in 0..10 {
             for x in 0..10 {
                 set_pixel(&mut ra, x, y, 100, 100, 100, 255);
@@ -580,8 +573,9 @@ mod tests {
 
     /// With `rx == 0` the horizontal pass, which reads rows through the checked `row_mut`, is
     /// skipped, so the vertical pass must check on its own that a `width * 4`-byte row fits
-    /// in the stride. Here the stride is half a row: unchecked, the vertical pass would run
-    /// past the attached region into the guard bytes after it.
+    /// in the stride. Here the stride is half a row, so a row reaches past the attached
+    /// region: the check must reject it before any row is touched, and the guard bytes around
+    /// the region confirm nothing outside it was written.
     #[test]
     fn test_stack_blur_vertical_only_rejects_short_stride() {
         let (w, h) = (4u32, 3u32);
@@ -597,8 +591,7 @@ mod tests {
     /// The 32-bit case of the same check: on a 32-bit `usize` (wasm32), `w * 4` for
     /// `w = 1 << 30` wraps to 0, which a plain multiply would pass off as a row that fits in
     /// any stride. The row length must saturate instead, so the check fails. On a 64-bit host
-    /// the product does not wrap; the wrap is exercised by the 32-bit entry of the Miri job in
-    /// `.github/workflows/ci.yml` (the Miri command in CLAUDE.md, Testing).
+    /// the product does not wrap, so only a 32-bit target exercises the wrap.
     #[test]
     fn test_stack_blur_vertical_only_rejects_row_length_overflow() {
         #[cfg(target_pointer_width = "64")]
@@ -617,9 +610,7 @@ mod tests {
         let region = h as usize * stride as usize;
         let mut mem = vec![SENTINEL; GUARD * 2 + region];
         mem[GUARD..GUARD + region].fill(0x11);
-        // SAFETY: the region holds `h * stride` bytes and outlives the accessor.
-        let mut ra =
-            unsafe { RowAccessor::new_with_buf(mem.as_mut_ptr().add(GUARD), w, h, stride) };
+        let mut ra = RowAccessor::new_with_buf(&mut mem[GUARD..GUARD + region], w, h, stride);
 
         let msg = panic_message(|| stack_blur_rgba32(&mut ra, 0, 1));
 
@@ -634,8 +625,8 @@ mod tests {
 
     /// A negative stride (bottom-up buffer) must blur exactly like the positive-stride buffer
     /// holding the same rows: the vertical pass walks rows by `stride`, so it must not step
-    /// past either end of the buffer in either direction. Exact-size buffers, so Miri flags any
-    /// pointer that leaves them.
+    /// past either end of the buffer in either direction. Exact-size buffers, so any row the
+    /// blur would reach outside them fails the slice bounds check.
     #[test]
     fn test_stack_blur_negative_stride_matches_positive() {
         for (w, h, rx, ry) in [
@@ -658,12 +649,8 @@ mod tests {
             // Bottom-up: the same rows stored in reverse, attached with a negative stride.
             let mut bottom_up: Vec<u8> = rows.iter().rev().flatten().copied().collect();
 
-            // SAFETY: each Vec holds exactly `h * row_len` bytes and outlives its accessor.
-            let mut pos =
-                unsafe { RowAccessor::new_with_buf(top_down.as_mut_ptr(), w, h, row_len as i32) };
-            let mut neg = unsafe {
-                RowAccessor::new_with_buf(bottom_up.as_mut_ptr(), w, h, -(row_len as i32))
-            };
+            let mut pos = RowAccessor::new_with_buf(&mut top_down, w, h, row_len as i32);
+            let mut neg = RowAccessor::new_with_buf(&mut bottom_up, w, h, -(row_len as i32));
             stack_blur_rgba32(&mut pos, rx, ry);
             stack_blur_rgba32(&mut neg, rx, ry);
 

@@ -88,14 +88,14 @@ const COVER_FULL: u32 = 255;
 ///
 /// Port of C++ `alpha_mask_u8<Step, Offset, MaskF>`.
 pub struct AlphaMaskU8<'a, const STEP: usize, const OFFSET: usize, MF: MaskFunction> {
-    rbuf: &'a RowAccessor,
+    rbuf: &'a RowAccessor<'a>,
     mask_function: MF,
 }
 
 impl<'a, const STEP: usize, const OFFSET: usize, MF: MaskFunction>
     AlphaMaskU8<'a, STEP, OFFSET, MF>
 {
-    pub fn new(rbuf: &'a RowAccessor, mask_function: MF) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>, mask_function: MF) -> Self {
         Self {
             rbuf,
             mask_function,
@@ -328,14 +328,14 @@ impl<const STEP: usize, const OFFSET: usize, MF: MaskFunction> AlphaMask
 ///
 /// Port of C++ `amask_no_clip_u8<Step, Offset, MaskF>`.
 pub struct AmaskNoClipU8<'a, const STEP: usize, const OFFSET: usize, MF: MaskFunction> {
-    rbuf: &'a RowAccessor,
+    rbuf: &'a RowAccessor<'a>,
     mask_function: MF,
 }
 
 impl<'a, const STEP: usize, const OFFSET: usize, MF: MaskFunction>
     AmaskNoClipU8<'a, STEP, OFFSET, MF>
 {
-    pub fn new(rbuf: &'a RowAccessor, mask_function: MF) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>, mask_function: MF) -> Self {
         Self {
             rbuf,
             mask_function,
@@ -437,15 +437,15 @@ pub type AmaskNoClipRgba32a<'a> = AmaskNoClipU8<'a, 4, 3, OneComponentMask>;
 mod tests {
     use super::*;
 
-    fn make_gray_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor {
+    fn make_gray_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor<'_> {
         data.resize((width * height) as usize, 0);
-        unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), width, height, width as i32) }
+        RowAccessor::new_with_buf(data, width, height, width as i32)
     }
 
-    fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor {
+    fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor<'_> {
         let stride = width * 4;
         data.resize((stride * height) as usize, 0);
-        unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), width, height, stride as i32) }
+        RowAccessor::new_with_buf(data, width, height, stride as i32)
     }
 
     #[test]
@@ -479,9 +479,9 @@ mod tests {
     #[test]
     fn test_pixel_in_bounds() {
         let mut data = Vec::new();
-        let rbuf = make_gray_buffer(4, 4, &mut data);
+        let mut rbuf = make_gray_buffer(4, 4, &mut data);
         // Set pixel (2,1) to 200
-        data[4 + 2] = 200;
+        rbuf.buf_mut()[4 + 2] = 200;
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
         assert_eq!(mask.pixel(2, 1), 200);
     }
@@ -500,8 +500,8 @@ mod tests {
     #[test]
     fn test_combine_pixel() {
         let mut data = Vec::new();
-        let rbuf = make_gray_buffer(4, 4, &mut data);
-        data[0] = 128;
+        let mut rbuf = make_gray_buffer(4, 4, &mut data);
+        rbuf.buf_mut()[0] = 128;
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
         // combine: (255 + val * mask_val) >> 8 = (255 + 200 * 128) >> 8
         let result = mask.combine_pixel(0, 0, 200);
@@ -522,7 +522,7 @@ mod tests {
         for (i, d) in data.iter_mut().take(4).enumerate() {
             *d = (i as u8 + 1) * 50;
         }
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
 
         let mut dst = vec![0u8; 4];
@@ -551,7 +551,7 @@ mod tests {
         for (i, d) in data.iter_mut().take(4).enumerate() {
             *d = (i as u8 + 1) * 50;
         }
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
 
         let mut dst = vec![99u8; 3];
@@ -568,7 +568,7 @@ mod tests {
         for (i, d) in data.iter_mut().take(4).enumerate() {
             *d = (i as u8 + 1) * 50;
         }
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
 
         let mut dst = vec![99u8; 3];
@@ -584,7 +584,7 @@ mod tests {
         let mut data = vec![0u8; 16];
         data[0] = 128;
         data[1] = 255;
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
 
         let mut dst = vec![200u8, 100u8];
@@ -601,7 +601,7 @@ mod tests {
         data[4 + 1] = 20;
         data[8 + 1] = 30;
         data[12 + 1] = 40;
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AlphaMaskGray8::new(&rbuf, OneComponentMask);
 
         let mut dst = vec![0u8; 4];
@@ -623,12 +623,12 @@ mod tests {
     #[test]
     fn test_rgba_mask() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
         // Set pixel (0,0) RGBA = (100, 150, 200, 255)
-        data[0] = 100;
-        data[1] = 150;
-        data[2] = 200;
-        data[3] = 255;
+        rbuf.buf_mut()[0] = 100;
+        rbuf.buf_mut()[1] = 150;
+        rbuf.buf_mut()[2] = 200;
+        rbuf.buf_mut()[3] = 255;
 
         // Alpha channel mask (step=4, offset=3)
         let mask = AlphaMaskRgba32a::new(&rbuf, OneComponentMask);
@@ -643,7 +643,7 @@ mod tests {
     fn test_no_clip_pixel() {
         let mut data = vec![0u8; 16];
         data[5] = 42; // row 1, pixel 1
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AmaskNoClipGray8::new(&rbuf, OneComponentMask);
         assert_eq!(mask.pixel(1, 1), 42);
     }
@@ -654,7 +654,7 @@ mod tests {
         data[0] = 10;
         data[1] = 20;
         data[2] = 30;
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AmaskNoClipGray8::new(&rbuf, OneComponentMask);
 
         let mut dst = vec![0u8; 3];
@@ -666,7 +666,7 @@ mod tests {
     fn test_no_clip_combine_pixel() {
         let mut data = vec![0u8; 16];
         data[0] = 128;
-        let rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 4, 4, 4) };
+        let rbuf = RowAccessor::new_with_buf(&mut data, 4, 4, 4);
         let mask = AmaskNoClipGray8::new(&rbuf, OneComponentMask);
         let result = mask.combine_pixel(0, 0, 200);
         assert_eq!(result, ((255 + 200u32 * 128) >> 8) as u8);

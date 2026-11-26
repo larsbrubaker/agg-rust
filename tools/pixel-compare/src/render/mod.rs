@@ -68,7 +68,7 @@ fn render_simple_line(width: u32, height: u32, _params: &[f64]) -> Vec<u8> {
     let stride = (width * 4) as i32;
     let mut buf = vec![255u8; (width * height * 4) as usize];
     let mut ra = RowAccessor::new();
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    ra.attach(&mut buf, width, height, stride);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));

@@ -2,6 +2,8 @@
 //
 // Provides buffer comparison, BMP I/O, and diff image generation.
 
+#![forbid(unsafe_code)]
+
 use std::fs::File;
 use std::io::{self, Read as IoRead, Write as IoWrite};
 use std::path::Path;

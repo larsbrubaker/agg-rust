@@ -225,12 +225,12 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbaB
 /// Port of C++ `span_image_filter_rgba_bilinear_clip<Source, Interpolator>`.
 pub struct SpanImageFilterRgbaBilinearClip<'a, I> {
     base: SpanImageFilterBase<'a, I>,
-    rbuf: &'a RowAccessor,
+    rbuf: &'a RowAccessor<'a>,
     back_color: Rgba8,
 }
 
 impl<'a, I> SpanImageFilterRgbaBilinearClip<'a, I> {
-    pub fn new(rbuf: &'a RowAccessor, back_color: Rgba8, interpolator: &'a mut I) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>, back_color: Rgba8, interpolator: &'a mut I) -> Self {
         Self {
             base: SpanImageFilterBase::new(interpolator, None),
             rbuf,
@@ -963,10 +963,10 @@ mod tests {
     use crate::image_filters::ImageFilterBilinear;
     use crate::rendering_buffer::RowAccessor;
 
-    fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor {
+    fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor<'_> {
         let stride = width as usize * 4;
         data.resize(stride * height as usize, 0);
-        unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), width, height, stride as i32) }
+        RowAccessor::new_with_buf(data, width, height, stride as i32)
     }
 
     fn set_pixel(data: &mut [u8], width: u32, x: u32, y: u32, rgba: [u8; 4]) {
@@ -979,8 +979,8 @@ mod tests {
     #[test]
     fn test_nn_identity() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 1, 1, [100, 150, 200, 255]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 1, 1, [100, 150, 200, 255]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let trans = TransAffine::new();
@@ -998,10 +998,10 @@ mod tests {
     #[test]
     fn test_nn_multiple_pixels() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 0, 0, [10, 20, 30, 40]);
-        set_pixel(&mut data, 4, 1, 0, [50, 60, 70, 80]);
-        set_pixel(&mut data, 4, 2, 0, [90, 100, 110, 120]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 0, 0, [10, 20, 30, 40]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 0, [50, 60, 70, 80]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 0, [90, 100, 110, 120]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let trans = TransAffine::new();
@@ -1018,8 +1018,8 @@ mod tests {
     #[test]
     fn test_nn_with_translation() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 2, 2, [77, 88, 99, 255]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 2, 2, [77, 88, 99, 255]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         // Translate by (-2, -2): pixel at device (0,0) reads source (2,2)
@@ -1039,12 +1039,12 @@ mod tests {
     fn test_bilinear_integer_position() {
         // At integer positions, bilinear should approximate the pixel value
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
         // Fill a 2x2 region with the same color
-        set_pixel(&mut data, 4, 0, 0, [100, 100, 100, 255]);
-        set_pixel(&mut data, 4, 1, 0, [100, 100, 100, 255]);
-        set_pixel(&mut data, 4, 0, 1, [100, 100, 100, 255]);
-        set_pixel(&mut data, 4, 1, 1, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 0, 0, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 0, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 0, 1, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 1, [100, 100, 100, 255]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let trans = TransAffine::new();
@@ -1061,11 +1061,11 @@ mod tests {
     fn test_bilinear_blend() {
         // 2x2 image: top=white, bottom=black
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(2, 2, &mut data);
-        set_pixel(&mut data, 2, 0, 0, [255, 255, 255, 255]);
-        set_pixel(&mut data, 2, 1, 0, [255, 255, 255, 255]);
-        set_pixel(&mut data, 2, 0, 1, [0, 0, 0, 255]);
-        set_pixel(&mut data, 2, 1, 1, [0, 0, 0, 255]);
+        let mut rbuf = make_rgba_buffer(2, 2, &mut data);
+        set_pixel(rbuf.buf_mut(), 2, 0, 0, [255, 255, 255, 255]);
+        set_pixel(rbuf.buf_mut(), 2, 1, 0, [255, 255, 255, 255]);
+        set_pixel(rbuf.buf_mut(), 2, 0, 1, [0, 0, 0, 255]);
+        set_pixel(rbuf.buf_mut(), 2, 1, 1, [0, 0, 0, 255]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let trans = TransAffine::new();
@@ -1085,11 +1085,11 @@ mod tests {
     #[test]
     fn test_bilinear_clip_in_bounds() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 1, 1, [100, 100, 100, 255]);
-        set_pixel(&mut data, 4, 2, 1, [100, 100, 100, 255]);
-        set_pixel(&mut data, 4, 1, 2, [100, 100, 100, 255]);
-        set_pixel(&mut data, 4, 2, 2, [100, 100, 100, 255]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 1, 1, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 1, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 2, [100, 100, 100, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 2, [100, 100, 100, 255]);
 
         let trans = TransAffine::new();
         let mut interp = SpanInterpolatorLinear::new(trans);
@@ -1138,11 +1138,11 @@ mod tests {
     #[test]
     fn test_2x2_with_bilinear_filter() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 1, 1, [200, 200, 200, 255]);
-        set_pixel(&mut data, 4, 2, 1, [200, 200, 200, 255]);
-        set_pixel(&mut data, 4, 1, 2, [200, 200, 200, 255]);
-        set_pixel(&mut data, 4, 2, 2, [200, 200, 200, 255]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 1, 1, [200, 200, 200, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 1, [200, 200, 200, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 2, [200, 200, 200, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 2, [200, 200, 200, 255]);
 
         let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, true);
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
@@ -1161,11 +1161,11 @@ mod tests {
     #[test]
     fn test_general_with_bilinear_kernel() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 1, 1, [150, 150, 150, 255]);
-        set_pixel(&mut data, 4, 2, 1, [150, 150, 150, 255]);
-        set_pixel(&mut data, 4, 1, 2, [150, 150, 150, 255]);
-        set_pixel(&mut data, 4, 2, 2, [150, 150, 150, 255]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 1, 1, [150, 150, 150, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 1, [150, 150, 150, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 2, [150, 150, 150, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 2, [150, 150, 150, 255]);
 
         let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, true);
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
@@ -1204,11 +1204,11 @@ mod tests {
     #[test]
     fn test_resample_affine_identity() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 1, 1, [120, 130, 140, 255]);
-        set_pixel(&mut data, 4, 2, 1, [120, 130, 140, 255]);
-        set_pixel(&mut data, 4, 1, 2, [120, 130, 140, 255]);
-        set_pixel(&mut data, 4, 2, 2, [120, 130, 140, 255]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 1, 1, [120, 130, 140, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 1, [120, 130, 140, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 1, 2, [120, 130, 140, 255]);
+        set_pixel(rbuf.buf_mut(), 4, 2, 2, [120, 130, 140, 255]);
 
         let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, true);
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
@@ -1249,10 +1249,10 @@ mod tests {
         use crate::span_subdiv_adaptor::SpanSubdivAdaptor;
 
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(8, 8, &mut data);
+        let mut rbuf = make_rgba_buffer(8, 8, &mut data);
         for y in 0..8 {
             for x in 0..8 {
-                set_pixel(&mut data, 8, x, y, [255, 40, 200, 100]);
+                set_pixel(rbuf.buf_mut(), 8, x, y, [255, 40, 200, 100]);
             }
         }
         let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, false);
@@ -1273,8 +1273,8 @@ mod tests {
     #[test]
     fn test_image_source_trait_clip() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 0, 0, [11, 22, 33, 44]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 0, 0, [11, 22, 33, 44]);
 
         let mut acc = ImageAccessorClip::<4>::new(&rbuf, &[0, 0, 0, 0]);
         let p: &[u8] = ImageSource::span(&mut acc, 0, 0, 1);
@@ -1285,8 +1285,8 @@ mod tests {
     #[test]
     fn test_image_source_trait_clone() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_pixel(&mut data, 4, 1, 0, [55, 66, 77, 88]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_pixel(rbuf.buf_mut(), 4, 1, 0, [55, 66, 77, 88]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let p = ImageSource::span(&mut acc, 1, 0, 1);
@@ -1298,9 +1298,9 @@ mod tests {
     fn test_span_generator_trait_compliance() {
         // Verify that the NN filter implements SpanGenerator correctly
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(2, 2, &mut data);
-        set_pixel(&mut data, 2, 0, 0, [10, 20, 30, 255]);
-        set_pixel(&mut data, 2, 1, 0, [40, 50, 60, 255]);
+        let mut rbuf = make_rgba_buffer(2, 2, &mut data);
+        set_pixel(rbuf.buf_mut(), 2, 0, 0, [10, 20, 30, 255]);
+        set_pixel(rbuf.buf_mut(), 2, 1, 0, [40, 50, 60, 255]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let trans = TransAffine::new();

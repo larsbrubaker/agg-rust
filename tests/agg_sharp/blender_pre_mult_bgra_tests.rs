@@ -11,7 +11,8 @@ use agg_rust::pixfmt_rgba::{PixelFormat, PixfmtRgba32Pre};
 fn blend_one(destination: [u8; 4], color: Rgba8, covers: &[u8], cover: u8) -> Rgba8 {
     let mut image = Image::new(1, 1, 4, 0);
     image.bytes.copy_from_slice(&destination);
-    let mut pf = PixfmtRgba32Pre::new(&mut image.rows);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgba32Pre::new(&mut ra);
     pf.blend_color_hspan(0, 0, 1, &[color], covers, cover);
     pf.pixel(0, 0)
 }
@@ -39,7 +40,8 @@ fn straight_alpha_color_saturates_instead_of_wrapping() {
 #[test]
 fn partial_first_cover_for_all_scales_an_opaque_color() {
     let mut image = Image::new(2, 1, 4, 255);
-    let mut pf = PixfmtRgba32Pre::new(&mut image.rows);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgba32Pre::new(&mut ra);
     let colors = [Rgba8::new(200, 100, 50, 255), Rgba8::new(200, 100, 50, 255)];
 
     pf.blend_color_hspan(0, 0, 2, &colors, &[], 128);

@@ -159,12 +159,14 @@ const BPP: usize = 4; // bytes per pixel
 /// accessor and its bounds-checked row slices (`RowAccessor::row_bytes`); the
 /// wrapping formats differ only in their blend arithmetic (lerp vs prelerp).
 struct RgbaRaw<'a> {
-    rbuf: &'a mut RowAccessor,
+    rbuf: RowAccessor<'a>,
 }
 
 impl<'a> RgbaRaw<'a> {
-    fn new(rbuf: &'a mut RowAccessor) -> Self {
-        Self { rbuf }
+    fn new(rbuf: &'a mut RowAccessor<'_>) -> Self {
+        Self {
+            rbuf: rbuf.reborrow(),
+        }
     }
 
     fn width(&self) -> u32 {
@@ -254,7 +256,7 @@ pub struct PixfmtRgba32<'a> {
 }
 
 impl<'a> PixfmtRgba32<'a> {
-    pub fn new(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn new(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self {
             raw: RgbaRaw::new(rbuf),
         }
@@ -466,7 +468,7 @@ pub struct PixfmtRgba32Pre<'a> {
 }
 
 impl<'a> PixfmtRgba32Pre<'a> {
-    pub fn new(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn new(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self {
             raw: RgbaRaw::new(rbuf),
         }
@@ -636,19 +638,16 @@ impl<'a> PixelFormat for PixfmtRgba32Pre<'a> {
 mod tests {
     use super::*;
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * BPP as u32) as i32;
-        let mut buf = vec![0u8; (h * w * BPP as u32) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w * BPP as u32) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_new() {
-        let (_buf, mut ra) = make_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 100, 100);
         let pf = PixfmtRgba32::new(&mut ra);
         assert_eq!(pf.width(), 100);
         assert_eq!(pf.height(), 100);
@@ -656,7 +655,8 @@ mod tests {
 
     #[test]
     fn test_copy_pixel() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let red = Rgba8::new(255, 0, 0, 255);
         pf.copy_pixel(5, 5, &red);
@@ -669,7 +669,8 @@ mod tests {
 
     #[test]
     fn test_copy_hline() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let green = Rgba8::new(0, 255, 0, 255);
         pf.copy_hline(5, 3, 10, &green);
@@ -684,7 +685,8 @@ mod tests {
 
     #[test]
     fn test_blend_pixel_opaque() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let blue = Rgba8::new(0, 0, 255, 255);
         pf.blend_pixel(3, 3, &blue, 255);
@@ -695,7 +697,8 @@ mod tests {
 
     #[test]
     fn test_blend_pixel_semi_transparent() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         // Start with white background
         let white = Rgba8::new(255, 255, 255, 255);
@@ -712,7 +715,8 @@ mod tests {
 
     #[test]
     fn test_blend_hline() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let red = Rgba8::new(255, 0, 0, 255);
         pf.blend_hline(5, 3, 5, &red, 255);
@@ -724,7 +728,8 @@ mod tests {
 
     #[test]
     fn test_blend_solid_hspan() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let green = Rgba8::new(0, 255, 0, 255);
         let covers = [255u8, 128, 64, 0, 255];
@@ -739,7 +744,8 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let white = Rgba8::new(255, 255, 255, 255);
         pf.clear(&white);
@@ -756,7 +762,8 @@ mod tests {
 
     #[test]
     fn test_blend_on_black_background() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         // Blend white at 50% on black
         let white = Rgba8::new(255, 255, 255, 255);
@@ -768,7 +775,8 @@ mod tests {
 
     #[test]
     fn test_blend_preserves_adjacent_pixels() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let red = Rgba8::new(255, 0, 0, 255);
         pf.blend_pixel(5, 5, &red, 255);
@@ -782,7 +790,8 @@ mod tests {
 
     #[test]
     fn test_pixel_read_write_roundtrip() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let c = Rgba8::new(42, 128, 200, 180);
         pf.copy_pixel(7, 3, &c);
@@ -795,7 +804,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan_per_pixel_covers() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let colors = [
             Rgba8::new(255, 0, 0, 255),
@@ -818,7 +828,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan_uniform_cover() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let colors = [Rgba8::new(255, 0, 0, 255), Rgba8::new(0, 255, 0, 255)];
         // Empty covers slice → uniform cover of 255
@@ -831,7 +842,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan_full_cover_opaque() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         let white = Rgba8::new(255, 255, 255, 255);
         pf.clear(&white);
@@ -861,7 +873,8 @@ mod tests {
     ///   q=(50,100,25), a'=100  ->  (56,112,43,255)
     #[test]
     fn test_pre_blend_pixel_cover_folding() {
-        let (_buf, mut ra) = make_buffer(4, 4);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 4, 4);
         let mut pf = PixfmtRgba32Pre::new(&mut ra);
         pf.copy_pixel(1, 1, &Rgba8::new(10, 20, 30, 255));
         pf.blend_pixel(1, 1, &Rgba8::new(100, 200, 50, 200), 128);
@@ -873,7 +886,8 @@ mod tests {
     /// (`c.a == 255 && cover == 255` -> `set`).
     #[test]
     fn test_pre_blend_pixel_opaque_full_cover_is_copy() {
-        let (_buf, mut ra) = make_buffer(4, 4);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 4, 4);
         let mut pf = PixfmtRgba32Pre::new(&mut ra);
         pf.copy_pixel(2, 2, &Rgba8::new(240, 240, 230, 255));
         pf.blend_pixel(2, 2, &Rgba8::new(102, 77, 26, 255), 255);
@@ -885,7 +899,8 @@ mod tests {
     /// early return), regardless of cover.
     #[test]
     fn test_pre_blend_pixel_transparent_is_noop() {
-        let (_buf, mut ra) = make_buffer(4, 4);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 4, 4);
         let mut pf = PixfmtRgba32Pre::new(&mut ra);
         let backdrop = Rgba8::new(17, 34, 51, 255);
         pf.copy_pixel(0, 0, &backdrop);
@@ -901,7 +916,8 @@ mod tests {
     ///   cover 0   -> prelerp(p, 0, 0) == p -> unchanged (240,240,230)
     #[test]
     fn test_pre_blend_solid_hspan_covers_and_zero_noop() {
-        let (_buf, mut ra) = make_buffer(8, 4);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 8, 4);
         let mut pf = PixfmtRgba32Pre::new(&mut ra);
         let backdrop = Rgba8::new(240, 240, 230, 255);
         for x in 0..3 {
@@ -938,7 +954,8 @@ mod tests {
     ///   q=(15,10,5), a'=mult_cover(180,64)=45 -> prelerp -> (15,10,5,255)
     #[test]
     fn test_pre_blend_color_hspan_with_covers_slice() {
-        let (_buf, mut ra) = make_buffer(8, 4);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 8, 4);
         let mut pf = PixfmtRgba32Pre::new(&mut ra);
         let backdrop = Rgba8::new(0, 0, 0, 255);
         pf.copy_pixel(0, 0, &backdrop);
@@ -954,7 +971,8 @@ mod tests {
     ///   prelerp -> (140,70,35,255).
     #[test]
     fn test_pre_blend_color_hspan_full_cover_premultiplied() {
-        let (_buf, mut ra) = make_buffer(8, 4);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 8, 4);
         let mut pf = PixfmtRgba32Pre::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(200, 100, 50, 255));
         let colors = [Rgba8::new(40, 20, 10, 128)];

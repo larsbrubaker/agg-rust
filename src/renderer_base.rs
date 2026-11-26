@@ -642,19 +642,16 @@ mod tests {
 
     const BPP: usize = 4;
 
-    fn make_renderer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_renderer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * BPP as u32) as i32;
-        let mut buf = vec![0u8; (h * w * BPP as u32) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w * BPP as u32) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_new() {
-        let (_buf, mut ra) = make_renderer(100, 80);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 100, 80);
         let pf = PixfmtRgba32::new(&mut ra);
         let ren = RendererBase::new(pf);
         assert_eq!(ren.width(), 100);
@@ -667,7 +664,8 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let (_buf, mut ra) = make_renderer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 10, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let white = Rgba8::new(255, 255, 255, 255);
@@ -679,7 +677,8 @@ mod tests {
 
     #[test]
     fn test_copy_pixel_clipped() {
-        let (_buf, mut ra) = make_renderer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 10, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let red = Rgba8::new(255, 0, 0, 255);
@@ -693,7 +692,8 @@ mod tests {
 
     #[test]
     fn test_blend_hline_clipped() {
-        let (_buf, mut ra) = make_renderer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 20, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let green = Rgba8::new(0, 255, 0, 255);
@@ -706,7 +706,8 @@ mod tests {
 
     #[test]
     fn test_clip_box() {
-        let (_buf, mut ra) = make_renderer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 100, 100);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         assert!(ren.clip_box_i(10, 10, 50, 50));
@@ -718,7 +719,8 @@ mod tests {
 
     #[test]
     fn test_clip_box_invalid() {
-        let (_buf, mut ra) = make_renderer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 100, 100);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         // Clip box entirely outside buffer
@@ -727,7 +729,8 @@ mod tests {
 
     #[test]
     fn test_blend_solid_hspan_clipped() {
-        let (_buf, mut ra) = make_renderer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 20, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let blue = Rgba8::new(0, 0, 255, 255);
@@ -741,7 +744,8 @@ mod tests {
 
     #[test]
     fn test_blend_solid_hspan_fully_clipped() {
-        let (_buf, mut ra) = make_renderer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 20, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let red = Rgba8::new(255, 0, 0, 255);
@@ -754,7 +758,8 @@ mod tests {
 
     #[test]
     fn test_inbox() {
-        let (_buf, mut ra) = make_renderer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 10, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let ren = RendererBase::new(pf);
         assert!(ren.inbox(0, 0));
@@ -766,7 +771,8 @@ mod tests {
 
     #[test]
     fn test_reset_clipping() {
-        let (_buf, mut ra) = make_renderer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 100, 100);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         ren.clip_box_i(10, 10, 50, 50);
@@ -782,7 +788,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan() {
-        let (_buf, mut ra) = make_renderer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 20, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let colors = [
@@ -801,7 +808,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan_clipped_left() {
-        let (_buf, mut ra) = make_renderer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 20, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let colors = [
@@ -822,7 +830,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan_clipped_y() {
-        let (_buf, mut ra) = make_renderer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_renderer(&mut buf, 20, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pf);
         let colors = [Rgba8::new(255, 0, 0, 255)];

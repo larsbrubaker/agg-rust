@@ -1,12 +1,12 @@
-//! Shared helpers for the agg-sharp test ports: an owned RGBA32 image standing in for
-//! agg-sharp's `ImageBuffer` (zeroed, so untouched pixels have alpha 0, as in C#).
+//! Shared helpers for the agg-sharp test ports: an owned RGBA32 image that hands out a
+//! `RowAccessor` over itself, standing in for agg-sharp's `ImageBuffer` (zeroed, so
+//! untouched pixels have alpha 0, as in C#).
 
 use agg_rust::rendering_buffer::RowAccessor;
 
-/// An owned pixel buffer and the row accessor over it.
+/// An owned RGBA32 pixel buffer and its size.
 pub struct Image {
     pub buf: Vec<u8>,
-    pub ra: RowAccessor,
     pub width: u32,
     pub height: u32,
 }
@@ -14,17 +14,21 @@ pub struct Image {
 impl Image {
     /// A `width` x `height` RGBA32 image, every byte 0.
     pub fn new(width: u32, height: u32) -> Self {
-        let mut buf = vec![0u8; (width * height * 4) as usize];
-        let mut ra = RowAccessor::new();
-        // SAFETY: `buf` is owned by the returned value and never reallocated, so the pointer
-        // stays valid for as long as `ra` is used through it.
-        unsafe { ra.attach(buf.as_mut_ptr(), width, height, (width * 4) as i32) };
         Self {
-            buf,
-            ra,
+            buf: vec![0u8; (width * height * 4) as usize],
             width,
             height,
         }
+    }
+
+    /// A row accessor over the image's bytes, borrowing them for its lifetime.
+    pub fn accessor(&mut self) -> RowAccessor<'_> {
+        RowAccessor::new_with_buf(
+            &mut self.buf,
+            self.width,
+            self.height,
+            (self.width * 4) as i32,
+        )
     }
 
     /// The pixel at `x`, `y` as `[r, g, b, a]`.
@@ -54,21 +58,26 @@ impl Image {
     }
 }
 
-/// An owned one-byte-per-pixel gray image and the row accessor over it (agg-sharp's
+/// An owned one-byte-per-pixel gray image and its size (agg-sharp's
 /// `ImageBuffer(w, h, 8, new blender_gray(1))`).
 pub struct GrayImage {
     pub buf: Vec<u8>,
-    pub ra: RowAccessor,
     pub width: u32,
+    pub height: u32,
 }
 
 impl GrayImage {
     pub fn new(width: u32, height: u32) -> Self {
-        let mut buf = vec![0u8; (width * height) as usize];
-        let mut ra = RowAccessor::new();
-        // SAFETY: as in `Image::new`.
-        unsafe { ra.attach(buf.as_mut_ptr(), width, height, width as i32) };
-        Self { buf, ra, width }
+        Self {
+            buf: vec![0u8; (width * height) as usize],
+            width,
+            height,
+        }
+    }
+
+    /// A row accessor over the image's bytes, borrowing them for its lifetime.
+    pub fn accessor(&mut self) -> RowAccessor<'_> {
+        RowAccessor::new_with_buf(&mut self.buf, self.width, self.height, self.width as i32)
     }
 
     pub fn get(&self, x: u32, y: u32) -> u8 {

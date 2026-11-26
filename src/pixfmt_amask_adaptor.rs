@@ -281,12 +281,12 @@ mod tests {
     #[test]
     fn vertical_and_copy_operations_take_the_mask_as_coverage() {
         let mut mbuf = mask_bytes();
-        let mrows = unsafe { RowAccessor::new_with_buf(mbuf.as_mut_ptr(), 2, 3, 2) };
+        let mrows = RowAccessor::new_with_buf(&mut mbuf, 2, 3, 2);
         let black = Rgba8::new(0, 0, 0, 255);
 
         let run = |op: &dyn Fn(&mut PixfmtAmaskAdaptor<PixfmtRgba32, AlphaMaskGray8>)| {
             let mut buf = vec![0u8; 2 * 3 * 4];
-            let mut rows = unsafe { RowAccessor::new_with_buf(buf.as_mut_ptr(), 2, 3, 8) };
+            let mut rows = RowAccessor::new_with_buf(&mut buf, 2, 3, 8);
             {
                 let mut a = PixfmtAmaskAdaptor::new(
                     PixfmtRgba32::new(&mut rows),

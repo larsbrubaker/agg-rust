@@ -24,12 +24,14 @@ const BPP: usize = 1;
 /// returns `a=255`. Blending uses the source color's alpha to interpolate
 /// the gray value.
 pub struct PixfmtGray8<'a> {
-    rbuf: &'a mut RowAccessor,
+    rbuf: RowAccessor<'a>,
 }
 
 impl<'a> PixfmtGray8<'a> {
-    pub fn new(rbuf: &'a mut RowAccessor) -> Self {
-        Self { rbuf }
+    pub fn new(rbuf: &'a mut RowAccessor<'_>) -> Self {
+        Self {
+            rbuf: rbuf.reborrow(),
+        }
     }
 
     /// Row of pixels at `y` as a byte slice (shared, read-only view).
@@ -171,19 +173,16 @@ impl<'a> PixelFormat for PixfmtGray8<'a> {
 mod tests {
     use super::*;
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = w as i32;
-        let mut buf = vec![0u8; (h * w) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_new() {
-        let (_buf, mut ra) = make_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 100, 100);
         let pf = PixfmtGray8::new(&mut ra);
         assert_eq!(pf.width(), 100);
         assert_eq!(pf.height(), 100);
@@ -191,7 +190,8 @@ mod tests {
 
     #[test]
     fn test_copy_pixel() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         let white = Gray8::new(255, 255);
         pf.copy_pixel(5, 5, &white);
@@ -202,7 +202,8 @@ mod tests {
 
     #[test]
     fn test_copy_hline() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         let mid = Gray8::new(128, 255);
         pf.copy_hline(5, 3, 10, &mid);
@@ -216,7 +217,8 @@ mod tests {
 
     #[test]
     fn test_blend_pixel_opaque() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         let c = Gray8::new(200, 255);
         pf.blend_pixel(3, 3, &c, 255);
@@ -226,7 +228,8 @@ mod tests {
 
     #[test]
     fn test_blend_pixel_semitransparent() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         // Start with white background
         let white = Gray8::new(255, 255);
@@ -242,7 +245,8 @@ mod tests {
 
     #[test]
     fn test_blend_hline() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         let c = Gray8::new(100, 255);
         pf.blend_hline(2, 2, 5, &c, 255);
@@ -254,7 +258,8 @@ mod tests {
 
     #[test]
     fn test_blend_solid_hspan() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         let c = Gray8::new(200, 255);
         let covers = [255u8, 128, 64, 0];
@@ -269,7 +274,8 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         pf.clear(&Gray8::new(128, 255));
         let p = pf.pixel(5, 5);
@@ -278,7 +284,8 @@ mod tests {
 
     #[test]
     fn test_pixel_always_opaque() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let pf = PixfmtGray8::new(&mut ra);
         let p = pf.pixel(0, 0);
         assert_eq!(p.a, 255);
@@ -286,7 +293,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_hspan_with_covers() {
-        let (_buf, mut ra) = make_buffer(20, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 10);
         let mut pf = PixfmtGray8::new(&mut ra);
         let colors = [
             Gray8::new(100, 255),

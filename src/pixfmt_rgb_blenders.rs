@@ -105,7 +105,7 @@ impl RgbBlender for BlenderRgbGamma<'_> {
 /// Port of C++ `pixfmt_alpha_blend_rgb<Blender, rendering_buffer>` for
 /// 3-byte RGB pixels (component order R, G, B).
 pub struct PixfmtAlphaBlendRgb<'a, B: RgbBlender> {
-    rbuf: &'a mut RowAccessor,
+    rbuf: RowAccessor<'a>,
     blender: B,
 }
 
@@ -116,21 +116,24 @@ pub type PixfmtRgb24Pre<'a> = PixfmtAlphaBlendRgb<'a, BlenderRgbPre>;
 pub type PixfmtRgb24Gamma<'a, 'g> = PixfmtAlphaBlendRgb<'a, BlenderRgbGamma<'g>>;
 
 impl<'a> PixfmtAlphaBlendRgb<'a, BlenderRgbPre> {
-    pub fn new(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn new(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self::new_with_blender(rbuf, BlenderRgbPre)
     }
 }
 
 impl<'a, 'g> PixfmtAlphaBlendRgb<'a, BlenderRgbGamma<'g>> {
     /// Port of the C++ `pixfmt_rgb24_gamma(rb, g)` constructor.
-    pub fn new_with_gamma(rbuf: &'a mut RowAccessor, gamma: &'g GammaLut) -> Self {
+    pub fn new_with_gamma(rbuf: &'a mut RowAccessor<'_>, gamma: &'g GammaLut) -> Self {
         Self::new_with_blender(rbuf, BlenderRgbGamma::new(gamma))
     }
 }
 
 impl<'a, B: RgbBlender> PixfmtAlphaBlendRgb<'a, B> {
-    pub fn new_with_blender(rbuf: &'a mut RowAccessor, blender: B) -> Self {
-        Self { rbuf, blender }
+    pub fn new_with_blender(rbuf: &'a mut RowAccessor<'_>, blender: B) -> Self {
+        Self {
+            rbuf: rbuf.reborrow(),
+            blender,
+        }
     }
 
     /// The blender (C++ `blender()`).

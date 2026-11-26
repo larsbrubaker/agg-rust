@@ -9,6 +9,7 @@ use agg_rust::color::Rgba8;
 use agg_rust::image_accessors::ImageAccessorClip;
 use agg_rust::image_filters::{ImageFilterBilinear, ImageFilterHanning, ImageFilterLut};
 use agg_rust::renderer_scanline::SpanGenerator;
+use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::span_image_filter_rgba::{SpanImageResampleRgba, SpanImageResampleRgbaAffine};
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::span_interpolator_persp::SpanInterpolatorPerspLerp;
@@ -19,8 +20,9 @@ use agg_rust::trans_affine::TransAffine;
 /// which rounds to 1 where C++ truncates to 0.
 #[test]
 fn affine_resample_rounds_just_over_half() {
-    let image = column_of_ones();
-    let mut acc = clip(&image);
+    let mut image = column_of_ones();
+    let ra = image.accessor();
+    let mut acc = clip(&ra);
     let mut interpolator = SpanInterpolatorLinear::new(TransAffine::new_translation(0.5, 0.0));
     let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, false);
     let mut filter = SpanImageResampleRgbaAffine::new(&mut acc, &mut interpolator, &lut);
@@ -32,8 +34,9 @@ fn affine_resample_rounds_just_over_half() {
 /// subdiv adaptor.
 #[test]
 fn perspective_resample_rounds_just_over_half() {
-    let image = column_of_ones();
-    let mut acc = clip(&image);
+    let mut image = column_of_ones();
+    let ra = image.accessor();
+    let mut acc = clip(&ra);
     let lerp = SpanInterpolatorPerspLerp::new_quad_to_rect(
         &[-0.5, 0.0, 7.5, 0.0, 7.5, 8.0, -0.5, 8.0],
         0.0,
@@ -52,16 +55,17 @@ fn perspective_resample_rounds_just_over_half() {
 #[test]
 fn flat_color_keeps_its_value_shrunk_and_blurred() {
     let flat = Rgba8::new(100, 60, 3, 128);
-    let image = flat_image([100, 60, 3, 128]);
+    let mut image = flat_image([100, 60, 3, 128]);
     let lut = ImageFilterLut::new_with_filter(&ImageFilterHanning, true);
 
-    let mut acc = clip(&image);
+    let ra = image.accessor();
+    let mut acc = clip(&ra);
     let mut interpolator = SpanInterpolatorLinear::new(TransAffine::new_scaling(3.7, 2.2));
     let mut affine = SpanImageResampleRgbaAffine::new(&mut acc, &mut interpolator, &lut);
     affine.resample_base_mut().set_blur(1.5);
     assert_eq!(sample(&mut affine), flat);
 
-    let mut acc = clip(&image);
+    let mut acc = clip(&ra);
     let shrink = SpanInterpolatorPerspLerp::new_quad_to_rect(
         &[0.0, 0.0, 5.0, 0.0, 5.0, 5.0, 0.0, 5.0],
         0.0,
@@ -78,8 +82,9 @@ fn flat_color_keeps_its_value_shrunk_and_blurred() {
 /// C++ treats the source as premultiplied: a channel above alpha comes out at alpha.
 #[test]
 fn color_above_alpha_is_clamped_to_alpha() {
-    let image = flat_image([255, 40, 200, 100]);
-    let mut acc = clip(&image);
+    let mut image = flat_image([255, 40, 200, 100]);
+    let ra = image.accessor();
+    let mut acc = clip(&ra);
     let mut interpolator = SpanInterpolatorLinear::new(TransAffine::new());
     let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, false);
     let mut filter = SpanImageResampleRgbaAffine::new(&mut acc, &mut interpolator, &lut);
@@ -87,8 +92,8 @@ fn color_above_alpha_is_clamped_to_alpha() {
     assert_eq!(sample(&mut filter), Rgba8::new(100, 40, 100, 100));
 }
 
-fn clip(image: &Image) -> ImageAccessorClip<'_, 4> {
-    ImageAccessorClip::<4>::new(&image.ra, &[0, 0, 0, 0])
+fn clip<'a>(ra: &'a RowAccessor<'a>) -> ImageAccessorClip<'a, 4> {
+    ImageAccessorClip::<4>::new(ra, &[0, 0, 0, 0])
 }
 
 fn flat_image(color: [u8; 4]) -> Image {

@@ -187,12 +187,12 @@ impl<S: ImageSource, I: SpanInterpolator> SpanGenerator for SpanImageFilterRgbBi
 /// Port of C++ `span_image_filter_rgb_bilinear_clip<Source, Interpolator>`.
 pub struct SpanImageFilterRgbBilinearClip<'a, I> {
     base: SpanImageFilterBase<'a, I>,
-    rbuf: &'a RowAccessor,
+    rbuf: &'a RowAccessor<'a>,
     back_color: Rgba8,
 }
 
 impl<'a, I> SpanImageFilterRgbBilinearClip<'a, I> {
-    pub fn new(rbuf: &'a RowAccessor, back_color: Rgba8, interpolator: &'a mut I) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>, back_color: Rgba8, interpolator: &'a mut I) -> Self {
         Self {
             base: SpanImageFilterBase::new(interpolator, None),
             rbuf,

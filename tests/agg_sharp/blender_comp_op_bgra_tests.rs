@@ -180,7 +180,8 @@ fn blend_matches_cpp_agg() {
     for (op, d, s, cover, e) in BLEND_CASES {
         let mut image = Image::new(1, 1, 4, 0);
         image.bytes.copy_from_slice(&d);
-        let mut pf = PixfmtRgba32CompOp::new_with_op(&mut image.rows, op);
+        let mut ra = image.accessor();
+        let mut pf = PixfmtRgba32CompOp::new_with_op(&mut ra, op);
 
         pf.blend_pixel(
             0,
@@ -202,7 +203,8 @@ fn blend_matches_cpp_agg() {
 #[test]
 fn blend_pixels_uses_the_operator_and_each_cover() {
     let mut image = Image::new(2, 1, 4, 255);
-    let mut pf = PixfmtRgba32CompOp::new_with_op(&mut image.rows, CompOp::Difference);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgba32CompOp::new_with_op(&mut ra, CompOp::Difference);
     let colors = [Rgba8::new(0, 0, 255, 255), Rgba8::new(0, 0, 255, 255)];
 
     pf.blend_color_hspan(0, 0, 2, &colors, &[255, 0], 255);

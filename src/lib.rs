@@ -26,8 +26,8 @@
 //! and documents the difference. No safe function reaches undefined behavior,
 //! whatever its arguments: where C++ AGG leaves a precondition unchecked, agg-rust
 //! checks it and an out-of-range argument panics. The library is written in safe
-//! Rust and denies `unsafe_code`; the few `unsafe` uses that remain from the port
-//! are tested under Miri and are being removed.
+//! Rust and forbids `unsafe_code`: a pixel buffer is a borrowed `&mut [u8]`
+//! ([`rendering_buffer::RowAccessor`]), checked against its geometry when attached.
 //!
 //! ## Architecture
 //!
@@ -39,11 +39,10 @@
 //! 4. **Scanline Container** — stores coverage data between stages
 //! 5. **Renderer** — blends pixels into the output buffer
 
-// The library is safe Rust: no new `unsafe` code (CLAUDE.md, Project Phase). The uses that
-// remain from the port each carry an `#[expect(unsafe_code, reason = "...")]` and are open
-// work to remove (PORTING_PLAN.md); once they are gone this becomes `forbid`. Unit tests are
-// exempt only because they attach buffers through the `unsafe fn RowAccessor::new_with_buf`.
-#![cfg_attr(not(test), deny(unsafe_code))]
+// The library is safe Rust: its code, unit tests included, has no `unsafe` (CLAUDE.md,
+// Project Phase). `forbid` rather than `deny`, so no `allow` or `expect` attribute anywhere in
+// the crate can re-enable it.
+#![forbid(unsafe_code)]
 
 // Phase 1: Foundation Types & Math
 pub mod array;

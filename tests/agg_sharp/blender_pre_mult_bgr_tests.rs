@@ -11,7 +11,8 @@ use agg_rust::pixfmt_rgba::PixelFormat;
 #[test]
 fn partial_cover_scales_an_opaque_color() {
     let mut image = Image::new(1, 1, 3, 255);
-    let mut pf = PixfmtRgb24Pre::new(&mut image.rows);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Pre::new(&mut ra);
 
     pf.blend_color_hspan(0, 0, 1, &[Rgba8::new(200, 100, 50, 255)], &[128], 255);
 
@@ -22,7 +23,8 @@ fn partial_cover_scales_an_opaque_color() {
 #[test]
 fn partial_first_cover_for_all_scales_an_opaque_color() {
     let mut image = Image::new(2, 1, 3, 255);
-    let mut pf = PixfmtRgb24Pre::new(&mut image.rows);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Pre::new(&mut ra);
     let colors = [Rgba8::new(200, 100, 50, 255), Rgba8::new(200, 100, 50, 255)];
 
     // agg-sharp's firstCoverForAll is C++'s null covers with one uniform cover.
@@ -36,7 +38,8 @@ fn partial_first_cover_for_all_scales_an_opaque_color() {
 #[test]
 fn straight_alpha_color_saturates_instead_of_wrapping() {
     let mut image = Image::new(1, 1, 3, 255);
-    let mut pf = PixfmtRgb24Pre::new(&mut image.rows);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Pre::new(&mut ra);
 
     pf.blend_pixel(0, 0, &Rgba8::new(255, 0, 0, 128), 255);
 

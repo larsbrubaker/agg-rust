@@ -19,7 +19,8 @@ fn black() -> Rgba8 {
 fn marker_left_of_the_clip_box_draws_its_visible_part() {
     let mut image = Image::new(10, 10);
     {
-        let mut ren = RendererBase::new(PixfmtRgba32::new(&mut image.ra));
+        let mut ra = image.accessor();
+        let mut ren = RendererBase::new(PixfmtRgba32::new(&mut ra));
         let mut markers = RendererMarkers::new(&mut ren);
         markers.set_line_color(black());
         markers.set_fill_color(black());
@@ -37,7 +38,8 @@ fn marker_left_of_the_clip_box_draws_its_visible_part() {
 #[test]
 fn rust_only_visible_uses_the_marker_box_not_x_plus_y() {
     let mut image = Image::new(10, 10);
-    let mut ren = RendererBase::new(PixfmtRgba32::new(&mut image.ra));
+    let mut ra = image.accessor();
+    let mut ren = RendererBase::new(PixfmtRgba32::new(&mut ra));
     let markers = RendererMarkers::new(&mut ren);
 
     assert!(markers.visible(-2, 0, 4));

@@ -23,9 +23,11 @@ fn blend_solid_hspan_leaves_the_callers_covers_alone() {
     mask.set(1, 0, 128);
     let mut destination = Image::new(4, 1);
     {
+        let mut destination_ra = destination.accessor();
+        let mask_ra = mask.accessor();
         let mut adaptor = PixfmtAmaskAdaptor::new(
-            PixfmtRgba32::new(&mut destination.ra),
-            AlphaMaskGray8::new(&mask.ra, OneComponentMask),
+            PixfmtRgba32::new(&mut destination_ra),
+            AlphaMaskGray8::new(&mask_ra, OneComponentMask),
         );
 
         let covers: [u8; 5] = [7, 255, 255, 255, 9];
@@ -51,9 +53,11 @@ fn pixels_vlines_and_color_spans_are_masked_and_clipped() {
     let mut destination = Image::new(3, 3);
     let covers: [u8; 3] = [255, 255, 255];
     {
+        let mut destination_ra = destination.accessor();
+        let mask_ra = mask.accessor();
         let mut target = RendererBase::new(PixfmtAmaskAdaptor::new(
-            PixfmtRgba32::new(&mut destination.ra),
-            AmaskNoClipGray8::new(&mask.ra, OneComponentMask),
+            PixfmtRgba32::new(&mut destination_ra),
+            AmaskNoClipGray8::new(&mask_ra, OneComponentMask),
         ));
 
         target.blend_pixel(0, 0, &black(), 255);

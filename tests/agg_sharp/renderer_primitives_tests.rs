@@ -11,7 +11,8 @@ const LINE: [u8; 4] = [255, 0, 0, 255];
 const FILL: [u8; 4] = [0, 0, 255, 255];
 
 fn draw(image: &mut Image, f: impl FnOnce(&mut RendererPrimitives<PixfmtRgba32>)) {
-    let mut ren = RendererBase::new(PixfmtRgba32::new(&mut image.ra));
+    let mut ra = image.accessor();
+    let mut ren = RendererBase::new(PixfmtRgba32::new(&mut ra));
     let mut primitives = RendererPrimitives::new(&mut ren);
     primitives.set_line_color(Rgba8::new(255, 0, 0, 255));
     primitives.set_fill_color(Rgba8::new(0, 0, 255, 255));

@@ -853,7 +853,7 @@ fn blur_subrect(
     let original = sub.clone();
     let mut sub_ra = RowAccessor::new();
     let sub_stride = (sub_w * 4) as i32;
-    unsafe { sub_ra.attach(sub.as_mut_ptr(), sub_w, sub_h, sub_stride) };
+    sub_ra.attach(&mut sub, sub_w, sub_h, sub_stride);
 
     match method {
         0 => {
@@ -966,7 +966,17 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let t0 = std::time::Instant::now();
         if method != 2 || channel_r || channel_g || channel_b {
             blur_subrect(
-                &mut buf, width, height, bx1, by1, bx2, by2, radius, method, channel_r, channel_g,
+                ra.buf_mut(),
+                width,
+                height,
+                bx1,
+                by1,
+                bx2,
+                by2,
+                radius,
+                method,
+                channel_r,
+                channel_g,
                 channel_b,
             );
         }
@@ -976,9 +986,7 @@ pub fn blur_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
     }
 
-    // Re-attach and continue drawing after direct buffer edits.
-    let stride = (width * 4) as i32;
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    // A fresh pixel format to continue drawing after the direct buffer edits.
     let pf2 = PixfmtRgba32::new(&mut ra);
     let mut rb2 = RendererBase::new(pf2);
 
@@ -1822,7 +1830,7 @@ pub fn distortions(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
     let mut img_ra = RowAccessor::new();
-    unsafe { img_ra.attach(spheres.as_mut_ptr(), img_w, img_h, (img_w * 4) as i32) };
+    img_ra.attach(&mut spheres, img_w, img_h, (img_w * 4) as i32);
 
     let angle_rad = angle * std::f64::consts::PI / 180.0;
 

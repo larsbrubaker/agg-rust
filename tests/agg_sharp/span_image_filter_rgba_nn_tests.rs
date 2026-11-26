@@ -14,16 +14,18 @@ use agg_rust::trans_affine::TransAffine;
 /// Sampling left of the image through a clamp accessor gives the row's first pixel.
 #[test]
 fn outside_the_image_reads_the_clamped_edge() {
-    let image = gradient();
-    let mut accessor = ImageAccessorClone::<4>::new(&image.ra);
+    let mut image = gradient();
+    let ra = image.accessor();
+    let mut accessor = ImageAccessorClone::<4>::new(&ra);
     assert_eq!(sample(&mut accessor, -10.0, 0.0, 3, 2), pixel(&image, 0, 2));
 }
 
 /// Sampling right of and below the image through a clip accessor gives its background color.
 #[test]
 fn outside_the_image_reads_the_clip_background() {
-    let image = gradient();
-    let mut accessor = ImageAccessorClip::<4>::new(&image.ra, &[9, 8, 7, 6]);
+    let mut image = gradient();
+    let ra = image.accessor();
+    let mut accessor = ImageAccessorClip::<4>::new(&ra, &[9, 8, 7, 6]);
     assert_eq!(
         sample(&mut accessor, 10.0, -10.0, 1, 1),
         Rgba8::new(9, 8, 7, 6)
@@ -33,8 +35,9 @@ fn outside_the_image_reads_the_clip_background() {
 /// Inside the image the nearest pixel comes through unchanged.
 #[test]
 fn inside_the_image_reads_the_pixel() {
-    let image = gradient();
-    let mut accessor = ImageAccessorClone::<4>::new(&image.ra);
+    let mut image = gradient();
+    let ra = image.accessor();
+    let mut accessor = ImageAccessorClone::<4>::new(&ra);
     assert_eq!(sample(&mut accessor, 1.0, 1.0, 2, 1), pixel(&image, 3, 2));
 }
 

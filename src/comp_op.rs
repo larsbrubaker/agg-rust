@@ -895,20 +895,23 @@ const BPP: usize = 4;
 /// Wraps a `RowAccessor` and stores the current compositing operation.
 /// All blending is dispatched through `comp_op_blend()`.
 pub struct PixfmtRgba32CompOp<'a> {
-    rbuf: &'a mut RowAccessor,
+    rbuf: RowAccessor<'a>,
     comp_op: CompOp,
 }
 
 impl<'a> PixfmtRgba32CompOp<'a> {
-    pub fn new(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn new(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self {
-            rbuf,
+            rbuf: rbuf.reborrow(),
             comp_op: CompOp::SrcOver,
         }
     }
 
-    pub fn new_with_op(rbuf: &'a mut RowAccessor, op: CompOp) -> Self {
-        Self { rbuf, comp_op: op }
+    pub fn new_with_op(rbuf: &'a mut RowAccessor<'_>, op: CompOp) -> Self {
+        Self {
+            rbuf: rbuf.reborrow(),
+            comp_op: op,
+        }
     }
 
     pub fn comp_op(&self) -> CompOp {
@@ -1082,14 +1085,10 @@ mod tests {
     use super::*;
     use crate::rendering_buffer::RowAccessor;
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * 4) as i32;
-        let mut buf = vec![0u8; (h * w * 4) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w * 4) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
@@ -1099,7 +1098,8 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // Set a pixel first
         pf.copy_pixel(5, 5, &Rgba8::new(255, 0, 0, 255));
@@ -1116,7 +1116,8 @@ mod tests {
 
     #[test]
     fn test_src() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(100, 100, 100, 255));
 
@@ -1132,7 +1133,8 @@ mod tests {
 
     #[test]
     fn test_dst_is_noop() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(42, 43, 44, 200));
 
@@ -1147,7 +1149,8 @@ mod tests {
 
     #[test]
     fn test_src_over_opaque() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(100, 100, 100, 255));
 
@@ -1163,7 +1166,8 @@ mod tests {
 
     #[test]
     fn test_src_over_semitransparent() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(0, 0, 0, 255));
 
@@ -1178,7 +1182,8 @@ mod tests {
 
     #[test]
     fn test_multiply_mode() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // White background
         pf.copy_pixel(0, 0, &Rgba8::new(255, 255, 255, 255));
@@ -1192,7 +1197,8 @@ mod tests {
 
     #[test]
     fn test_screen_mode() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // Black background
         pf.copy_pixel(0, 0, &Rgba8::new(0, 0, 0, 255));
@@ -1206,7 +1212,8 @@ mod tests {
 
     #[test]
     fn test_xor_mode() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // Fully opaque red
         pf.copy_pixel(0, 0, &Rgba8::new(255, 0, 0, 255));
@@ -1221,7 +1228,8 @@ mod tests {
 
     #[test]
     fn test_blend_hline() {
-        let (_buf, mut ra) = make_buffer(20, 1);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 1);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.set_comp_op(CompOp::SrcOver);
         let red = Rgba8::new(255, 0, 0, 255);
@@ -1236,7 +1244,8 @@ mod tests {
 
     #[test]
     fn test_blend_solid_hspan() {
-        let (_buf, mut ra) = make_buffer(10, 1);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 1);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.set_comp_op(CompOp::SrcOver);
         let green = Rgba8::new(0, 255, 0, 255);
@@ -1279,7 +1288,8 @@ mod tests {
             CompOp::Difference,
             CompOp::Exclusion,
         ];
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         let c = Rgba8::new(128, 64, 32, 200);
         // Set some background
@@ -1292,7 +1302,8 @@ mod tests {
 
     #[test]
     fn test_difference_mode() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // White opaque background
         pf.copy_pixel(0, 0, &Rgba8::new(255, 255, 255, 255));
@@ -1308,7 +1319,8 @@ mod tests {
 
     #[test]
     fn test_plus_saturates() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(200, 200, 200, 255));
 
@@ -1340,7 +1352,8 @@ mod tests {
     ///   alpha unchanged: 200.
     #[test]
     fn rust_only_src_atop_blends_blue_with_destination_blue() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // Premultiplied buffer bytes written directly (green 200 vs blue 40).
         pf.copy_pixel(0, 0, &Rgba8::new(10, 200, 40, 200));
@@ -1361,7 +1374,8 @@ mod tests {
     /// Dca' = Sa.Da + Dca.(1 - Sa) = 1: white stays white.
     #[test]
     fn rust_only_color_burn_black_over_white_stays_white() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         pf.copy_pixel(0, 0, &Rgba8::new(255, 255, 255, 255));
 
@@ -1388,7 +1402,8 @@ mod tests {
     ///     g,b < a => unchanged        -> from_double(10/255) = 10
     #[test]
     fn test_minus_clip_clamps_rgb_to_alpha() {
-        let (_buf, mut ra) = make_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32CompOp::new(&mut ra);
         // Deliberately not premul-valid: red (250) > alpha (40).
         pf.copy_pixel(0, 0, &Rgba8::new(250, 10, 10, 40));

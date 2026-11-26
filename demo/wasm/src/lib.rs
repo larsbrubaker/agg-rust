@@ -1,3 +1,7 @@
+// The demos are safe Rust like the library they show; `#[wasm_bindgen]`'s generated
+// glue comes from an external macro, which this lint does not inspect.
+#![forbid(unsafe_code)]
+
 use wasm_bindgen::prelude::*;
 
 mod lion_data;

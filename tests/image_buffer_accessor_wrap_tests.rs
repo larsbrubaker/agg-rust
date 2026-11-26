@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Port of agg-sharp `ImageBufferAccessorWrapTests` (Tests/Agg.Tests/Agg).
 //!
 //! `ImageAccessorWrap` is C++'s `image_accessor_wrap`: reads past any edge
@@ -53,7 +54,7 @@ fn spans_read_the_wrapped_pixels() {
             pixels[at + 1] = y as u8;
         }
     }
-    let rbuf = unsafe { RowAccessor::new_with_buf(pixels.as_mut_ptr(), w, h, (w * 4) as i32) };
+    let rbuf = RowAccessor::new_with_buf(&mut pixels, w, h, (w * 4) as i32);
     let mut accessor = ImageAccessorWrap::<4, WrapModeRepeat, WrapModeReflect>::new(&rbuf);
 
     let p = accessor.span(-1, 2, 3);

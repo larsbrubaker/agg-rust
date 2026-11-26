@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Bounds of the image accessors.
 //!
 //! `span`, `next_x` and `next_y` are safe fns, so no sequence of calls may read outside the
@@ -16,18 +17,9 @@
 //! walked, whatever `len` is. C++'s accessors do no such checking; the Rust ones document
 //! that deliberate divergence.
 //!
-//! Natively each image sits in a `Vec` between guard bytes, and padded rows carry padding
-//! bytes, so a read past a row or past the image returns bytes no pixel holds instead of
-//! reaching memory the test does not own. Under Miri the guards are empty (`GUARD` is 0) and
-//! the `Vec` is exactly the attached rows (padding included, as it is part of them): the
-//! accessor's pointer then has provenance over the image alone, so a read or a pointer offset
-//! past it is an out-of-bounds access Miri reports as undefined behaviour. With guards it
-//! would be a legal in-allocation access Miri cannot see, and only the value comparison
-//! would stand guard.
-//!
-//! Under Miri the grids are cut down (`cfg!(miri)`) so the file runs in about a minute; each
-//! reduced grid says why it still covers every class of call the full one does. Natively the
-//! full grids run.
+//! Each image is a `Vec` of exactly the attached rows. Padded rows carry padding bytes no
+//! pixel holds, so a read that strays past a row's last pixel within the stride shows up as a
+//! wrong value; a read past the attached bytes panics, which fails the test as well.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -46,20 +38,17 @@ use agg_rust::span_image_filter_rgba::SpanImageResampleRgbaAffine;
 use agg_rust::span_interpolator_linear::SpanInterpolatorLinear;
 use agg_rust::trans_affine::TransAffine;
 
-const SENTINEL: u8 = 0xA5;
 const PADDING: u8 = 0x77;
-/// Guard bytes on each side of an image: none under Miri (see the module doc).
-const GUARD: usize = if cfg!(miri) { 0 } else { 256 };
 const W: u32 = 5;
 const H: u32 = 3;
 const BPP: usize = 4;
 const ROW: usize = W as usize * BPP;
 /// `ImageAccessorClip`'s background: no pixel's bytes (byte 0 of a pixel has a low nibble of
-/// at most 9 here), nor `SENTINEL` or `PADDING`.
+/// at most 9 here), nor `PADDING`.
 const BK: [u8; 4] = [0x0F, 0x1F, 0x2F, 0x3F];
 
 /// A pixel of up to 4 bytes, zero-filled past its width, so results compare without
-/// allocating (Miri runs these tests).
+/// allocating.
 type Px = [u8; 4];
 
 fn px(p: &[u8]) -> Px {
@@ -69,9 +58,8 @@ fn px(p: &[u8]) -> Px {
 }
 
 /// An image of `width` x `height` pixels of `bpp` bytes stored with `stride` (positive:
-/// top-down; negative: bottom-up), between two `GUARD`-byte runs of `SENTINEL` (empty under
-/// Miri, where `guards_intact` is then trivially true and Miri itself checks bounds).
-struct Guarded {
+/// top-down; negative: bottom-up), `height * |stride|` bytes in all.
+struct Image {
     mem: Vec<u8>,
     bpp: usize,
     width: u32,
@@ -79,21 +67,17 @@ struct Guarded {
     stride: i32,
 }
 
-impl Guarded {
+impl Image {
     /// A `W` x `H` RGBA image.
     fn new(stride: i32) -> Self {
         Self::with(BPP, W, H, stride)
     }
 
     /// Pixel bytes are the first `bpp` of `expected_bytes(x, y)`: unique per pixel (byte 0
-    /// alone is), never `SENTINEL`, `PADDING` or `BK`. Rows too long for the stride stay
-    /// `PADDING`.
+    /// alone is), never `PADDING` or `BK`. Rows too long for the stride stay `PADDING`.
     fn with(bpp: usize, width: u32, height: u32, stride: i32) -> Self {
-        let region = stride.unsigned_abs() as usize * height as usize;
-        let mut mem = vec![SENTINEL; GUARD * 2 + region];
-        mem[GUARD..GUARD + region].fill(PADDING);
         let mut g = Self {
-            mem,
+            mem: vec![PADDING; stride.unsigned_abs() as usize * height as usize],
             bpp,
             width,
             height,
@@ -119,21 +103,11 @@ impl Guarded {
         } else {
             (self.height as i32 - 1 - y) as usize
         };
-        GUARD + row * abs + x as usize * self.bpp
+        row * abs + x as usize * self.bpp
     }
 
-    fn attach(&mut self) -> RowAccessor {
-        // SAFETY: `mem[GUARD..]` holds `height * |stride|` bytes, with the lowest address
-        // first as `attach` expects for a negative stride, and outlives the accessor; nothing
-        // writes `mem` while the accessor is used.
-        unsafe {
-            RowAccessor::new_with_buf(
-                self.mem.as_mut_ptr().add(GUARD),
-                self.width,
-                self.height,
-                self.stride,
-            )
-        }
+    fn attach(&mut self) -> RowAccessor<'_> {
+        RowAccessor::new_with_buf(&mut self.mem, self.width, self.height, self.stride)
     }
 
     /// Pixel (x, y) from the raw bytes; both must be inside the image.
@@ -157,12 +131,6 @@ impl Guarded {
         } else {
             px(&BK[..self.bpp])
         }
-    }
-
-    fn guards_intact(&self) -> bool {
-        let region = self.mem.len() - GUARD * 2;
-        let (before, rest) = self.mem.split_at(GUARD);
-        before.iter().chain(&rest[region..]).all(|&b| b == SENTINEL)
     }
 }
 
@@ -224,7 +192,7 @@ enum Kind {
 }
 
 impl Kind {
-    fn accessor<'a, const N: usize>(self, ra: &'a RowAccessor) -> Box<dyn ImageSource + 'a> {
+    fn accessor<'a, const N: usize>(self, ra: &'a RowAccessor<'_>) -> Box<dyn ImageSource + 'a> {
         match self {
             Kind::Clone => Box::new(ImageAccessorClone::<N>::new(ra)),
             Kind::Clip => Box::new(ImageAccessorClip::<N>::new(ra, &BK)),
@@ -248,7 +216,7 @@ impl Kind {
     }
 
     /// The pixel the accessor must return at (x, y).
-    fn expected(self, g: &Guarded, x: i64, y: i64) -> Px {
+    fn expected(self, g: &Image, x: i64, y: i64) -> Px {
         let wrapped = |fx: Fold, fy: Fold| g.at(fx.apply(x, g.width), fy.apply(y, g.height));
         match self {
             Kind::Clone => g.clamped(x, y),
@@ -264,11 +232,11 @@ const BOUNDED: [Kind; 2] = [Kind::Clone, Kind::Clip];
 
 /// A span on the last row, then far more `next_x` steps than `len`: once past the row's last
 /// pixel each step returns the accessor's meaning there (the edge pixel for Clone, the
-/// background for Clip), never the guard bytes after the image.
+/// background for Clip), never the bytes after the row.
 #[test]
 fn next_x_past_the_span_on_the_last_row_keeps_the_meaning() {
     for kind in BOUNDED {
-        let mut g = Guarded::new(ROW as i32);
+        let mut g = Image::new(ROW as i32);
         let ra = g.attach();
         let y = H as i32 - 1;
         let mut got = Vec::new();
@@ -288,7 +256,6 @@ fn next_x_past_the_span_on_the_last_row_keeps_the_meaning() {
                 "{kind:?}: span({x}, {y}, {len}) then {i} next_x"
             );
         }
-        assert!(g.guards_intact());
     }
 }
 
@@ -297,7 +264,7 @@ fn next_x_past_the_span_on_the_last_row_keeps_the_meaning() {
 #[test]
 fn span_at_width_with_zero_len_keeps_the_meaning() {
     for kind in BOUNDED {
-        let mut g = Guarded::new(ROW as i32);
+        let mut g = Image::new(ROW as i32);
         let ra = g.attach();
         let mut got = Vec::new();
         for y in 0..H as i32 {
@@ -319,7 +286,7 @@ fn span_at_width_with_zero_len_keeps_the_meaning() {
 #[test]
 fn huge_len_keeps_the_meaning() {
     for kind in BOUNDED {
-        let mut g = Guarded::new(ROW as i32);
+        let mut g = Image::new(ROW as i32);
         let ra = g.attach();
         let mut got = Vec::new();
         for len in [u32::MAX, i32::MAX as u32, i32::MAX as u32 + 1] {
@@ -358,7 +325,7 @@ fn huge_len_keeps_the_meaning() {
 fn clone_stride_shorter_than_the_row_panics() {
     let short = 2 * BPP as i32;
     for stride in [short, -short] {
-        let mut g = Guarded::new(stride);
+        let mut g = Image::new(stride);
         let ra = g.attach();
         let expect = format!("row of {ROW} bytes does not fit in stride {stride}");
         for (x, y, len) in [
@@ -378,7 +345,6 @@ fn clone_stride_shorter_than_the_row_panics() {
                 "stride {stride}: span({x}, {y}, {len})"
             );
         }
-        assert!(g.guards_intact());
     }
 }
 
@@ -390,7 +356,7 @@ fn clone_stride_shorter_than_the_row_panics() {
 fn clip_stride_shorter_than_the_row_panics_inside_the_image() {
     let short = 2 * BPP as i32;
     for stride in [short, -short] {
-        let mut g = Guarded::new(stride);
+        let mut g = Image::new(stride);
         let ra = g.attach();
         let expect = format!("row of {ROW} bytes does not fit in stride {stride}");
         for (x, y, len) in [(0, 0, 1), (3, H as i32 - 1, 2), (W as i32 - 1, 1, 1)] {
@@ -421,7 +387,6 @@ fn clip_stride_shorter_than_the_row_panics_inside_the_image() {
             Some(expect.as_str()),
             "stride {stride}: next_x into the image"
         );
-        assert!(g.guards_intact());
     }
 }
 
@@ -430,7 +395,7 @@ fn clip_stride_shorter_than_the_row_panics_inside_the_image() {
 #[test]
 fn next_y_past_the_bottom_row_keeps_the_meaning() {
     for kind in BOUNDED {
-        let mut g = Guarded::new(ROW as i32);
+        let mut g = Image::new(ROW as i32);
         let ra = g.attach();
         let y0 = H as i32 - 2;
         let mut got = Vec::new();
@@ -463,89 +428,48 @@ struct Grid {
 }
 
 impl Grid {
-    /// The grid for the bounded accessors on a `width` x `height` image.
+    /// The grid for the bounded accessors on a `width` x `height` image: every start from 3
+    /// pixels left of the image to 3 past it, every row from 2 above to 2 below, lengths
+    /// around every edge and past `i32`, and walks from each start down past the bottom and
+    /// right past the row.
     ///
-    /// Natively: every start from 3 pixels left of the image to 3 past it, every row from 2
-    /// above to 2 below, lengths around every edge and past `i32`, and walks from each start
-    /// down past the bottom and right past the row.
-    ///
-    /// Under Miri, one start per class instead: x left of the image (-1), the first pixel
-    /// (0), an interior pixel (1), the last pixel (width - 1) and one past it (width); y above
-    /// the image (-1), the first row, the last row and one below it; lengths 0 (with x = width:
-    /// `span(width, y, 0)`), 1 (with x = width - 1: a fast path that fits exactly at the last
-    /// pixel), `width` (fits exactly from x = 0, one too long from x = 1, so the slow path),
-    /// and the overflowing `u32::MAX` and `2^31`. Two rows cover `next_y` within the image
-    /// (from row 0) and past the bottom (from the last row); `width + 2` pixels per row walk
-    /// two steps off the row from x = 0, which falls off the fast path and then steps the
-    /// slow path once more.
-    ///
-    /// On a narrow image some of these coincide (at width 1 the first pixel is the last, and
-    /// "interior" is one past it); the duplicates are dropped, so they cost nothing.
+    /// On a narrow image some lengths coincide (at width 1, `width - 1`, `width` and
+    /// `width + 1` are 0, 1 and 2); the duplicates are dropped, so they cost nothing.
     fn bounded(width: u32, height: u32) -> Self {
-        let mut grid = Self::bounded_with_duplicates(width, height);
-        for v in [&mut grid.xs, &mut grid.ys] {
-            v.sort_unstable();
-            v.dedup();
-        }
-        grid.lens.sort_unstable();
-        grid.lens.dedup();
-        grid
-    }
-
-    fn bounded_with_duplicates(width: u32, height: u32) -> Self {
         let (w, h) = (width as i32, height as i32);
-        if cfg!(miri) {
-            Grid {
-                xs: vec![-1, 0, 1, w - 1, w],
-                ys: vec![-1, 0, h - 1, h],
-                lens: vec![0, 1, width, u32::MAX, 1 << 31],
-                rows: 2,
-                cols: w + 2,
-            }
-        } else {
-            Grid {
-                xs: (-3..w + 3).collect(),
-                ys: (-2..h + 2).collect(),
-                lens: vec![
-                    0,
-                    1,
-                    2,
-                    width - 1,
-                    width,
-                    width + 1,
-                    u32::MAX,
-                    i32::MAX as u32,
-                    1 << 31,
-                ],
-                rows: h + 2,
-                cols: w + 3,
-            }
+        let mut lens = vec![
+            0,
+            1,
+            2,
+            width - 1,
+            width,
+            width + 1,
+            u32::MAX,
+            i32::MAX as u32,
+            1 << 31,
+        ];
+        lens.sort_unstable();
+        lens.dedup();
+        Grid {
+            xs: (-3..w + 3).collect(),
+            ys: (-2..h + 2).collect(),
+            lens,
+            rows: h + 2,
+            cols: w + 3,
         }
     }
 
     /// The grid for the wrapping accessors: starts more than a period (two for reflect) to
     /// each side, and walks of more than two periods each way, so every wrap point is crossed
-    /// by `next_x` and `next_y` both. `len` means nothing to them. Under Miri the starts are
-    /// one per period (and 0) instead of every one, keeping the full walks, which are what
-    /// cross the wrap points.
+    /// by `next_x` and `next_y` both. `len` means nothing to them.
     fn wrapped(width: u32, height: u32) -> Self {
         let (w, h) = (width as i32, height as i32);
-        if cfg!(miri) {
-            Grid {
-                xs: vec![-2 * w - 1, -1, 0, w - 1, 2 * w],
-                ys: vec![-2 * h - 1, 0, h],
-                lens: vec![1],
-                rows: 2 * h + 2,
-                cols: 2 * w + 2,
-            }
-        } else {
-            Grid {
-                xs: (-2 * w - 1..2 * w + 2).collect(),
-                ys: (-2 * h - 1..2 * h + 2).collect(),
-                lens: vec![1, u32::MAX],
-                rows: 2 * h + 2,
-                cols: 2 * w + 2,
-            }
+        Grid {
+            xs: (-2 * w - 1..2 * w + 2).collect(),
+            ys: (-2 * h - 1..2 * h + 2).collect(),
+            lens: vec![1, u32::MAX],
+            rows: 2 * h + 2,
+            cols: 2 * w + 2,
         }
     }
 }
@@ -560,7 +484,7 @@ fn cross_check<const N: usize>(
     grid: fn(u32, u32) -> Grid,
 ) {
     for &(stride, height) in images {
-        let mut g = Guarded::with(N, width, height, stride);
+        let mut g = Image::with(N, width, height, stride);
         let ra = g.attach();
         let Grid {
             xs,
@@ -594,26 +518,17 @@ fn cross_check<const N: usize>(
                  {len}), {j} next_y, {i} next_x"
             );
         }
-        assert!(g.guards_intact());
     }
 }
 
-/// The RGBA buffers the bounded accessors are cross-checked on. Natively: top-down and
-/// bottom-up, exact and padded strides, each at one row and at `H` rows. Under Miri: a
-/// top-down exact stride and a bottom-up padded one, at `H` rows (which has a first, an
-/// interior and a last row): each stride sign and each of exact and padded once; the
-/// one-row image is only the first and last row being the same, which `H` rows already
-/// exercise separately.
+/// The RGBA buffers the bounded accessors are cross-checked on: top-down and bottom-up,
+/// exact and padded strides, each at one row and at `H` rows.
 fn rgba_images() -> Vec<(i32, u32)> {
     let row = ROW as i32;
-    if cfg!(miri) {
-        vec![(row, H), (-(row + 8), H)]
-    } else {
-        [row, -row, row + 8, -(row + 8)]
-            .into_iter()
-            .flat_map(|s| [(s, 1), (s, H)])
-            .collect()
-    }
+    [row, -row, row + 8, -(row + 8)]
+        .into_iter()
+        .flat_map(|s| [(s, 1), (s, H)])
+        .collect()
 }
 
 #[test]
@@ -624,9 +539,8 @@ fn bounded_accessors_match_their_reference() {
 }
 
 /// The same round trip on an image one pixel wide, whose first pixel is also its last: a
-/// fast-path span there ends the row on the first `next_x`. Natively and under Miri the same
-/// four strides (each sign, exact and padded) at one row and at `H` rows: the grid is small
-/// at this width.
+/// fast-path span there ends the row on the first `next_x`. The same four strides (each sign,
+/// exact and padded) at one row and at `H` rows.
 #[test]
 fn bounded_accessors_match_their_reference_at_width_1() {
     let row = BPP as i32;
@@ -640,20 +554,14 @@ fn bounded_accessors_match_their_reference_at_width_1() {
 }
 
 /// The same round trip for pixel widths other than 4 (odd padding, so rows do not start at
-/// a multiple of the pixel width). Under Miri one buffer per width, of opposite stride signs
-/// and paddings, as the RGBA ones already cover both of each.
+/// a multiple of the pixel width), each at an exact top-down stride and a padded bottom-up
+/// one.
 #[test]
 fn bounded_accessors_match_their_reference_for_other_pixel_widths() {
     let row3 = W as i32 * 3;
     let row1 = W as i32;
-    let (images3, images1) = if cfg!(miri) {
-        (vec![(-(row3 + 5), H)], vec![(row1, H)])
-    } else {
-        (
-            vec![(row3, H), (-(row3 + 5), H)],
-            vec![(row1, H), (-(row1 + 3), H)],
-        )
-    };
+    let images3 = vec![(row3, H), (-(row3 + 5), H)];
+    let images1 = vec![(row1, H), (-(row1 + 3), H)];
     for kind in BOUNDED {
         cross_check::<3>(kind, W, &images3, Grid::bounded);
         cross_check::<1>(kind, W, &images1, Grid::bounded);
@@ -734,28 +642,32 @@ fn reused_accessor_keeps_the_meaning() {
         NextX,
     ];
     for kind in BOUNDED {
-        let mut g = Guarded::new(ROW as i32);
-        let ra = g.attach();
-        let mut acc = kind.accessor::<4>(&ra);
-        let (mut x0, mut x, mut y) = (0i64, 0i64, 0i64);
-        let mut got = Vec::new();
-        for (k, op) in ops.into_iter().enumerate() {
-            let pixel = match op {
-                Span(sx, sy, len) => {
-                    (x0, x, y) = (sx as i64, sx as i64, sy as i64);
-                    px(acc.span(sx, sy, len))
-                }
-                NextX => {
-                    x += 1;
-                    px(acc.next_x())
-                }
-                NextY => {
-                    (x, y) = (x0, y + 1);
-                    px(acc.next_y())
-                }
-            };
-            got.push((k, op, x, y, pixel));
-        }
+        let mut g = Image::new(ROW as i32);
+        // The boxed accessor borrows `g` until it is dropped at the end of this block.
+        let got = {
+            let ra = g.attach();
+            let mut acc = kind.accessor::<4>(&ra);
+            let (mut x0, mut x, mut y) = (0i64, 0i64, 0i64);
+            let mut got = Vec::new();
+            for (k, op) in ops.into_iter().enumerate() {
+                let pixel = match op {
+                    Span(sx, sy, len) => {
+                        (x0, x, y) = (sx as i64, sx as i64, sy as i64);
+                        px(acc.span(sx, sy, len))
+                    }
+                    NextX => {
+                        x += 1;
+                        px(acc.next_x())
+                    }
+                    NextY => {
+                        (x, y) = (x0, y + 1);
+                        px(acc.next_y())
+                    }
+                };
+                got.push((k, op, x, y, pixel));
+            }
+            got
+        };
         for (k, op, x, y, pixel) in got {
             assert_eq!(
                 pixel,
@@ -798,7 +710,7 @@ fn clone_empty_image_panics() {
         (W, 0, ROW as i32, "row 0 out of bounds (height=0)"),
         (0, 0, 4, "row 0 out of bounds (height=0)"),
     ] {
-        let mut g = Guarded::with(BPP, width, height, stride);
+        let mut g = Image::with(BPP, width, height, stride);
         let ra = g.attach();
         for (name, call) in EMPTY_IMAGE_CALLS {
             let mut acc = ImageAccessorClone::<4>::new(&ra);
@@ -808,7 +720,6 @@ fn clone_empty_image_panics() {
                 "{width}x{height}: {name}"
             );
         }
-        assert!(g.guards_intact());
     }
 }
 
@@ -817,7 +728,7 @@ fn clone_empty_image_panics() {
 #[test]
 fn clip_empty_image_is_all_background() {
     for (width, height, stride) in [(0, H, 4), (W, 0, ROW as i32), (0, 0, 4)] {
-        let mut g = Guarded::with(BPP, width, height, stride);
+        let mut g = Image::with(BPP, width, height, stride);
         let ra = g.attach();
         let mut acc = ImageAccessorClip::<4>::new(&ra, &BK);
         assert_eq!(acc.span(0, 0, 1), BK, "{width}x{height}");
@@ -831,7 +742,6 @@ fn clip_empty_image_is_all_background() {
                 "{width}x{height}: {name}"
             );
         }
-        assert!(g.guards_intact());
     }
 }
 
@@ -841,7 +751,7 @@ fn clip_empty_image_is_all_background() {
 /// past the row reads the padding; the accessor promises nothing there.)
 #[test]
 fn no_clip_panics_outside_the_image() {
-    let mut g = Guarded::new(ROW as i32);
+    let mut g = Image::new(ROW as i32);
     let ra = g.attach();
     let past_row = format!(
         "range end index {} out of range for slice of length {ROW}",
@@ -938,7 +848,6 @@ fn no_clip_panics_outside_the_image() {
             "{name}"
         );
     }
-    assert!(g.guards_intact());
 }
 
 /// The resample generators step `next_x` until the filter weight runs out, which can be one
@@ -961,17 +870,13 @@ fn no_clip_panics_outside_the_image() {
 /// Bessel, the only one at scales 0.75 to 4 in sixteenths and offsets in 128ths; Bessel at
 /// scale 1.75, tx 0.84375 overshoots only spans already past the row). A far-off pixel read
 /// there changes the Bessel and bilinear outputs; in the bicubic cases the extra pixel's
-/// weight rounds to 0, so only the bounds catch it: on the exact-size image the step lands
-/// past the end of the buffer, which Miri reports, and which `ImageAccessorClip`'s checked
-/// row slice panicked on.
+/// weight rounds to 0, so only the bounds catch it: on the last row of the exact-size image
+/// a step that read past the row would run past the end of the buffer, and the checked row
+/// access would panic.
 ///
 /// So the test cannot pass vacuously if the generators or filters change, `Overshoot` counts
 /// the steps each case takes past its spans, and every case must step past the right edge
 /// of the image from a span that fit in the row (the fast path's dangerous case).
-///
-/// Under Miri only the last row is generated (the row whose overshoot would leave the
-/// buffer; the others only reach the next row) and only the Bessel case (whose output shows
-/// a wrong read) and the bilinear one (the cheapest that overshoots) run.
 #[test]
 fn resample_past_the_right_edge_keeps_the_meaning() {
     const BG: [u8; 4] = [30, 60, 90, 120];
@@ -992,21 +897,13 @@ fn resample_past_the_right_edge_keeps_the_meaning() {
             })
             .collect()
     };
-    let rows: Vec<i32> = if cfg!(miri) {
-        vec![h as i32 - 1]
-    } else {
-        (0..h as i32).collect()
-    };
-    let cases: &[(&str, f64, f64)] = if cfg!(miri) {
-        &[("bessel", 1.375, 0.6796875), ("bilinear", 2.5, 0.234375)]
-    } else {
-        &[
-            ("bessel", 1.375, 0.6796875),
-            ("bilinear", 2.5, 0.234375),
-            ("bicubic", 2.5, 0.21875),
-            ("bicubic", 2.5, 0.234375),
-        ]
-    };
+    let rows: Vec<i32> = (0..h as i32).collect();
+    let cases: &[(&str, f64, f64)] = &[
+        ("bessel", 1.375, 0.6796875),
+        ("bilinear", 2.5, 0.234375),
+        ("bicubic", 2.5, 0.21875),
+        ("bicubic", 2.5, 0.234375),
+    ];
 
     /// An accessor that counts the `next_x` steps the generator takes past the `len` it
     /// passed to `span`, per row of the span (`next_y` returns to its start).
@@ -1081,10 +978,8 @@ fn resample_past_the_right_edge_keeps_the_meaning() {
     let (cw, ch) = (LEFT + w + RIGHT, TOP + h + BOTTOM);
     let mut exact = image(0);
     let mut padded = image(3);
-    // SAFETY: each Vec holds `h` rows of the stride's bytes and outlives its accessor.
-    let ra_exact = unsafe { RowAccessor::new_with_buf(exact.as_mut_ptr(), w, h, w as i32 * 4) };
-    let ra_padded =
-        unsafe { RowAccessor::new_with_buf(padded.as_mut_ptr(), w, h, (w + 3) as i32 * 4) };
+    let ra_exact = RowAccessor::new_with_buf(&mut exact, w, h, w as i32 * 4);
+    let ra_padded = RowAccessor::new_with_buf(&mut padded, w, h, (w + 3) as i32 * 4);
     for kind in BOUNDED {
         // The canvas: pixel (x, y) is the meaning at image pixel (x - LEFT, y - TOP).
         let mut canvas: Vec<u8> = (0..ch as i64)
@@ -1102,9 +997,7 @@ fn resample_past_the_right_edge_keeps_the_meaning() {
                 })
             })
             .collect();
-        // SAFETY: the Vec holds `ch` rows of `cw * 4` bytes and outlives its accessor.
-        let ra_canvas =
-            unsafe { RowAccessor::new_with_buf(canvas.as_mut_ptr(), cw, ch, cw as i32 * 4) };
+        let ra_canvas = RowAccessor::new_with_buf(&mut canvas, cw, ch, cw as i32 * 4);
         /// Renders through `inner` wrapped in `Overshoot`; the pixels and the
         /// (`beyond`, `past_row`) counts.
         fn counted<S: ImageSource>(
@@ -1126,7 +1019,7 @@ fn resample_past_the_right_edge_keeps_the_meaning() {
             let out = render(&mut acc, lut, (scale, tx, (0.0, 0.0)), rows);
             (out, (acc.beyond, acc.past_row))
         }
-        let run = |ra: &RowAccessor, lut: &ImageFilterLut, scale: f64, tx: f64| {
+        let run = |ra: &RowAccessor<'_>, lut: &ImageFilterLut, scale: f64, tx: f64| {
             let result = catch_unwind(AssertUnwindSafe(|| match kind {
                 Kind::Clip => counted(
                     ImageAccessorClip::<4>::new(ra, &BG),

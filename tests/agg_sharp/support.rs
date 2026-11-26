@@ -1,25 +1,29 @@
-//! Shared helpers for the agg-sharp test ports: an owned byte buffer with a
-//! `RowAccessor` attached, standing in for agg-sharp's `ImageBuffer`.
+//! Shared helpers for the agg-sharp test ports: an owned byte buffer that hands
+//! out a `RowAccessor` over itself, standing in for agg-sharp's `ImageBuffer`.
 
 use agg_rust::rendering_buffer::RowAccessor;
 
-/// Pixel bytes plus a row accessor over them. The `Vec` is never resized, so
-/// the accessor's pointer stays valid for the struct's lifetime.
+/// Pixel bytes and the geometry of the rows they hold.
 pub struct Image {
     pub bytes: Vec<u8>,
-    pub rows: RowAccessor,
+    width: u32,
+    height: u32,
+    stride: i32,
 }
 
 impl Image {
     /// A `width` x `height` image of `bpp` bytes per pixel, every byte `fill`.
     pub fn new(width: u32, height: u32, bpp: u32, fill: u8) -> Self {
-        let mut bytes = vec![fill; (width * height * bpp) as usize];
-        let mut rows = RowAccessor::new();
-        // SAFETY: `bytes` holds exactly width * height * bpp bytes and lives
-        // (unmoved on the heap) as long as `rows`.
-        unsafe {
-            rows.attach(bytes.as_mut_ptr(), width, height, (width * bpp) as i32);
+        Self {
+            bytes: vec![fill; (width * height * bpp) as usize],
+            width,
+            height,
+            stride: (width * bpp) as i32,
         }
-        Self { bytes, rows }
+    }
+
+    /// A row accessor over the image's bytes, borrowing them for its lifetime.
+    pub fn accessor(&mut self) -> RowAccessor<'_> {
+        RowAccessor::new_with_buf(&mut self.bytes, self.width, self.height, self.stride)
     }
 }

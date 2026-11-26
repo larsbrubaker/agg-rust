@@ -102,14 +102,17 @@ const BPP: usize = 4; // bytes per pixel in RGBA32
 /// 5 neighboring subpixels (tertiary, secondary, primary, secondary, tertiary)
 /// using the `LcdDistributionLut`, matching the C++ implementation exactly.
 pub struct PixfmtRgba32Lcd<'a> {
-    rbuf: &'a mut RowAccessor,
+    rbuf: RowAccessor<'a>,
     lut: &'a LcdDistributionLut,
 }
 
 impl<'a> PixfmtRgba32Lcd<'a> {
     /// Create a new LCD pixel format wrapping an RGBA32 rendering buffer.
-    pub fn new(rbuf: &'a mut RowAccessor, lut: &'a LcdDistributionLut) -> Self {
-        Self { rbuf, lut }
+    pub fn new(rbuf: &'a mut RowAccessor<'_>, lut: &'a LcdDistributionLut) -> Self {
+        Self {
+            rbuf: rbuf.reborrow(),
+            lut,
+        }
     }
 
     /// Get the actual (non-subpixel) width.
@@ -396,19 +399,16 @@ mod tests {
         assert_eq!(lut.primary(255), 85);
     }
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * BPP as u32) as i32;
-        let mut buf = vec![255u8; (h * w * BPP as u32) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![255u8; (h * w * BPP as u32) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_pixfmt_lcd_width_height() {
-        let (_buf, mut ra) = make_buffer(100, 50);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 100, 50);
         let lut = LcdDistributionLut::new(1.0 / 3.0, 2.0 / 9.0, 1.0 / 9.0);
         let pf = PixfmtRgba32Lcd::new(&mut ra, &lut);
         assert_eq!(pf.width(), 300); // 100 * 3
@@ -418,7 +418,8 @@ mod tests {
     #[test]
     fn test_lcd_blend_solid_hspan_black_on_white() {
         // Blend black text on white background — should darken the pixels
-        let (_buf, mut ra) = make_buffer(100, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 100, 10);
         let lut = LcdDistributionLut::new(1.0 / 3.0, 2.0 / 9.0, 1.0 / 9.0);
         let mut pf = PixfmtRgba32Lcd::new(&mut ra, &lut);
 

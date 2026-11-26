@@ -210,7 +210,7 @@ pub fn image_perspective_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8
     let (img_w, img_h, mut img_data) = load_spheres_image();
     let mut img_ra = RowAccessor::new();
     let img_stride = (img_w * 4) as i32;
-    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_data, img_w, img_h, img_stride);
 
     let g_x1 = 0.0_f64;
     let g_y1 = 0.0_f64;
@@ -332,7 +332,7 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut mask_buf = vec![0u8; (width * height) as usize];
     {
         let mut mask_ra = RowAccessor::new();
-        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, width as i32) };
+        mask_ra.attach(&mut mask_buf, width, height, width as i32);
         let mask_pf = PixfmtGray8::new(&mut mask_ra);
         let mut mask_rb = RendererBase::new(mask_pf);
         let mut mask_ras = RasterizerScanlineAa::new();
@@ -380,7 +380,7 @@ pub fn alpha_mask_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut lion_buf = vec![0u8; (width * height * 4) as usize];
     {
         let mut lion_ra = RowAccessor::new();
-        unsafe { lion_ra.attach(lion_buf.as_mut_ptr(), width, height, (width * 4) as i32) };
+        lion_ra.attach(&mut lion_buf, width, height, (width * 4) as i32);
         let lion_pf = PixfmtRgba32::new(&mut lion_ra);
         let mut lion_rb = RendererBase::new(lion_pf);
         lion_rb.clear(&Rgba8::new(0, 0, 0, 0));
@@ -635,7 +635,7 @@ pub fn image_alpha(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let (img_w, img_h, mut img_data) = load_spheres_image();
     let mut img_ra = RowAccessor::new();
     let img_stride = (img_w * 4) as i32;
-    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_data, img_w, img_h, img_stride);
 
     // Transform: center, rotate 10 deg, center back
     let mut mtx = TransAffine::new();
@@ -731,7 +731,7 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ) -> Vec<u8> {
         let mut mask_buf = vec![0u8; (width * height) as usize];
         let mut mask_ra = RowAccessor::new();
-        unsafe { mask_ra.attach(mask_buf.as_mut_ptr(), width, height, width as i32) };
+        mask_ra.attach(&mut mask_buf, width, height, width as i32);
         let mask_pf = PixfmtGray8::new(&mut mask_ra);
         let mut mask_rb = RendererBase::new(mask_pf);
         let mut mask_ras = RasterizerScanlineAa::new();
@@ -772,7 +772,7 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     ) {
         let mut temp_buf = vec![0u8; (width * height * 4) as usize];
         let mut temp_ra = RowAccessor::new();
-        unsafe { temp_ra.attach(temp_buf.as_mut_ptr(), width, height, (width * 4) as i32) };
+        temp_ra.attach(&mut temp_buf, width, height, (width * 4) as i32);
         let temp_pf = PixfmtRgba32::new(&mut temp_ra);
         let mut temp_rb = RendererBase::new(temp_pf);
         temp_rb.clear(&Rgba8::new(0, 0, 0, 0));
@@ -888,6 +888,9 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 measure_with_ms(|| generate_alpha_mask(width, height, operation, &mut ps1));
             draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
 
+            // The masked blend writes the main buffer's bytes directly through `ra`,
+            // which ends the renderer's borrow; the renderer is rebuilt after it (its
+            // clip box is the default full-buffer one).
             let (_, render_ms) = measure_with_ms(|| {
                 render_with_alpha_mask(
                     width,
@@ -895,9 +898,10 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut ps2,
                     &mask,
                     Rgba8::new(127, 0, 0, 127),
-                    &mut buf,
+                    ra.buf_mut(),
                 );
             });
+            rb = RendererBase::new(PixfmtRgba32::new(&mut ra));
             draw_text!(
                 250.0,
                 5.0,
@@ -952,6 +956,7 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut stroke_for_masked = ConvStroke::new(&mut ps2_for_masked);
             stroke_for_masked.set_width(10.0);
 
+            // See scenario 0: the renderer is rebuilt after the blend writes its bytes.
             let (_, render_ms) = measure_with_ms(|| {
                 render_with_alpha_mask(
                     width,
@@ -959,9 +964,10 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut stroke_for_masked,
                     &mask,
                     Rgba8::new(127, 0, 0, 127),
-                    &mut buf,
+                    ra.buf_mut(),
                 );
             });
+            rb = RendererBase::new(PixfmtRgba32::new(&mut ra));
             draw_text!(
                 250.0,
                 5.0,
@@ -1008,6 +1014,7 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             });
             draw_text!(250.0, 20.0, &format!("Generate AlphaMask: {:.3}ms", gen_ms));
 
+            // See scenario 0: the renderer is rebuilt after the blend writes its bytes.
             let (_, render_ms) = measure_with_ms(|| {
                 let mut trans_arrows_for_masked = ConvTransform::new(&mut arrows, mtx2);
                 render_with_alpha_mask(
@@ -1016,9 +1023,10 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut trans_arrows_for_masked,
                     &mask,
                     Rgba8::new(127, 0, 0, 127),
-                    &mut buf,
+                    ra.buf_mut(),
                 );
             });
+            rb = RendererBase::new(PixfmtRgba32::new(&mut ra));
             draw_text!(
                 250.0,
                 5.0,
@@ -1064,6 +1072,7 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             let mut sp2 = Spiral::new(mx, my, 10.0, 150.0, 30.0, 0.0);
             let mut stroke_for_masked = ConvStroke::new(&mut sp2);
             stroke_for_masked.set_width(15.0);
+            // See scenario 0: the renderer is rebuilt after the blend writes its bytes.
             let (_, render_ms) = measure_with_ms(|| {
                 render_with_alpha_mask(
                     width,
@@ -1071,9 +1080,10 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut stroke_for_masked,
                     &mask,
                     Rgba8::new(127, 0, 0, 127),
-                    &mut buf,
+                    ra.buf_mut(),
                 );
             });
+            rb = RendererBase::new(PixfmtRgba32::new(&mut ra));
             draw_text!(
                 250.0,
                 5.0,
@@ -1201,6 +1211,7 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
             mtx2.multiply(&TransAffine::new_translation(220.0, 200.0));
             let mut trans2 = ConvTransform::new(&mut glyph_for_masked, mtx2);
             let mut curve_for_masked = ConvCurve::new(&mut trans2);
+            // See scenario 0: the renderer is rebuilt after the blend writes its bytes.
             let (_, render_ms) = measure_with_ms(|| {
                 render_with_alpha_mask(
                     width,
@@ -1208,9 +1219,10 @@ pub fn alpha_mask3(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                     &mut curve_for_masked,
                     &mask,
                     Rgba8::new(127, 0, 0, 127),
-                    &mut buf,
+                    ra.buf_mut(),
                 );
             });
+            rb = RendererBase::new(PixfmtRgba32::new(&mut ra));
             draw_text!(
                 250.0,
                 5.0,
@@ -1272,7 +1284,7 @@ pub fn image_transforms_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8>
     let (img_w, img_h, mut img_data) = load_spheres_image();
     let mut img_ra = RowAccessor::new();
     let img_stride = (img_w * 4) as i32;
-    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_data, img_w, img_h, img_stride);
 
     // Build the same 14-point star as C++, centered at polygon center.
     let mut r = w;
@@ -2202,7 +2214,7 @@ pub fn image_resample_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Setup source image accessor
     let img_stride = (img_w * 4) as i32;
     let mut img_ra = RowAccessor::new();
-    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_data, img_w, img_h, img_stride);
     let mut source = ImageAccessorClone::<4>::new(&img_ra);
 
     // Create filter
@@ -2339,7 +2351,7 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     {
         let mut mask_ra = RowAccessor::new();
         let mask_stride = width as i32;
-        unsafe { mask_ra.attach(mask_gray.as_mut_ptr(), width, height, mask_stride) };
+        mask_ra.attach(&mut mask_gray, width, height, mask_stride);
         let mask_pf = PixfmtGray8::new(&mut mask_ra);
         let mut mask_rb = RendererBase::new(mask_pf);
         mask_rb.clear(&Gray8::new(0, 255));
@@ -2368,7 +2380,7 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     {
         let mut temp_ra = RowAccessor::new();
         let stride = (width * 4) as i32;
-        unsafe { temp_ra.attach(temp_buf.as_mut_ptr(), width, height, stride) };
+        temp_ra.attach(&mut temp_buf, width, height, stride);
         let temp_pf = PixfmtRgba32::new(&mut temp_ra);
         let mut temp_rb = RendererBase::new(temp_pf);
         temp_rb.clear(&Rgba8::new(0, 0, 0, 0)); // transparent
@@ -2480,7 +2492,9 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
     }
 
-    // Step 3: Composite masked temp buffer onto main buffer.
+    // Step 3: Composite masked temp buffer onto main buffer, through the accessor
+    // that owns the main buffer's bytes.
+    let dst = ra.buf_mut();
     for y in 0..height as usize {
         for x in 0..width as usize {
             let idx = y * width as usize + x;
@@ -2496,10 +2510,10 @@ pub fn alpha_mask2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 let src_r = (255 + sr * mask_val) >> 8;
                 let src_g = (255 + sg * mask_val) >> 8;
                 let src_b = (255 + sb * mask_val) >> 8;
-                buf[pi] = (src_r + ((255 + buf[pi] as u32 * inv_a) >> 8)).min(255) as u8;
-                buf[pi + 1] = (src_g + ((255 + buf[pi + 1] as u32 * inv_a) >> 8)).min(255) as u8;
-                buf[pi + 2] = (src_b + ((255 + buf[pi + 2] as u32 * inv_a) >> 8)).min(255) as u8;
-                buf[pi + 3] = (a + ((255 + buf[pi + 3] as u32 * inv_a) >> 8)).min(255) as u8;
+                dst[pi] = (src_r + ((255 + dst[pi] as u32 * inv_a) >> 8)).min(255) as u8;
+                dst[pi + 1] = (src_g + ((255 + dst[pi + 1] as u32 * inv_a) >> 8)).min(255) as u8;
+                dst[pi + 2] = (src_b + ((255 + dst[pi + 2] as u32 * inv_a) >> 8)).min(255) as u8;
+                dst[pi + 3] = (a + ((255 + dst[pi + 3] as u32 * inv_a) >> 8)).min(255) as u8;
             }
         }
     }

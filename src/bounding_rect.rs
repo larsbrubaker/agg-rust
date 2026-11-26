@@ -196,26 +196,25 @@ mod tests {
 
     #[test]
     fn test_bounding_rect_single_point() {
-        struct SinglePoint;
+        struct SinglePoint {
+            called: bool,
+        }
         impl VertexSource for SinglePoint {
             fn rewind(&mut self, _: u32) {}
             fn vertex(&mut self, x: &mut f64, y: &mut f64) -> u32 {
                 // Only return one vertex, then stop
-                static mut CALLED: bool = false;
-                unsafe {
-                    if !CALLED {
-                        CALLED = true;
-                        *x = 42.0;
-                        *y = 17.0;
-                        PATH_CMD_MOVE_TO
-                    } else {
-                        CALLED = false; // reset for next test
-                        PATH_CMD_STOP
-                    }
+                if !self.called {
+                    self.called = true;
+                    *x = 42.0;
+                    *y = 17.0;
+                    PATH_CMD_MOVE_TO
+                } else {
+                    self.called = false; // reset for the next pass
+                    PATH_CMD_STOP
                 }
             }
         }
-        let mut sp = SinglePoint;
+        let mut sp = SinglePoint { called: false };
         let r = bounding_rect_single(&mut sp, 0).unwrap();
         assert!((r.x1 - 42.0).abs() < 1e-10);
         assert!((r.y1 - 17.0).abs() < 1e-10);

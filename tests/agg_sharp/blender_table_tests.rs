@@ -24,7 +24,7 @@ fn blend_pixels_with_transparent_source_keeps_remaining_pixels_aligned() {
     ];
 
     let mut dest = Image::new(3, 1, 4, 0);
-    PixfmtRgba32Pre::new(&mut dest.rows).blend_color_hspan(0, 0, 3, &source_colors, &[], 128);
+    PixfmtRgba32Pre::new(&mut dest.accessor()).blend_color_hspan(0, 0, 3, &source_colors, &[], 128);
 
     // Pixel 0 came from the transparent color, so it must be untouched.
     assert_eq!(&dest.bytes[0..4], &[0, 0, 0, 0]);
@@ -36,7 +36,7 @@ fn blend_pixels_with_transparent_source_keeps_remaining_pixels_aligned() {
     assert_eq!(dest.bytes[8], 0);
 
     let mut without_transparent = Image::new(2, 1, 4, 0);
-    PixfmtRgba32Pre::new(&mut without_transparent.rows).blend_color_hspan(
+    PixfmtRgba32Pre::new(&mut without_transparent.accessor()).blend_color_hspan(
         0,
         0,
         2,

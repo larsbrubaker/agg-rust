@@ -419,7 +419,7 @@ mod fast_row {
     /// tests the row with `row_fits` first, so `row_bytes`'s own test folds into it and no
     /// panic path is left in the accessors' hot code.
     pub(super) struct FastRow<'a, const PIX_WIDTH: usize> {
-        rbuf: &'a RowAccessor,
+        rbuf: &'a RowAccessor<'a>,
         /// The pixels of the current row after the current one; empty when inactive.
         pixels: slice::Iter<'a, [u8; PIX_WIDTH]>,
         /// Whether the fast path is on a row. With `pixels` empty it tells a row that ended
@@ -431,7 +431,7 @@ mod fast_row {
 
     impl<'a, const PIX_WIDTH: usize> FastRow<'a, PIX_WIDTH> {
         /// Inactive.
-        pub(super) fn new(rbuf: &'a RowAccessor) -> Self {
+        pub(super) fn new(rbuf: &'a RowAccessor<'a>) -> Self {
             Self {
                 rbuf,
                 pixels: [].iter(),
@@ -443,7 +443,7 @@ mod fast_row {
         /// The image. The accessors read it from here rather than keeping their own copy
         /// of the reference: two copies are two loads in the generators' loops.
         #[inline]
-        pub(super) fn rbuf(&self) -> &'a RowAccessor {
+        pub(super) fn rbuf(&self) -> &'a RowAccessor<'a> {
             self.rbuf
         }
 
@@ -579,7 +579,7 @@ pub struct ImageAccessorClip<'a, const PIX_WIDTH: usize> {
 }
 
 impl<'a, const PIX_WIDTH: usize> ImageAccessorClip<'a, PIX_WIDTH> {
-    pub fn new(rbuf: &'a RowAccessor, bk_color: &[u8]) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>, bk_color: &[u8]) -> Self {
         let mut bk_buf = [0u8; PIX_WIDTH];
         let len = bk_color.len().min(PIX_WIDTH);
         bk_buf[..len].copy_from_slice(&bk_color[..len]);
@@ -686,7 +686,7 @@ impl<'a, const PIX_WIDTH: usize> ImageAccessorClip<'a, PIX_WIDTH> {
 /// right edge of an exact-stride image. Use it only where every pixel the generator reads
 /// is inside the image; `ImageAccessorClip` or `ImageAccessorClone` define every pixel.
 pub struct ImageAccessorNoClip<'a, const PIX_WIDTH: usize> {
-    rbuf: &'a RowAccessor,
+    rbuf: &'a RowAccessor<'a>,
     /// Byte offset of the span's first pixel, where `next_y` starts the next row.
     x_off: usize,
     y: i32,
@@ -694,7 +694,7 @@ pub struct ImageAccessorNoClip<'a, const PIX_WIDTH: usize> {
 }
 
 impl<'a, const PIX_WIDTH: usize> ImageAccessorNoClip<'a, PIX_WIDTH> {
-    pub fn new(rbuf: &'a RowAccessor) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>) -> Self {
         Self {
             rbuf,
             x_off: 0,
@@ -771,7 +771,7 @@ pub struct ImageAccessorClone<'a, const PIX_WIDTH: usize> {
 }
 
 impl<'a, const PIX_WIDTH: usize> ImageAccessorClone<'a, PIX_WIDTH> {
-    pub fn new(rbuf: &'a RowAccessor) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>) -> Self {
         Self {
             x: 0,
             y: 0,
@@ -862,7 +862,7 @@ impl<'a, const PIX_WIDTH: usize> ImageAccessorClone<'a, PIX_WIDTH> {
 ///
 /// Port of C++ `image_accessor_wrap<PixFmt, WrapX, WrapY>`.
 pub struct ImageAccessorWrap<'a, const PIX_WIDTH: usize, WX: WrapMode, WY: WrapMode> {
-    rbuf: &'a RowAccessor,
+    rbuf: &'a RowAccessor<'a>,
     x: i32,
     wrap_x: WX,
     wrap_y: WY,
@@ -872,7 +872,7 @@ pub struct ImageAccessorWrap<'a, const PIX_WIDTH: usize, WX: WrapMode, WY: WrapM
 impl<'a, const PIX_WIDTH: usize, WX: WrapMode, WY: WrapMode>
     ImageAccessorWrap<'a, PIX_WIDTH, WX, WY>
 {
-    pub fn new(rbuf: &'a RowAccessor) -> Self {
+    pub fn new(rbuf: &'a RowAccessor<'a>) -> Self {
         Self {
             rbuf,
             x: 0,
@@ -912,10 +912,10 @@ impl<'a, const PIX_WIDTH: usize, WX: WrapMode, WY: WrapMode>
 mod tests {
     use super::*;
 
-    fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor {
+    fn make_rgba_buffer(width: u32, height: u32, data: &mut Vec<u8>) -> RowAccessor<'_> {
         let stride = width as usize * 4;
         data.resize(stride * height as usize, 0);
-        unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), width, height, stride as i32) }
+        RowAccessor::new_with_buf(data, width, height, stride as i32)
     }
 
     fn set_rgba_pixel(data: &mut [u8], width: u32, x: u32, y: u32, rgba: [u8; 4]) {
@@ -1001,8 +1001,8 @@ mod tests {
     #[test]
     fn test_clip_in_bounds() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 1, 1, [10, 20, 30, 40]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 1, 1, [10, 20, 30, 40]);
 
         let mut acc = ImageAccessorClip::<4>::new(&rbuf, &[0, 0, 0, 0]);
         let pix = acc.span(1, 1, 1);
@@ -1022,9 +1022,9 @@ mod tests {
     #[test]
     fn test_clip_span_fast_path() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 0, 0, [1, 2, 3, 4]);
-        set_rgba_pixel(&mut data, 4, 1, 0, [5, 6, 7, 8]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 0, 0, [1, 2, 3, 4]);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 1, 0, [5, 6, 7, 8]);
 
         let mut acc = ImageAccessorClip::<4>::new(&rbuf, &[0, 0, 0, 0]);
         let pix = acc.span(0, 0, 2);
@@ -1038,8 +1038,8 @@ mod tests {
     #[test]
     fn test_no_clip_span() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 2, 1, [11, 22, 33, 44]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 2, 1, [11, 22, 33, 44]);
 
         let mut acc = ImageAccessorNoClip::<4>::new(&rbuf);
         let pix = acc.span(2, 1, 1);
@@ -1049,10 +1049,10 @@ mod tests {
     #[test]
     fn test_no_clip_next_x() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 0, 0, [10, 0, 0, 0]);
-        set_rgba_pixel(&mut data, 4, 1, 0, [20, 0, 0, 0]);
-        set_rgba_pixel(&mut data, 4, 2, 0, [30, 0, 0, 0]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 0, 0, [10, 0, 0, 0]);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 1, 0, [20, 0, 0, 0]);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 2, 0, [30, 0, 0, 0]);
 
         let mut acc = ImageAccessorNoClip::<4>::new(&rbuf);
         acc.span(0, 0, 3);
@@ -1067,8 +1067,8 @@ mod tests {
     #[test]
     fn test_clone_in_bounds() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 1, 1, [50, 60, 70, 80]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 1, 1, [50, 60, 70, 80]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let pix = acc.span(1, 1, 1);
@@ -1078,8 +1078,8 @@ mod tests {
     #[test]
     fn test_clone_clamps_negative() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 0, 0, [10, 20, 30, 40]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 0, 0, [10, 20, 30, 40]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let pix = acc.span(-5, -3, 1);
@@ -1090,8 +1090,8 @@ mod tests {
     #[test]
     fn test_clone_clamps_overflow() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
-        set_rgba_pixel(&mut data, 4, 3, 3, [99, 88, 77, 66]);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 4, 3, 3, [99, 88, 77, 66]);
 
         let mut acc = ImageAccessorClone::<4>::new(&rbuf);
         let pix = acc.span(100, 100, 1);
@@ -1107,11 +1107,11 @@ mod tests {
         // and never advance along the fast path, so this guards its row
         // iterator's entry and end.
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(4, 4, &mut data);
+        let mut rbuf = make_rgba_buffer(4, 4, &mut data);
         for y in 0..4u32 {
             for x in 0..4u32 {
                 set_rgba_pixel(
-                    &mut data,
+                    rbuf.buf_mut(),
                     4,
                     x,
                     y,
@@ -1166,11 +1166,11 @@ mod tests {
     #[test]
     fn test_wrap_repeat_access() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(2, 2, &mut data);
-        set_rgba_pixel(&mut data, 2, 0, 0, [10, 0, 0, 0]);
-        set_rgba_pixel(&mut data, 2, 1, 0, [20, 0, 0, 0]);
-        set_rgba_pixel(&mut data, 2, 0, 1, [30, 0, 0, 0]);
-        set_rgba_pixel(&mut data, 2, 1, 1, [40, 0, 0, 0]);
+        let mut rbuf = make_rgba_buffer(2, 2, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 2, 0, 0, [10, 0, 0, 0]);
+        set_rgba_pixel(rbuf.buf_mut(), 2, 1, 0, [20, 0, 0, 0]);
+        set_rgba_pixel(rbuf.buf_mut(), 2, 0, 1, [30, 0, 0, 0]);
+        set_rgba_pixel(rbuf.buf_mut(), 2, 1, 1, [40, 0, 0, 0]);
 
         let mut acc = ImageAccessorWrap::<4, WrapModeRepeat, WrapModeRepeat>::new(&rbuf);
         // x=2, y=0 should wrap to x=0, y=0
@@ -1184,9 +1184,9 @@ mod tests {
     #[test]
     fn test_wrap_next_y() {
         let mut data = Vec::new();
-        let rbuf = make_rgba_buffer(2, 2, &mut data);
-        set_rgba_pixel(&mut data, 2, 0, 0, [10, 0, 0, 0]);
-        set_rgba_pixel(&mut data, 2, 0, 1, [30, 0, 0, 0]);
+        let mut rbuf = make_rgba_buffer(2, 2, &mut data);
+        set_rgba_pixel(rbuf.buf_mut(), 2, 0, 0, [10, 0, 0, 0]);
+        set_rgba_pixel(rbuf.buf_mut(), 2, 0, 1, [30, 0, 0, 0]);
 
         let mut acc = ImageAccessorWrap::<4, WrapModeRepeat, WrapModeRepeat>::new(&rbuf);
         acc.span(0, 0, 1);

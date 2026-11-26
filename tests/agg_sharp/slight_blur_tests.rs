@@ -15,7 +15,7 @@ fn gray(v: u8) -> [u8; 4] {
 }
 
 fn blur(image: &mut Image, radius: f64, bounds: RectI) {
-    SlightBlur::new(radius).blur(&mut ChannelView::rgba32(&mut image.ra), bounds);
+    SlightBlur::new(radius).blur(&mut ChannelView::rgba32(&mut image.accessor()), bounds);
 }
 
 /// One white pixel on black at radius 1 (weights 0.0177, 0.9647, 0.0177): across, 255 becomes

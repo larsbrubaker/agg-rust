@@ -108,21 +108,18 @@ mod tests {
         font
     }
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * 4) as i32;
-        let mut buf = vec![0u8; (h * w * 4) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w * 4) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_render_htext() {
         let font_data = make_test_font();
         let mut glyph = GlyphRasterBin::new(&font_data);
-        let (_buf, mut ra) = make_buffer(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 20);
         let pixf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pixf);
 
@@ -139,7 +136,8 @@ mod tests {
     fn test_render_empty_string() {
         let font_data = make_test_font();
         let mut glyph = GlyphRasterBin::new(&font_data);
-        let (_buf, mut ra) = make_buffer(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 20, 20);
         let pixf = PixfmtRgba32::new(&mut ra);
         let mut ren = RendererBase::new(pixf);
 

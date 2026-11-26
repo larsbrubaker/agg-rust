@@ -110,19 +110,16 @@ mod tests {
     use crate::pixfmt_rgba::PixfmtRgba32;
     use crate::rendering_buffer::RowAccessor;
 
-    fn make_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * 4) as i32;
-        let mut buf = vec![0u8; (h * w * 4) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![0u8; (h * w * 4) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_transposed_dimensions() {
-        let (_buf, mut ra) = make_buffer(100, 50);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 100, 50);
         let pixf = PixfmtRgba32::new(&mut ra);
         let trans = PixfmtTransposer::new(pixf);
         assert_eq!(trans.width(), 50); // height becomes width
@@ -131,7 +128,8 @@ mod tests {
 
     #[test]
     fn test_transposed_pixel() {
-        let (_buf, mut ra) = make_buffer(10, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_buffer(&mut buf, 10, 20);
         let pixf = PixfmtRgba32::new(&mut ra);
         let mut trans = PixfmtTransposer::new(pixf);
 

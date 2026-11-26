@@ -25,7 +25,7 @@ fn halfway_between_two_values_rounds() {
     }
 
     let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, true);
-    let sample = sample(&image, 0.5, 0.0, &lut);
+    let sample = sample(&mut image, 0.5, 0.0, &lut);
 
     assert_eq!(sample.r, 1);
     assert_eq!(sample.a, 1);
@@ -42,16 +42,17 @@ fn flat_color_keeps_its_value_at_every_fractional_offset() {
     let lut = ImageFilterLut::new_with_filter(&ImageFilterSpline36, true);
     for i in 0..16 {
         for j in 0..16 {
-            let sample = sample(&image, i as f64 / 16.0, j as f64 / 16.0, &lut);
+            let sample = sample(&mut image, i as f64 / 16.0, j as f64 / 16.0, &lut);
 
             assert_eq!(sample, Rgba8::new(255, 128, 3, 255));
         }
     }
 }
 
-fn sample(image: &Image, tx: f64, ty: f64, lut: &ImageFilterLut) -> Rgba8 {
+fn sample(image: &mut Image, tx: f64, ty: f64, lut: &ImageFilterLut) -> Rgba8 {
     let mut interpolator = SpanInterpolatorLinear::new(TransAffine::new_translation(tx, ty));
-    let mut accessor = ImageAccessorClone::<4>::new(&image.ra);
+    let ra = image.accessor();
+    let mut accessor = ImageAccessorClone::<4>::new(&ra);
     let mut filter = SpanImageFilterRgbaGen::new(&mut accessor, &mut interpolator, lut);
     let mut span = [Rgba8::new(0, 0, 0, 0)];
     filter.generate(&mut span, 1, 1, 1);

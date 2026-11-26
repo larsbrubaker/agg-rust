@@ -25,7 +25,7 @@ fn flat_field_stays_exact() {
             px.copy_from_slice(&color);
         }
 
-        stack_blur_rgba32(&mut image.ra, radius, radius);
+        stack_blur_rgba32(&mut image.accessor(), radius, radius);
 
         for y in 0..image.height {
             for x in 0..image.width {

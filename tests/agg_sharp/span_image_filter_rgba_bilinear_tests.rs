@@ -17,7 +17,8 @@ use agg_rust::trans_affine::TransAffine;
 fn translucent_source_keeps_its_alpha() {
     let mut image = Image::new(4, 4);
     image.fill([100, 60, 3, 128]);
-    let mut accessor = ImageAccessorClone::<4>::new(&image.ra);
+    let ra = image.accessor();
+    let mut accessor = ImageAccessorClone::<4>::new(&ra);
     assert_eq!(
         sample(&mut accessor, 1, 1, 0.3, 0.6),
         Rgba8::new(100, 60, 3, 128)
@@ -29,7 +30,8 @@ fn translucent_source_keeps_its_alpha() {
 fn sampling_past_the_edges_goes_through_the_accessor() {
     let mut image = Image::new(4, 4);
     image.fill([10, 20, 30, 255]);
-    let mut accessor = ImageAccessorClone::<4>::new(&image.ra);
+    let ra = image.accessor();
+    let mut accessor = ImageAccessorClone::<4>::new(&ra);
     assert_eq!(
         sample(&mut accessor, 3, 3, 0.5, 0.5),
         Rgba8::new(10, 20, 30, 255)

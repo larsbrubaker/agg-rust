@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Port of agg-sharp `ImageBufferSolidBlendTests` (Tests/Agg.Tests/Agg).
 //!
 //! C++ pixfmt's solid blends (`blend_solid_hspan`, `blend_hline`,
@@ -56,7 +57,7 @@ const STRAIGHT_RESULT: Rgba8 = Rgba8 {
 macro_rules! with_image {
     ($make:expr, $draw:expr) => {{
         let mut data = vec![0u8; 2 * 2 * 4];
-        let mut rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), 2, 2, 8) };
+        let mut rbuf = RowAccessor::new_with_buf(&mut data, 2, 2, 8);
         let mut ren = RendererBase::new($make(&mut rbuf));
         for y in 0..2 {
             ren.copy_hline(0, y, 1, &BACKGROUND);

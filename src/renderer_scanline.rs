@@ -214,14 +214,10 @@ mod tests {
 
     const BPP: usize = 4;
 
-    fn make_rgba_buffer(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_rgba_buffer(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * BPP as u32) as i32;
-        let mut buf = vec![255u8; (h * w * BPP as u32) as usize]; // white background (all 0xFF)
-        let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
-        (buf, ra)
+        *buf = vec![255u8; (h * w * BPP as u32) as usize]; // white background (all 0xFF)
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     // ========================================================================
@@ -230,7 +226,8 @@ mod tests {
 
     #[test]
     fn test_render_triangle_solid_red() {
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(255, 255, 255, 255));
         let mut ren = RendererBase::new(pf);
@@ -272,7 +269,8 @@ mod tests {
 
     #[test]
     fn test_render_rectangle() {
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(255, 255, 255, 255));
         let mut ren = RendererBase::new(pf);
@@ -305,7 +303,8 @@ mod tests {
 
     #[test]
     fn test_render_ellipse() {
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(0, 0, 0, 255)); // black background
         let mut ren = RendererBase::new(pf);
@@ -333,7 +332,8 @@ mod tests {
 
     #[test]
     fn test_render_path_storage_triangle() {
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(255, 255, 255, 255));
         let mut ren = RendererBase::new(pf);
@@ -362,7 +362,8 @@ mod tests {
 
     #[test]
     fn test_render_with_clip_box() {
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(255, 255, 255, 255));
         let mut ren = RendererBase::new(pf);
@@ -397,7 +398,8 @@ mod tests {
 
     #[test]
     fn test_renderer_scanline_aa_solid_wrapper() {
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(0, 0, 0, 255));
         let mut ren = RendererBase::new(pf);
@@ -423,7 +425,8 @@ mod tests {
 
     #[test]
     fn test_render_empty() {
-        let (_buf, mut ra) = make_rgba_buffer(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 10, 10);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(255, 255, 255, 255));
         let mut ren = RendererBase::new(pf);
@@ -451,7 +454,8 @@ mod tests {
         use crate::span_interpolator_linear::SpanInterpolatorLinear;
         use crate::trans_affine::TransAffine;
 
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(255, 255, 255, 255));
         let mut ren = RendererBase::new(pf);
@@ -506,7 +510,8 @@ mod tests {
     fn test_render_gouraud_triangle() {
         use crate::span_gouraud_rgba::SpanGouraudRgba;
 
-        let (_buf, mut ra) = make_rgba_buffer(100, 100);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 100);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(0, 0, 0, 0)); // transparent black
         let mut ren = RendererBase::new(pf);
@@ -561,7 +566,8 @@ mod tests {
         use crate::span_interpolator_linear::SpanInterpolatorLinear;
         use crate::trans_affine::TransAffine;
 
-        let (_buf, mut ra) = make_rgba_buffer(100, 50);
+        let mut buf = Vec::new();
+        let mut ra = make_rgba_buffer(&mut buf, 100, 50);
         let mut pf = PixfmtRgba32::new(&mut ra);
         pf.clear(&Rgba8::new(0, 0, 0, 255));
         let mut ren = RendererBase::new(pf);

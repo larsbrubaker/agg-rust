@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Port of agg-sharp `ImageBlendFromTests` (Tests/Agg.Tests/Agg).
 //!
 //! C++ AGG's `renderer_base::blend_from_color` and `blend_from_lut`: a gray
@@ -15,16 +16,16 @@ fn background() -> Rgba8 {
 }
 
 /// A one-row gray8 buffer of `values` and its accessor.
-fn new_gray(values: &mut [u8]) -> RowAccessor {
+fn new_gray(values: &mut [u8]) -> RowAccessor<'_> {
     let w = values.len() as u32;
-    unsafe { RowAccessor::new_with_buf(values.as_mut_ptr(), w, 1, w as i32) }
+    RowAccessor::new_with_buf(values, w, 1, w as i32)
 }
 
 /// Runs `draw` on a `w` x `h` RGBA destination cleared to the background,
 /// then hands back the destination's pixels.
 fn with_dest(w: u32, h: u32, draw: impl FnOnce(&mut RendererBase<PixfmtRgba32>)) -> Vec<Rgba8> {
     let mut data = vec![0u8; (w * h * 4) as usize];
-    let mut rbuf = unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), w, h, (w * 4) as i32) };
+    let mut rbuf = RowAccessor::new_with_buf(&mut data, w, h, (w * 4) as i32);
     let mut ren = RendererBase::new(PixfmtRgba32::new(&mut rbuf));
     ren.clear(&background());
     draw(&mut ren);
@@ -101,7 +102,7 @@ fn blend_from_lut_blends_the_colour_each_gray_indexes() {
 fn placement_is_clipped_to_the_destination() {
     let mut values = [0u8; 25];
     values[5 + 1] = 255;
-    let gray = unsafe { RowAccessor::new_with_buf(values.as_mut_ptr(), 5, 5, 5) };
+    let gray = RowAccessor::new_with_buf(&mut values, 5, 5, 5);
     let black = Rgba8::new(0, 0, 0, 255);
 
     let dest = with_dest(3, 3, |ren| {

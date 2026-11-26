@@ -57,6 +57,8 @@
 // C++ bug fix the Rust side carries is rendered from a patched header
 // (`tools/cpp-renderer/patches/`): revert both so `cpp-references` stays pristine.
 
+#![forbid(unsafe_code)]
+
 use pixel_compare::{
     compare_buffers, generate_diff_image, generate_sidebyside, load_image, save_image,
 };

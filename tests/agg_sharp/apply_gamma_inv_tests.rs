@@ -13,12 +13,14 @@ fn check_inverse_gamma(bit_depth: u32) {
     let color = Rgba8::new(10, 100, 200, 77);
     let mut image = Image::new(3, 2, bit_depth / 8, 0);
     let pixel = if bit_depth == 24 {
-        let mut pf = PixfmtRgb24::new(&mut image.rows);
+        let mut ra = image.accessor();
+        let mut pf = PixfmtRgb24::new(&mut ra);
         pf.copy_pixel(1, 1, &color);
         pf.apply_gamma_inv(&gamma);
         pf.pixel(1, 1)
     } else {
-        let mut pf = PixfmtRgba32::new(&mut image.rows);
+        let mut ra = image.accessor();
+        let mut pf = PixfmtRgba32::new(&mut ra);
         pf.copy_pixel(1, 1, &color);
         pf.apply_gamma_inv(&gamma);
         pf.pixel(1, 1)
@@ -44,7 +46,8 @@ fn maps_color_channels_through_the_inverse_gamma() {
 fn maps_color_channels_through_the_direct_gamma() {
     let gamma = GammaLut::new_with_gamma(2.0);
     let mut image = Image::new(3, 2, 3, 0);
-    let mut pf = PixfmtRgb24::new(&mut image.rows);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24::new(&mut ra);
     pf.copy_pixel(1, 1, &Rgba8::new(10, 100, 200, 255));
 
     pf.apply_gamma_dir(&gamma);

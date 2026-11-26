@@ -59,7 +59,8 @@ fn rendered_glyphs_match_cpp() {
     for flip in [false, true] {
         let mut image = Image::new(40, 30);
         {
-            let mut ren = RendererBase::new(PixfmtRgba32::new(&mut image.ra));
+            let mut ra = image.accessor();
+            let mut ren = RendererBase::new(PixfmtRgba32::new(&mut ra));
             ren.clear(&white);
             let mut glyph = GlyphRasterBin::new(by_name("verdana12").unwrap());
             render_raster_htext_solid(&mut ren, &mut glyph, 2.0, 14.0, "AW", &black, flip);

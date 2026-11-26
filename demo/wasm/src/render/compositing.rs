@@ -98,7 +98,7 @@ pub fn blend_color(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     {
         let mut shadow_ra = RowAccessor::new();
         let stride = (width * 4) as i32;
-        unsafe { shadow_ra.attach(shadow_buf.as_mut_ptr(), width, height, stride) };
+        shadow_ra.attach(&mut shadow_buf, width, height, stride);
         let shadow_pf = PixfmtRgba32::new(&mut shadow_ra);
         let mut shadow_rb = RendererBase::new(shadow_pf);
         shadow_rb.clear(&Rgba8::new(0, 0, 0, 0));
@@ -135,7 +135,7 @@ pub fn blend_color(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     if blur_radius > 0.5 {
         let mut shadow_ra = RowAccessor::new();
         let stride = (width * 4) as i32;
-        unsafe { shadow_ra.attach(shadow_buf.as_mut_ptr(), width, height, stride) };
+        shadow_ra.attach(&mut shadow_buf, width, height, stride);
         stack_blur_rgba32(&mut shadow_ra, blur_radius as u32, blur_radius as u32);
     }
 
@@ -147,7 +147,8 @@ pub fn blend_color(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    // Composite blurred shadow onto main buffer
+    // Composite blurred shadow onto main buffer, through the accessor that owns its bytes
+    let dst = ra.buf_mut();
     for y in 0..height {
         for x in 0..width {
             let off = ((y * width + x) * 4) as usize;
@@ -157,21 +158,19 @@ pub fn blend_color(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
                 let sg = shadow_buf[off + 1] as u32;
                 let sb = shadow_buf[off + 2] as u32;
                 let da = 255u32;
-                let dr = buf[off] as u32;
-                let dg = buf[off + 1] as u32;
-                let db = buf[off + 2] as u32;
+                let dr = dst[off] as u32;
+                let dg = dst[off + 1] as u32;
+                let db = dst[off + 2] as u32;
                 // src-over compositing
-                buf[off] = (dr + (sr * sa - dr * sa + 127) / 255) as u8;
-                buf[off + 1] = (dg + (sg * sa - dg * sa + 127) / 255) as u8;
-                buf[off + 2] = (db + (sb * sa - db * sa + 127) / 255) as u8;
-                buf[off + 3] = (da + (sa * (255 - da) + 127) / 255) as u8;
+                dst[off] = (dr + (sr * sa - dr * sa + 127) / 255) as u8;
+                dst[off + 1] = (dg + (sg * sa - dg * sa + 127) / 255) as u8;
+                dst[off + 2] = (db + (sb * sa - db * sa + 127) / 255) as u8;
+                dst[off + 3] = (da + (sa * (255 - da) + 127) / 255) as u8;
             }
         }
     }
 
-    // Re-attach for rendering the main shape
-    let stride = (width * 4) as i32;
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    // A fresh pixel format and renderer for the main shape
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
 
@@ -212,7 +211,7 @@ pub fn component_rendering(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let mut gbuf = vec![255u8; (width * height) as usize];
         let mut gra = RowAccessor::new();
         let stride = width as i32;
-        unsafe { gra.attach(gbuf.as_mut_ptr(), width, height, stride) };
+        gra.attach(&mut gbuf, width, height, stride);
         let gpf = PixfmtGray8::new(&mut gra);
         let mut grb = RendererBase::new(gpf);
         grb.clear(&Gray8::new(255, 255));
@@ -248,7 +247,7 @@ pub fn component_rendering(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Re-attach for rendering controls
     let mut ra = RowAccessor::new();
     let stride = (width * 4) as i32;
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    ra.attach(&mut buf, width, height, stride);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     let mut ras = RasterizerScanlineAa::new();
@@ -296,7 +295,7 @@ pub fn polymorphic_renderer(width: u32, height: u32, params: &[f64]) -> Vec<u8> 
             {
                 let mut rgb_ra = RowAccessor::new();
                 let stride = (width * 3) as i32;
-                unsafe { rgb_ra.attach(rgb_buf.as_mut_ptr(), width, height, stride) };
+                rgb_ra.attach(&mut rgb_buf, width, height, stride);
                 let rgb_pf = PixfmtRgb24::new(&mut rgb_ra);
                 let mut rgb_rb = RendererBase::new(rgb_pf);
                 rgb_rb.clear(&Rgba8::new(255, 255, 255, 255));
@@ -339,7 +338,7 @@ pub fn polymorphic_renderer(width: u32, height: u32, params: &[f64]) -> Vec<u8> 
             {
                 let mut gray_ra = RowAccessor::new();
                 let stride = width as i32;
-                unsafe { gray_ra.attach(gray_buf.as_mut_ptr(), width, height, stride) };
+                gray_ra.attach(&mut gray_buf, width, height, stride);
                 let gray_pf = PixfmtGray8::new(&mut gray_ra);
                 let mut gray_rb = RendererBase::new(gray_pf);
                 gray_rb.clear(&Gray8::new(255, 255));
@@ -371,7 +370,7 @@ pub fn polymorphic_renderer(width: u32, height: u32, params: &[f64]) -> Vec<u8> 
             // Render with standard RGBA32
             let mut ra = RowAccessor::new();
             let stride = (width * 4) as i32;
-            unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+            ra.attach(&mut buf, width, height, stride);
             let pf = PixfmtRgba32::new(&mut ra);
             let mut rb = RendererBase::new(pf);
             rb.clear(&Rgba8::new(255, 255, 255, 255));
@@ -391,7 +390,7 @@ pub fn polymorphic_renderer(width: u32, height: u32, params: &[f64]) -> Vec<u8> 
     // Overlay format label
     let mut ra = RowAccessor::new();
     let stride = (width * 4) as i32;
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    ra.attach(&mut buf, width, height, stride);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     let mut ras = RasterizerScanlineAa::new();
@@ -1086,7 +1085,7 @@ pub fn pattern_fill(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     {
         let mut pat_ra = RowAccessor::new();
         let stride = (ps * 4) as i32;
-        unsafe { pat_ra.attach(pat_buf.as_mut_ptr(), ps, ps, stride) };
+        pat_ra.attach(&mut pat_buf, ps, ps, stride);
         let pat_pf = PixfmtRgba32::new(&mut pat_ra);
         let mut pat_rb = RendererBase::new(pat_pf);
         pat_rb.clear(&Rgba8::new(230, 230, 230, 255));
@@ -1122,7 +1121,7 @@ pub fn pattern_fill(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Create pattern source using ImageAccessorWrap for tiling
     let mut pat_ra = RowAccessor::new();
     let pat_stride = (ps * 4) as i32;
-    unsafe { pat_ra.attach(pat_buf.as_mut_ptr(), ps, ps, pat_stride) };
+    pat_ra.attach(&mut pat_buf, ps, ps, pat_stride);
     let wrap_src = ImageAccessorWrap::<4, WrapModeRepeat, WrapModeRepeat>::new(&pat_ra);
     let mut pattern_gen = SpanPatternRgba::new(wrap_src, 0, 0);
     let mut sa: SpanAllocator<Rgba8> = SpanAllocator::new();
@@ -1218,7 +1217,7 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     {
         let mut img_ra = RowAccessor::new();
         let stride = (img_w * 4) as i32;
-        unsafe { img_ra.attach(img_buf.as_mut_ptr(), img_w, img_h, stride) };
+        img_ra.attach(&mut img_buf, img_w, img_h, stride);
         let img_pf = PixfmtRgba32::new(&mut img_ra);
         let mut img_rb = RendererBase::new(img_pf);
         img_rb.clear(&Rgba8::new(240, 235, 230, 255));
@@ -1265,7 +1264,7 @@ pub fn pattern_perspective(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Set up image source
     let mut img_ra = RowAccessor::new();
     let img_stride = (img_w * 4) as i32;
-    unsafe { img_ra.attach(img_buf.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_buf, img_w, img_h, img_stride);
 
     // Build quad path
     let mut quad_path = PathStorage::new();
@@ -1423,7 +1422,7 @@ pub fn pattern_resample(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
 
     let mut img_ra = RowAccessor::new();
     let img_stride = (img_w * 4) as i32;
-    unsafe { img_ra.attach(img_buf.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_buf, img_w, img_h, img_stride);
 
     // Perspective transform
     let dst_quad: [f64; 8] = [
@@ -2537,24 +2536,29 @@ pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut img0 = vec![0u8; (width * height * 4) as usize];
     let stride = (width * 4) as i32;
     let mut ra_img = RowAccessor::new();
-    unsafe { ra_img.attach(img0.as_mut_ptr(), width, height, stride) };
+    ra_img.attach(&mut img0, width, height, stride);
     {
         let pf = PixfmtRgba32::new(&mut ra_img);
         let mut rb = RendererBase::new(pf);
         rb.clear(&Rgba8::new(0, 0, 0, 0));
-
+    }
+    {
         // Destination image (compositing.ppm) at (250, 180), alpha-scaled by Dst Alpha.
+        let img = ra_img.buf_mut();
         let ppm = include_bytes!("../../../../cpp-references/agg-src/examples/art/compositing.ppm");
         if let Some((iw, ih, rgba)) = parse_p6_ppm(ppm) {
             for y in 0..ih.min(height.saturating_sub(180)) {
                 for x in 0..iw.min(width.saturating_sub(250)) {
                     let si = ((y * iw + x) * 4) as usize;
                     let di = (((y + 180) * width + (x + 250)) * 4) as usize;
-                    alpha_blend_rgba_over(&mut img0[di..di + 4], &rgba[si..si + 4], dst_alpha);
+                    alpha_blend_rgba_over(&mut img[di..di + 4], &rgba[si..si + 4], dst_alpha);
                 }
             }
         }
-
+    }
+    {
+        let pf = PixfmtRgba32::new(&mut ra_img);
+        let mut rb = RendererBase::new(pf);
         render_circle_gradient(
             &mut rb,
             70.0 * 3.0,
@@ -2583,12 +2587,15 @@ pub fn compositing(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     });
 
     // Blend scene image over checkerboard.
-    for i in (0..buf.len()).step_by(4) {
-        let src = [img0[i], img0[i + 1], img0[i + 2], img0[i + 3]];
-        alpha_blend_rgba_over(&mut buf[i..i + 4], &src, 1.0);
+    {
+        let img = ra_img.buf();
+        let dst = ra.buf_mut();
+        for i in (0..dst.len()).step_by(4) {
+            let src = [img[i], img[i + 1], img[i + 2], img[i + 3]];
+            alpha_blend_rgba_over(&mut dst[i..i + 4], &src, 1.0);
+        }
     }
 
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     let mut ras = RasterizerScanlineAa::new();
@@ -3560,18 +3567,21 @@ pub fn rasterizer_compound(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
 
-    // C++: clear with a horizontal gradient from yellow to cyan.
+    // C++: clear with a horizontal gradient from yellow to cyan. The bytes are written
+    // directly through `ra`, so the renderer is rebuilt after it.
+    let dst = ra.buf_mut();
     for y in 0..height as usize {
         for x in 0..width as usize {
             let k = x as f64 / w.max(1.0);
             let c = Rgba8::new(255, 255, 0, 255).gradient(&Rgba8::new(0, 255, 255, 255), k);
             let i = (y * width as usize + x) * 4;
-            buf[i] = c.r;
-            buf[i + 1] = c.g;
-            buf[i + 2] = c.b;
-            buf[i + 3] = c.a;
+            dst[i] = c.r;
+            dst[i + 1] = c.g;
+            dst[i + 2] = c.b;
+            dst[i + 3] = c.a;
         }
     }
+    let mut rb = RendererBase::new(PixfmtRgba32::new(&mut ra));
 
     // Draw the same two background triangles as C++.
     let mut ras = RasterizerScanlineAa::new();

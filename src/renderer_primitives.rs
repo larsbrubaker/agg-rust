@@ -387,17 +387,16 @@ mod tests {
     use crate::pixfmt_rgba::PixfmtRgba32;
     use crate::rendering_buffer::RowAccessor;
 
-    fn make_ren(w: u32, h: u32) -> (Vec<u8>, RowAccessor) {
+    fn make_ren(buf: &mut Vec<u8>, w: u32, h: u32) -> RowAccessor<'_> {
         let stride = (w * 4) as i32;
-        let mut buf = vec![0u8; (w * h * 4) as usize];
-        let mut ra = RowAccessor::new();
-        unsafe { ra.attach(buf.as_mut_ptr(), w, h, stride) };
-        (buf, ra)
+        *buf = vec![0u8; (w * h * 4) as usize];
+        RowAccessor::new_with_buf(buf, w, h, stride)
     }
 
     #[test]
     fn test_rectangle() {
-        let (_buf, mut ra) = make_ren(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 20, 20);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -407,7 +406,8 @@ mod tests {
 
     #[test]
     fn test_solid_rectangle() {
-        let (_buf, mut ra) = make_ren(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 20, 20);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -417,7 +417,8 @@ mod tests {
 
     #[test]
     fn test_ellipse() {
-        let (_buf, mut ra) = make_ren(30, 30);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 30, 30);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -427,7 +428,8 @@ mod tests {
 
     #[test]
     fn test_solid_ellipse() {
-        let (_buf, mut ra) = make_ren(30, 30);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 30, 30);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -437,7 +439,8 @@ mod tests {
 
     #[test]
     fn test_line() {
-        let (_buf, mut ra) = make_ren(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 20, 20);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -451,7 +454,8 @@ mod tests {
 
     #[test]
     fn test_move_to_line_to() {
-        let (_buf, mut ra) = make_ren(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 20, 20);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -466,7 +470,8 @@ mod tests {
 
     #[test]
     fn test_color_accessors() {
-        let (_buf, mut ra) = make_ren(10, 10);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 10, 10);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);
@@ -478,7 +483,8 @@ mod tests {
 
     #[test]
     fn test_outlined_rectangle() {
-        let (_buf, mut ra) = make_ren(20, 20);
+        let mut buf = Vec::new();
+        let mut ra = make_ren(&mut buf, 20, 20);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut prim = RendererPrimitives::new(&mut rb);

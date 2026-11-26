@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Port of agg-sharp `ImageClippingProxyTests` (Tests/Agg.Tests/Agg).
 //!
 //! agg-sharp's `ImageClippingProxy` is C++'s `renderer_base`: a clip box
@@ -12,8 +13,8 @@ use agg_rust::pixfmt_rgba::{PixelFormat, PixfmtRgba32};
 use agg_rust::renderer_base::RendererBase;
 use agg_rust::rendering_buffer::RowAccessor;
 
-fn attach(data: &mut [u8], w: u32, h: u32) -> RowAccessor {
-    unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), w, h, (w * 4) as i32) }
+fn attach(data: &mut [u8], w: u32, h: u32) -> RowAccessor<'_> {
+    RowAccessor::new_with_buf(data, w, h, (w * 4) as i32)
 }
 
 fn black() -> Rgba8 {

@@ -87,10 +87,10 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         }
 
         let mut src_ra = RowAccessor::new();
-        unsafe { src_ra.attach(src_data.as_mut_ptr(), img_w, img_h, img_stride) };
+        src_ra.attach(&mut src_data, img_w, img_h, img_stride);
 
         let mut dst_ra = RowAccessor::new();
-        unsafe { dst_ra.attach(dst_data.as_mut_ptr(), img_w, img_h, img_stride) };
+        dst_ra.attach(&mut dst_data, img_w, img_h, img_stride);
 
         // Transform matrix
         let mut src_mtx = TransAffine::new();
@@ -195,7 +195,7 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let stride = (width * 4) as i32;
     let mut buf = vec![255u8; (width * height * 4) as usize];
     let mut ra = RowAccessor::new();
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    ra.attach(&mut buf, width, height, stride);
     let pf = PixfmtRgba32::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     rb.clear(&Rgba8::new(255, 255, 255, 255));
@@ -215,8 +215,9 @@ pub fn render(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     }
 
     if !skip_controls {
-        // Re-attach for control rendering
-        unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+        // A fresh accessor for control rendering: the one above borrowed
+        // `buf` only until the clear, so the image copy could write `buf`.
+        let mut ra = RowAccessor::new_with_buf(&mut buf, width, height, stride);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut ras = RasterizerScanlineAa::new();

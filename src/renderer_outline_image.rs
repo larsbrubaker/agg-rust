@@ -1283,9 +1283,7 @@ mod tests {
         let stride = (w * 4) as i32;
         let mut buf = vec![255u8; (h * w * 4) as usize];
         let mut ra = RowAccessor::new();
-        unsafe {
-            ra.attach(buf.as_mut_ptr(), w, h, stride);
-        }
+        ra.attach(&mut buf, w, h, stride);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
 

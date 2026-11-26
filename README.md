@@ -104,9 +104,7 @@ let (width, height) = (128u32, 128u32);
 
 // Create a rendering buffer over your own pixel memory (RGBA, 4 bytes a pixel)
 let mut buf = vec![0u8; (width * height * 4) as usize];
-let mut rbuf = RenderingBuffer::new();
-// Safety: `buf` holds `height` rows of `width * 4` bytes and outlives `rbuf`.
-unsafe { rbuf.attach(buf.as_mut_ptr(), width, height, (width * 4) as i32) };
+let mut rbuf = RenderingBuffer::new_with_buf(&mut buf, width, height, (width * 4) as i32);
 
 // Set up the pixel format and renderer
 let pixfmt = PixfmtRgba32::new(&mut rbuf);

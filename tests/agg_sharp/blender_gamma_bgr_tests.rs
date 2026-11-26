@@ -24,7 +24,8 @@ fn rgb(r: u32, g: u32, b: u32) -> Rgba8 {
 fn partial_cover_blends_through_dir_and_inv_as_cpp() {
     let gamma = GammaLut::new_with_gamma(2.0);
     let mut image = gray(100);
-    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut image.rows, &gamma);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut ra, &gamma);
 
     pf.blend_hline(0, 0, 1, &Rgba8::new(0, 0, 0, 255), 128);
 
@@ -36,7 +37,8 @@ fn partial_cover_blends_through_dir_and_inv_as_cpp() {
 fn opaque_full_cover_copies_the_color() {
     let gamma = GammaLut::new_with_gamma(2.0);
     let mut image = gray(100);
-    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut image.rows, &gamma);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut ra, &gamma);
 
     pf.blend_hline(0, 0, 1, &Rgba8::new(200, 10, 30, 255), 255);
 
@@ -48,7 +50,8 @@ fn opaque_full_cover_copies_the_color() {
 fn copy_hline_copies_the_color_to_every_pixel() {
     let gamma = GammaLut::new_with_gamma(2.0);
     let mut image = gray(100);
-    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut image.rows, &gamma);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut ra, &gamma);
 
     pf.copy_hline(0, 0, 3, &Rgba8::new(200, 10, 30, 255));
 
@@ -63,7 +66,8 @@ fn copy_hline_copies_the_color_to_every_pixel() {
 fn cover_that_zeroes_the_alpha_leaves_the_pixel() {
     let gamma = GammaLut::new_with_gamma(2.0);
     let mut image = gray(10);
-    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut image.rows, &gamma);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut ra, &gamma);
 
     pf.blend_hline(0, 0, 1, &Rgba8::new(0, 0, 0, 1), 1);
     pf.blend_hline(1, 0, 1, &Rgba8::new(0, 0, 0, 100), 1);
@@ -77,7 +81,8 @@ fn cover_that_zeroes_the_alpha_leaves_the_pixel() {
 fn color_span_blends_each_pixel_by_its_alpha() {
     let gamma = GammaLut::new_with_gamma(2.0);
     let mut image = gray(100);
-    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut image.rows, &gamma);
+    let mut ra = image.accessor();
+    let mut pf = PixfmtRgb24Gamma::new_with_gamma(&mut ra, &gamma);
     let colors = [
         Rgba8::new(0, 0, 0, 128),
         Rgba8::new(0, 0, 0, 0),

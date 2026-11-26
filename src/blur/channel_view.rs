@@ -12,7 +12,7 @@ use crate::rendering_buffer::RowAccessor;
 /// The pixels of a [`RowAccessor`] as `channels` adjacent bytes, `offset` bytes into each pixel,
 /// pixels `step` bytes apart.
 pub struct ChannelView<'a> {
-    rbuf: &'a mut RowAccessor,
+    rbuf: RowAccessor<'a>,
     step: usize,
     offset: usize,
     channels: usize,
@@ -23,14 +23,14 @@ impl<'a> ChannelView<'a> {
     ///
     /// # Panics
     /// When `channels` is 0 or the channels reach past the pixel (`offset + channels > step`).
-    pub fn new(rbuf: &'a mut RowAccessor, step: usize, offset: usize, channels: usize) -> Self {
+    pub fn new(rbuf: &'a mut RowAccessor<'_>, step: usize, offset: usize, channels: usize) -> Self {
         assert!(
             channels > 0 && offset + channels <= step,
             "channels {offset}..{} must lie inside a {step}-byte pixel",
             offset + channels
         );
         Self {
-            rbuf,
+            rbuf: rbuf.reborrow(),
             step,
             offset,
             channels,
@@ -38,23 +38,23 @@ impl<'a> ChannelView<'a> {
     }
 
     /// Every byte of 4-byte RGBA pixels (channel 0 is the buffer's first byte, R in RGBA order).
-    pub fn rgba32(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn rgba32(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self::new(rbuf, 4, 0, 4)
     }
 
     /// Every byte of 3-byte RGB pixels.
-    pub fn rgb24(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn rgb24(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self::new(rbuf, 3, 0, 3)
     }
 
     /// One-byte gray pixels.
-    pub fn gray8(rbuf: &'a mut RowAccessor) -> Self {
+    pub fn gray8(rbuf: &'a mut RowAccessor<'_>) -> Self {
         Self::new(rbuf, 1, 0, 1)
     }
 
     /// One channel, `offset` bytes into pixels `step` bytes apart, seen as gray: C++'s
     /// `pixfmt_alpha_blend_gray<..., Step, Offset>`.
-    pub fn channel(rbuf: &'a mut RowAccessor, step: usize, offset: usize) -> Self {
+    pub fn channel(rbuf: &'a mut RowAccessor<'_>, step: usize, offset: usize) -> Self {
         Self::new(rbuf, step, offset, 1)
     }
 

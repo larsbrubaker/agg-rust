@@ -21,10 +21,15 @@ pub use transforms::*;
 use agg_rust::rendering_buffer::RowAccessor;
 
 /// Create a rendering buffer, pixel format, and renderer base from dimensions.
-pub(crate) fn setup_renderer(buf: &mut Vec<u8>, ra: &mut RowAccessor, width: u32, height: u32) {
+pub(crate) fn setup_renderer<'a>(
+    buf: &'a mut Vec<u8>,
+    ra: &mut RowAccessor<'a>,
+    width: u32,
+    height: u32,
+) {
     let stride = (width * 4) as i32;
     buf.resize((width * height * 4) as usize, 255);
-    unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+    ra.attach(buf, width, height, stride);
 }
 
 // ============================================================================

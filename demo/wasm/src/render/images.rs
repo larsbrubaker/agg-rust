@@ -295,7 +295,7 @@ pub fn image1(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     let (img_w, img_h, mut img_data) = load_spheres_image();
     let img_stride = (img_w * 4) as i32;
     let mut img_ra = RowAccessor::new();
-    unsafe { img_ra.attach(img_data.as_mut_ptr(), img_w, img_h, img_stride) };
+    img_ra.attach(&mut img_data, img_w, img_h, img_stride);
 
     let iw = width as f64;
     let ih = height as f64;
@@ -442,13 +442,12 @@ fn apply_image_transform(
     }
 
     // Attach with negative stride — matching C++ flip_y=true convention.
-    // RowAccessor::attach with negative stride sets start to last memory row,
-    // so row_ptr(0) → last memory row, row_ptr(h-1) → first memory row.
+    // With a negative stride row 0 is the last memory row and row h-1 the first.
     let mut src_ra = RowAccessor::new();
-    unsafe { src_ra.attach(src.as_mut_ptr(), img_w, img_h, neg_stride) };
+    src_ra.attach(src, img_w, img_h, neg_stride);
 
     let mut dst_ra = RowAccessor::new();
-    unsafe { dst_ra.attach(dst.as_mut_ptr(), img_w, img_h, neg_stride) };
+    dst_ra.attach(dst, img_w, img_h, neg_stride);
 
     // Transform matrices — matching C++ transform_image()
     let mut src_mtx = TransAffine::new();
@@ -626,7 +625,7 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         let stride = (width * 4) as i32;
         let mut buf = vec![255u8; (width * height * 4) as usize];
         let mut ra = RowAccessor::new();
-        unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
+        ra.attach(&mut buf, width, height, stride);
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         rb.clear(&Rgba8::new(255, 255, 255, 255));
@@ -635,21 +634,21 @@ pub fn image_filters_demo(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
         // The image data is in bottom-up order (native BMP + negative stride processing).
         // The output buffer is top-down (positive stride). No flip here — the CSS
         // scaleY(-1) on the canvas handles the single presentation flip.
+        let dst = ra.buf_mut();
         for y in 0..img_h.min(height.saturating_sub(35)) {
             for x in 0..img_w.min(width.saturating_sub(110)) {
                 let si = ((y * img_w + x) * 4) as usize;
                 let di = (((y + 35) * width + (x + 110)) * 4) as usize;
-                if si + 3 < state.image_data.len() && di + 3 < buf.len() {
-                    buf[di] = state.image_data[si];
-                    buf[di + 1] = state.image_data[si + 1];
-                    buf[di + 2] = state.image_data[si + 2];
-                    buf[di + 3] = state.image_data[si + 3];
+                if si + 3 < state.image_data.len() && di + 3 < dst.len() {
+                    dst[di] = state.image_data[si];
+                    dst[di + 1] = state.image_data[si + 1];
+                    dst[di + 2] = state.image_data[si + 2];
+                    dst[di + 3] = state.image_data[si + 3];
                 }
             }
         }
 
         // Render controls — matching C++ on_draw exactly
-        unsafe { ra.attach(buf.as_mut_ptr(), width, height, stride) };
         let pf = PixfmtRgba32::new(&mut ra);
         let mut rb = RendererBase::new(pf);
         let mut ras = RasterizerScanlineAa::new();
@@ -1758,7 +1757,7 @@ pub fn image_filters2(width: u32, height: u32, params: &[f64]) -> Vec<u8> {
     // Create image rendering buffer
     let mut img_ra = RowAccessor::new();
     let mut img_data = g_image.to_vec();
-    unsafe { img_ra.attach(img_data.as_mut_ptr(), 4, 4, 16) };
+    img_ra.attach(&mut img_data, 4, 4, 16);
 
     // Map 4x4 image to 300x300 area at (200,40)
     // Scale 4→300, translate to (200,40)

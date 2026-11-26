@@ -10,7 +10,7 @@ fn impulse_spreads_by_the_truncated_kernel() {
     let mut image = GrayImage::new(5, 5);
     image.set(2, 2, 255);
 
-    stack_blur_gray8(&mut ChannelView::gray8(&mut image.ra), 1, 1);
+    stack_blur_gray8(&mut ChannelView::gray8(&mut image.accessor()), 1, 1);
 
     // Across: 63 127 63. Then down each column: 127 -> 31 63 31, 63 -> 15 31 15.
     let expected = [
@@ -51,8 +51,12 @@ fn matches_the_colour_stack_blur_per_channel() {
             }
         }
 
-        stack_blur_rgba32(&mut color.ra, radius, radius);
-        stack_blur_gray8(&mut ChannelView::gray8(&mut gray.ra), radius, radius);
+        stack_blur_rgba32(&mut color.accessor(), radius, radius);
+        stack_blur_gray8(
+            &mut ChannelView::gray8(&mut gray.accessor()),
+            radius,
+            radius,
+        );
 
         for y in 0..17 {
             for x in 0..23 {

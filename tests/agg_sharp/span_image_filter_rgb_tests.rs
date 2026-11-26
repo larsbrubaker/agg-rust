@@ -11,6 +11,7 @@ use agg_rust::image_filters::{
     ImageFilterBicubic, ImageFilterBilinear, ImageFilterHanning, ImageFilterLut,
 };
 use agg_rust::renderer_scanline::SpanGenerator;
+use agg_rust::rendering_buffer::RowAccessor;
 use agg_rust::span_image_filter_rgb::{
     SpanImageFilterRgb, SpanImageFilterRgb2x2, SpanImageFilterRgbBilinear,
     SpanImageFilterRgbBilinearClip,
@@ -28,9 +29,10 @@ const CLEAR: Rgba8 = Rgba8 {
 /// Halfway between 0 and 1 rounds to 1 in the bilinear filter.
 #[test]
 fn bilinear_clip_rounds_halfway() {
-    let image = column_of_ones();
+    let mut image = column_of_ones();
     let mut interpolator = translated(0.5, 0.0);
-    let mut filter = SpanImageFilterRgbBilinearClip::new(&image.rows, CLEAR, &mut interpolator);
+    let ra = image.accessor();
+    let mut filter = SpanImageFilterRgbBilinearClip::new(&ra, CLEAR, &mut interpolator);
 
     let sample = sample(&mut filter);
 
@@ -41,8 +43,9 @@ fn bilinear_clip_rounds_halfway() {
 /// Halfway between 0 and 1 rounds to 1 in the 2x2 filter.
 #[test]
 fn two_by_two_rounds_halfway() {
-    let image = column_of_ones();
-    let mut accessor = clip(&image);
+    let mut image = column_of_ones();
+    let ra = image.accessor();
+    let mut accessor = clip(&ra);
     let mut interpolator = translated(0.5, 0.0);
     let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, false);
     let mut filter = SpanImageFilterRgb2x2::new(&mut accessor, &mut interpolator, &lut);
@@ -58,8 +61,9 @@ fn two_by_two_rounds_halfway() {
 /// which rounds to 1 where C++ truncates to 0.
 #[test]
 fn general_filter_rounds_just_over_half() {
-    let image = column_of_ones();
-    let mut accessor = clip(&image);
+    let mut image = column_of_ones();
+    let ra = image.accessor();
+    let mut accessor = clip(&ra);
     let mut interpolator = translated(0.5, 0.0);
     let lut = ImageFilterLut::new_with_filter(&ImageFilterBilinear, false);
     let mut filter = SpanImageFilterRgb::new(&mut accessor, &mut interpolator, &lut);
@@ -72,19 +76,20 @@ fn general_filter_rounds_just_over_half() {
 #[test]
 fn flat_color_keeps_its_value_through_each_filter() {
     let flat = Rgba8::new(255, 128, 3, 255);
-    let image = filled(8, [255, 128, 3]);
+    let mut image = filled(8, [255, 128, 3]);
 
     let mut interpolator = translated(0.25, 0.75);
-    let mut filter = SpanImageFilterRgbBilinearClip::new(&image.rows, CLEAR, &mut interpolator);
+    let ra = image.accessor();
+    let mut filter = SpanImageFilterRgbBilinearClip::new(&ra, CLEAR, &mut interpolator);
     assert_eq!(sample(&mut filter), flat);
 
-    let mut accessor = clip(&image);
+    let mut accessor = clip(&ra);
     let mut interpolator = translated(0.25, 0.75);
     let lut = ImageFilterLut::new_with_filter(&ImageFilterHanning, true);
     let mut filter = SpanImageFilterRgb2x2::new(&mut accessor, &mut interpolator, &lut);
     assert_eq!(sample(&mut filter), flat);
 
-    let mut accessor = clip(&image);
+    let mut accessor = clip(&ra);
     let mut interpolator = translated(0.25, 0.75);
     let lut = ImageFilterLut::new_with_filter(&ImageFilterBicubic, true);
     let mut filter = SpanImageFilterRgb::new(&mut accessor, &mut interpolator, &lut);
@@ -96,8 +101,9 @@ fn flat_color_keeps_its_value_through_each_filter() {
 /// pixel.
 #[test]
 fn bilinear_reads_past_the_edge_through_its_accessor() {
-    let image = filled(8, [200, 100, 50]);
-    let mut accessor = clip(&image);
+    let mut image = filled(8, [200, 100, 50]);
+    let ra = image.accessor();
+    let mut accessor = clip(&ra);
     let mut interpolator = translated(4.5, 0.0);
     let mut filter = SpanImageFilterRgbBilinear::new(&mut accessor, &mut interpolator);
 
@@ -108,8 +114,8 @@ fn translated(tx: f64, ty: f64) -> SpanInterpolatorLinear {
     SpanInterpolatorLinear::new(TransAffine::new_translation(tx, ty))
 }
 
-fn clip(image: &Image) -> ImageAccessorClip<'_, 3> {
-    ImageAccessorClip::<3>::new(&image.rows, &[0, 0, 0])
+fn clip<'a>(ra: &'a RowAccessor<'a>) -> ImageAccessorClip<'a, 3> {
+    ImageAccessorClip::<3>::new(ra, &[0, 0, 0])
 }
 
 fn filled(size: u32, rgb: [u8; 3]) -> Image {

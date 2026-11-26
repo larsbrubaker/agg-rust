@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // tests/markdown_placement.rs — the Markdown placement gate (CLAUDE.md,
 // "Documentation"). Documentation lives in the code, in the header and doc
 // comments of the code it describes, where whoever works on that code reads

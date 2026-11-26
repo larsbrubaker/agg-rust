@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Port of agg-sharp `ImageBufferAccessorClipTests` (Tests/Agg.Tests/Agg).
 //!
 //! `ImageAccessorClip` is C++'s `image_accessor_clip`: a read outside the
@@ -27,8 +28,8 @@ fn filled(w: u32, h: u32, pixel: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-fn attach(data: &mut [u8], w: u32, h: u32, bpp: u32) -> RowAccessor {
-    unsafe { RowAccessor::new_with_buf(data.as_mut_ptr(), w, h, (w * bpp) as i32) }
+fn attach(data: &mut [u8], w: u32, h: u32, bpp: u32) -> RowAccessor<'_> {
+    RowAccessor::new_with_buf(data, w, h, (w * bpp) as i32)
 }
 
 #[test]

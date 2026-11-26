@@ -19,7 +19,7 @@ fn halfway_between_two_values_rounds() {
         image.set_pixel(2, y, [1, 1, 1, 1]);
     }
 
-    let sample = sample(&image, 0.5, 0.0);
+    let sample = sample(&mut image, 0.5, 0.0);
 
     assert_eq!(sample.r, 1);
     assert_eq!(sample.a, 1);
@@ -31,7 +31,7 @@ fn flat_color_keeps_its_value_at_a_fractional_offset() {
     let mut image = Image::new(4, 4);
     image.fill([255, 128, 3, 255]);
 
-    let sample = sample(&image, 1.0 / 256.0, 255.0 / 256.0);
+    let sample = sample(&mut image, 1.0 / 256.0, 255.0 / 256.0);
 
     assert_eq!(sample, Rgba8::new(255, 128, 3, 255));
 }
@@ -43,7 +43,8 @@ fn sample_outside_the_image_is_the_background_under_an_identity_matrix() {
     image.fill([255, 0, 0, 255]);
     let background = Rgba8::new(10, 20, 30, 40);
     let mut interpolator = SpanInterpolatorLinear::new(TransAffine::new());
-    let mut filter = SpanImageFilterRgbaBilinearClip::new(&image.ra, background, &mut interpolator);
+    let ra = image.accessor();
+    let mut filter = SpanImageFilterRgbaBilinearClip::new(&ra, background, &mut interpolator);
     let mut span = [Rgba8::new(0, 0, 0, 0)];
 
     filter.generate(&mut span, 8, 1, 1);
@@ -51,10 +52,11 @@ fn sample_outside_the_image_is_the_background_under_an_identity_matrix() {
     assert_eq!(span[0], background);
 }
 
-fn sample(image: &Image, tx: f64, ty: f64) -> Rgba8 {
+fn sample(image: &mut Image, tx: f64, ty: f64) -> Rgba8 {
     let white = Rgba8::new(255, 255, 255, 255);
     let mut interpolator = SpanInterpolatorLinear::new(TransAffine::new_translation(tx, ty));
-    let mut filter = SpanImageFilterRgbaBilinearClip::new(&image.ra, white, &mut interpolator);
+    let ra = image.accessor();
+    let mut filter = SpanImageFilterRgbaBilinearClip::new(&ra, white, &mut interpolator);
     let mut span = [Rgba8::new(0, 0, 0, 0)];
     filter.generate(&mut span, 1, 1, 1);
     span[0]
