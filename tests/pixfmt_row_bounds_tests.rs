@@ -6,9 +6,14 @@
 //! anything is read or written. C++ AGG does no such check (its pixfmts trust `renderer_base`
 //! clipping); `RowAccessor::row_bytes` documents that deliberate divergence.
 //!
-//! Each buffer is a `Vec` with guard bytes before and after the attached region, so an
-//! out-of-range write lands in memory the test owns and shows up as a changed guard byte
-//! instead of corrupting the heap.
+//! Natively each buffer is a `Vec` with guard bytes before and after the attached region, so
+//! an out-of-range write lands in memory the test owns and shows up as a changed guard byte
+//! instead of corrupting the heap. Under Miri the guards are empty (`GUARD` is 0) and the
+//! `Vec` is exactly the attached region: the accessor's pointer then has provenance over the
+//! image alone, so any access or pointer offset outside it is an out-of-bounds access Miri
+//! reports as undefined behaviour. With guards, such an access would be a legal in-allocation
+//! one Miri cannot see, leaving only the guard comparison to catch writes (and nothing to
+//! catch reads).
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::LazyLock;
@@ -25,11 +30,13 @@ use agg_rust::rendering_buffer::RowAccessor;
 
 const SENTINEL: u8 = 0xA5;
 const FILL: u8 = 0x11;
-const GUARD: usize = 256;
+/// Guard bytes on each side of the region: none under Miri (see the module doc).
+const GUARD: usize = if cfg!(miri) { 0 } else { 256 };
 const W: u32 = 4;
 const H: u32 = 2;
 
-/// `region` bytes filled with `FILL`, between two `GUARD`-byte runs of `SENTINEL`.
+/// `region` bytes filled with `FILL`, between two `GUARD`-byte runs of `SENTINEL` (empty
+/// under Miri, where `guards_intact` is then trivially true and Miri itself checks bounds).
 struct Guarded {
     mem: Vec<u8>,
     region: usize,
@@ -42,9 +49,13 @@ impl Guarded {
         Self { mem, region }
     }
 
-    /// An accessor on the region; `stride.abs() * height` must not exceed it.
+    /// An accessor on the region, which must be exactly `stride.abs() * height` bytes, so
+    /// under Miri no byte of the allocation lies outside the attached buffer.
     fn attach(&mut self, width: u32, height: u32, stride: i32) -> RowAccessor {
-        assert!(stride.unsigned_abs() as usize * height as usize <= self.region);
+        assert_eq!(
+            stride.unsigned_abs() as usize * height as usize,
+            self.region
+        );
         // SAFETY: the region holds `height * stride.abs()` bytes and outlives the accessor,
         // which each test stops using before it looks at `mem` again.
         unsafe {
@@ -181,7 +192,7 @@ macro_rules! row_bounds_tests {
                 x: i32,
                 y: i32,
             ) -> Result<(), String> {
-                let mut g = Guarded::new(ROW * H as usize);
+                let mut g = Guarded::new(stride.unsigned_abs() as usize * H as usize);
                 let mut ra = g.attach(W, H, stride);
                 let result = panics_with(expect, || run(&mut ra, op, x, y));
                 panics_without_writing_to(&g, result)
@@ -284,7 +295,7 @@ mod channel_view {
         step: usize,
         f: impl FnOnce(&mut ChannelView),
     ) -> Result<(), String> {
-        let mut g = Guarded::new(ROW * H as usize);
+        let mut g = Guarded::new(stride.unsigned_abs() as usize * H as usize);
         let mut ra = g.attach(W, H, stride);
         let result = panics_with(expect, || f(&mut ChannelView::new(&mut ra, step, 0, 1)));
         panics_without_writing_to(&g, result)
